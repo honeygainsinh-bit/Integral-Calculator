@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="km">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Integral Calculator V25 - Advanced Pro</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;600;700&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/nerdamer@1.1.13/nerdamer.core.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/nerdamer@1.1.13/Algebra.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/nerdamer@1.1.13/Calculus.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/nerdamer@1.1.13/Solve.js"></script>
+    
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$']] },
+            svg: { fontCache: 'global' }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    
+    <script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+    <script src="https://unpkg.com/function-plot@1/dist/function-plot.js"></script>
+
+    <style>
+        body { background-color: #0f172a; color: #e2e8f0; font-family: 'Outfit', 'Kantumruy Pro', sans-serif; }
+        
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(148, 163, 184, 0.1);
+            box-shadow: 0 0 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .input-box {
+            background: #1e293b;
+            border: 1px solid #334155;
+            transition: 0.3s;
+        }
+        .input-box:focus-within {
+            border-color: #38bdf8;
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.2);
+        }
+
+        .step-container {
+            border-left: 2px solid #38bdf8;
+            padding-left: 20px;
+            margin-left: 10px;
+            position: relative;
+            margin-bottom: 25px;
+        }
+        .step-dot {
+            position: absolute; left: -26px; top: 0;
+            width: 14px; height: 14px;
+            background: #38bdf8; border-radius: 50%;
+            border: 3px solid #0f172a;
+        }
+
+        .math-scroll { overflow-x: auto; padding-bottom: 5px; }
+        .math-scroll::-webkit-scrollbar { height: 3px; }
+        .math-scroll::-webkit-scrollbar-thumb { background: #38bdf8; }
+
+        .dev-glow {
+            color: #fff;
+            text-shadow: 0 0 10px #fff, 0 0 20px #0ea5e9, 0 0 40px #0ea5e9;
+            animation: neon-pulse 1.5s infinite alternate;
+            font-weight: 800;
+        }
+        
+        @keyframes neon-pulse {
+            from { text-shadow: 0 0 10px #fff, 0 0 20px #0ea5e9; }
+            to { text-shadow: 0 0 5px #fff, 0 0 10px #0ea5e9; }
+        }
+
+        #loader { position: fixed; inset: 0; background: #0f172a; z-index: 9999; display: flex; justify-content: center; align-items: center; }
+        .spinner { width: 50px; height: 50px; border: 3px solid #334155; border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen">
+
+    <div id="loader"><div class="spinner"></div></div>
+
+    <nav class="border-b border-slate-800 bg-slate-900/90 sticky top-0 z-50 p-4 flex justify-between items-center backdrop-blur">
+        <div class="flex items-center gap-2">
+            <span class="text-2xl text-sky-400 font-bold">∫</span>
+            <div class="font-bold text-lg text-white tracking-wider">Integral<span class="text-sky-400">Calculator</span></div>
+        </div>
+        <button onclick="toggleLang()" id="btn-lang" class="text-[10px] font-bold border border-slate-700 px-3 py-1.5 rounded-lg text-sky-400 hover:bg-slate-800 transition uppercase">
+            ENGLISH
+        </button>
+    </nav>
+
+    <main class="flex-grow container mx-auto p-4 max-w-2xl flex flex-col gap-6 py-8">
+        
+        <div class="glass-panel rounded-2xl p-6">
+            <div class="flex bg-slate-900 p-1 rounded-lg mb-6 border border-slate-800">
+                <button onclick="setMode('indefinite')" id="tab-indefinite" class="flex-1 py-3 rounded-md text-sm font-bold bg-sky-500/10 text-sky-400 border border-sky-500/30 transition-all">
+                    មិនកំណត់
+                </button>
+                <button onclick="setMode('definite')" id="tab-definite" class="flex-1 py-3 rounded-md text-sm font-bold text-slate-500 hover:text-white transition-all">
+                    កំណត់
+                </button>
+            </div>
+
+            <div class="space-y-5">
+                <div>
+                    <label id="lbl-func" class="text-[11px] text-slate-400 font-bold uppercase tracking-widest mb-2 block">
+                        អនុគមន៍ f(x)
+                    </label>
+                    <div class="input-box flex items-center rounded-xl px-4 py-4">
+                        <span class="text-2xl text-slate-500 font-serif italic mr-3">∫</span>
+                        <input type="text" id="fn-input" value="1/(1+x^2)" class="bg-transparent w-full text-xl text-white font-mono focus:outline-none placeholder-slate-600" placeholder="e.g. 1/(1+x^2), sec(x), e^(-x^2)">
+                        <span class="text-xl text-slate-500 font-serif italic ml-2">dx</span>
+                    </div>
+                </div>
+
+                <div id="limits-row" class="grid grid-cols-2 gap-4 hidden">
+                    <div>
+                        <label id="lbl-from" class="text-[10px] text-slate-500 font-bold uppercase mb-1 block">ពី (a)</label>
+                        <input type="text" id="a-input" value="0" class="input-box w-full rounded-lg p-3 text-center text-white font-mono outline-none">
+                    </div>
+                    <div>
+                        <label id="lbl-to" class="text-[10px] text-slate-500 font-bold uppercase mb-1 block">ទៅ (b)</label>
+                        <input type="text" id="b-input" value="Infinity" class="input-box w-full rounded-lg p-3 text-center text-white font-mono outline-none">
+                    </div>
+                </div>
+
+                <button onclick="calculate()" id="btn-solve" class="w-full bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 py-4 rounded-xl font-bold text-white shadow-lg shadow-sky-900/40 active:scale-[0.98] transition-transform uppercase tracking-widest">
+                    គណនា
+                </button>
+            </div>
+        </div>
+
+        <div id="result-card" class="glass-panel rounded-2xl p-6 hidden border-t-2 border-sky-500">
+            <h3 id="res-title" class="text-sky-400 text-xs font-bold tracking-[0.2em] mb-4 uppercase">លទ្ធផល</h3>
+            
+            <div class="bg-slate-950/50 border border-slate-800 p-6 rounded-xl mb-6 text-center flex items-center justify-center min-h-[100px]">
+                <div id="math-display" class="math-scroll text-2xl md:text-3xl text-white font-serif"></div>
+            </div>
+
+            <div id="decimal-section" class="hidden text-center mb-6">
+                <button onclick="toggleDecimal()" id="btn-decimal" class="text-[10px] border border-sky-500/30 bg-sky-500/10 px-4 py-2 rounded-full text-sky-400 hover:bg-sky-500/20 transition uppercase font-bold">
+                    បង្ហាញតម្លៃលេខ
+                </button>
+                <div id="decimal-val" class="hidden mt-3 text-xl text-emerald-400 font-mono font-bold"></div>
+            </div>
+
+            <div class="mb-6">
+                <div class="flex items-center gap-2 mb-6 border-b border-slate-800 pb-2">
+                    <span class="text-slate-400 text-xs font-bold uppercase tracking-wider" id="step-header">ដំណោះស្រាយលម្អិត</span>
+                </div>
+                <div id="steps-container" class="space-y-6"></div>
+            </div>
+
+            <div class="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/30">
+                <div id="graph-area" class="w-full h-[240px]"></div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="text-center py-8 text-[10px] text-slate-600 uppercase tracking-widest">
+        <span id="footer-dev">បង្កើតដោយ <span class="dev-glow">ឈៀង ស៊ិញស៊ិញ</span></span>
+    </footer>
+
+    <script>
+        let isKhmer = true;
+        let mode = 'indefinite';
+        let storedDecimal = null;
+        let lastFn = "";
+
+        // ----- ADVANCED LANGUAGE OBJECT -----
+        const lang = {
+            en: {
+                tabIndef: "INDEFINITE", tabDef: "DEFINITE",
+                lblFunc: "FUNCTION f(x)", lblFrom: "FROM (a)", lblTo: "TO (b)",
+                btnSolve: "CALCULATE", resTitle: "SOLUTION",
+                btnDecimal: "SHOW DECIMAL", stepHead: "STEP-BY-STEP SOLUTION", langLabel: "ខ្មែរ",
+                footerDev: "DEVELOPED BY <span class='dev-glow'>CHHEANG SINHSINH</span>",
+                
+                // Methods
+                methodParts: "Integration by Parts",
+                methodSub: "U-Substitution",
+                methodTrig: "Trigonometric Identity",
+                methodStandard: "Standard Formula",
+                methodInvTrig: "Inverse Trigonometric Form",
+                methodGaussian: "Gaussian Integral (Special Function)",
+                methodGamma: "Gamma Function / Special Form",
+                methodFeynman: "Feynman's Trick / Dirichlet",
+                
+                // Descriptions
+                descGaussian: "The integral of $e^{-x^2}$ has no elementary antiderivative. It is defined using the Error Function, $\\text{erf}(x)$.",
+                descGamma: "This integral takes the form of the Gamma Function $\\Gamma(n)$ or Incomplete Gamma Function.",
+                descFeynman: "For integrals like $\\frac{\\sin x}{x}$, we often use Feynman's differentiation under the integral sign or residue calculus.",
+                
+                // Steps
+                stepLet: "Let",
+                stepSub: "Substitute",
+                stepApply: "Apply Formula",
+                stepComplex: "Calculation involves higher special functions.",
+                stepGeneral: "General Method",
+                stepGenDesc: "Apply direct integration or substitution if necessary.",
+                stepLimitsSub: "Substitute limits",
+                
+                obsLinear: "Observe that $u$ is a linear function ($ax+b$).",
+                findDeriv: "Find Derivative:",
+                subBack: "Substitute $u$ back:",
+                formula: "Formula:",
+                subIn: "Substitute:",
+                splitTerms: "Split terms:",
+                trigHint: "(Use u-substitution $u=2x$ here)",
+
+                steps: {
+                    rewrite: "1. Problem Setup:",
+                    analysis: "2. Method Analysis:",
+                    process: "3. Calculation Steps:",
+                    final: "4. Final Answer:",
+                    limits: "5. Evaluate Limits:"
+                },
+                msgMatch: "Direct application of standard formula:"
+            },
+            kh: {
+                tabIndef: "មិនកំណត់", tabDef: "កំណត់",
+                lblFunc: "អនុគមន៍ f(x)", lblFrom: "ពី (a)", lblTo: "ទៅ (b)",
+                btnSolve: "គណនា", resTitle: "លទ្ធផល",
+                btnDecimal: "បង្ហាញតម្លៃលេខ", stepHead: "ដំណោះស្រាយលម្អិត", langLabel: "ENGLISH",
+                footerDev: "បង្កើតដោយ <span class='dev-glow'>ឈៀង ស៊ិញស៊ិញ</span>",
+                
+                methodParts: "អាំងតេក្រាលដោយផ្នែក",
+                methodSub: "វិធីជំនួសអថេរ (U-Substitution)",
+                methodTrig: "រូបមន្តត្រីកោណមាត្រ",
+                methodStandard: "រូបមន្តគ្រឹះ",
+                methodInvTrig: "ទម្រង់អនុគមន៍ច្រាស (Inverse Trig)",
+                methodGaussian: "អាំងតេក្រាល Gaussian (អនុគមន៍ពិសេស)",
+                methodGamma: "អនុគមន៍ហ្គាម៉ា (Gamma Function)",
+                methodFeynman: "ល្បិច Feynman / Dirichlet",
+                
+                descGaussian: "អាំងតេក្រាលនៃ $e^{-x^2}$ មិនមានព្រីមីទីវជាអនុគមន៍ធម្មតាទេ។ វាត្រូវបានកំណត់ដោយប្រើ Error Function $\\text{erf}(x)$។",
+                descGamma: "អាំងតេក្រាលនេះមានទម្រង់ជាអនុគមន៍ហ្គាម៉ា $\\Gamma(n)$ ឬ Incomplete Gamma Function។",
+                descFeynman: "សម្រាប់អាំងតេក្រាលដូចជា $\\frac{\\sin x}{x}$ ជាទូទៅយើងប្រើការធ្វើដេរីវេក្រោមសញ្ញាអាំងតេក្រាល (Feynman's Trick)។",
+
+                stepLet: "តាង",
+                stepSub: "ជំនួសចូល",
+                stepApply: "ប្រើរូបមន្ត",
+                stepComplex: "ការគណនានេះប្រើប្រាស់អនុគមន៍ពិសេសកម្រិតខ្ពស់។",
+                stepGeneral: "វិធីសាស្ត្រទូទៅ",
+                stepGenDesc: "អនុវត្តការគណនាដោយផ្ទាល់ ឬប្រើការជំនួសអថេរប្រសិនបើចាំបាច់។",
+                stepLimitsSub: "ជំនួសដែនកំណត់ចូល",
+
+                obsLinear: "សង្កេតឃើញ $u$ ជាអនុគមន៍លីនេអ៊ែរ ($ax+b$) ។",
+                findDeriv: "រកដេរីវេ:",
+                subBack: "ជំនួស $u$ ត្រឡប់មកវិញ:",
+                formula: "រូបមន្ត:",
+                subIn: "ជំនួសចូល:",
+                splitTerms: "បំបែកតួ:",
+                trigHint: "(នៅទីនេះប្រើវិធីជំនួសអថេរ $u=2x$)",
+
+                steps: {
+                    rewrite: "១. កំណត់ទម្រង់លំហាត់:",
+                    analysis: "២. វិភាគវិធីសាស្ត្រ:",
+                    process: "៣. ដំណើរការគណនា:",
+                    final: "៤. ចម្លើយចុងក្រោយ:",
+                    limits: "៥. ជំនួសដែនកំណត់:"
+                },
+                msgMatch: "អនុវត្តរូបមន្តគ្រឹះដោយផ្ទាល់:"
+            }
+        };
+
+        window.onload = () => { setTimeout(() => document.getElementById('loader').style.display = 'none', 500); updateUI(); };
+
+        function toggleLang() { isKhmer = !isKhmer; updateUI(); if(lastFn) calculate(); }
+
+        function updateUI() {
+            const t = isKhmer ? lang.kh : lang.en;
+            document.getElementById('tab-indefinite').innerText = t.tabIndef;
+            document.getElementById('tab-definite').innerText = t.tabDef;
+            document.getElementById('lbl-func').innerText = t.lblFunc;
+            document.getElementById('lbl-from').innerText = t.lblFrom;
+            document.getElementById('lbl-to').innerText = t.lblTo;
+            document.getElementById('btn-solve').innerText = t.btnSolve;
+            document.getElementById('res-title').innerText = t.resTitle;
+            document.getElementById('btn-decimal').innerText = t.btnDecimal;
+            document.getElementById('step-header').innerText = t.stepHead;
+            document.getElementById('btn-lang').innerText = t.langLabel; 
+            document.getElementById('footer-dev').innerHTML = t.footerDev;
+        }
+
+        function setMode(m) {
+            mode = m;
+            const row = document.getElementById('limits-row');
+            const t1 = document.getElementById('tab-indefinite');
+            const t2 = document.getElementById('tab-definite');
+            document.getElementById('result-card').classList.add('hidden');
+            
+            const active = "flex-1 py-3 rounded-md text-sm font-bold bg-sky-500/10 text-sky-400 border border-sky-500/30 transition-all";
+            const inactive = "flex-1 py-3 rounded-md text-sm font-bold text-slate-500 hover:text-white transition-all";
+
+            if (m === 'definite') {
+                row.classList.remove('hidden'); row.classList.add('grid');
+                t2.className = active; t1.className = inactive;
+            } else {
+                row.classList.add('hidden'); row.classList.remove('grid');
+                t1.className = active; t2.className = inactive;
+            }
+        }
+
+        function toggleDecimal() {
+            const el = document.getElementById('decimal-val');
+            el.innerText = "≈ " + storedDecimal;
+            el.classList.toggle('hidden');
+        }
+
+        function formatLatex(tex) {
+            if (!tex) return "";
+            let s = tex.toString()
+                .replace(/\\log/g, "\\ln")
+                .replace(/log/g, "ln");
+            
+            // Fix special functions formatting
+            s = s.replace(/asin/g, "\\arcsin")
+                 .replace(/acos/g, "\\arccos")
+                 .replace(/atan/g, "\\arctan")
+                 .replace(/acsc/g, "\\text{arccsc}")
+                 .replace(/asec/g, "\\text{arcsec}")
+                 .replace(/acot/g, "\\text{arccot}")
+                 .replace(/erf/g, "\\text{erf}")
+                 .replace(/gamma/gi, "\\Gamma");
+
+            s = s.replace(/\\sin\s*\\left\(x\\right\)\^\{(\d+)\}/g, "\\sin^{$1} x");
+            s = s.replace(/\\cos\s*\\left\(x\\right\)\^\{(\d+)\}/g, "\\cos^{$1} x");
+            s = s.replace(/\\left\(/g, "(").replace(/\\right\)/g, ")");
+            return s;
+        }
+
+        function smartParse(input) {
+            let s = input.toLowerCase().trim().replace(/\s+/g, '');
+            // Convert inverse trig inputs
+            s = s.replace(/arcsin/g, 'asin').replace(/arccos/g, 'acos').replace(/arctan/g, 'atan');
+            s = s.replace(/arccsc/g, 'acsc').replace(/arcsec/g, 'asec').replace(/arccot/g, 'acot');
+            
+            s = s.replace(/²/g, '^2').replace(/³/g, '^3');
+            const trig = "(sin|cos|tan|cot|sec|csc|asin|acos|atan)";
+            let re = new RegExp(`${trig}\\^(\\d+)([a-z0-9]+)`, 'g');
+            s = s.replace(re, '($1($3))^$2'); 
+            
+            // Handle implied multiplication
+            s = s.replace(/(\d)([a-z])/g, '$1*$2');
+            s = s.replace(/x(sin|cos|tan|log|ln|exp|sqrt|asin|acos|atan)/g, 'x*$1'); 
+            
+            const funcs = ['sin','cos','tan','log','sqrt','exp','ln','asin','acos','atan','sec','csc'];
+            funcs.forEach(f => {
+                const r = new RegExp(`${f}(?!\\()([a-z0-9^]+)`, 'g');
+                s = s.replace(r, `${f}($1)`);
+            });
+            s = s.replace(/ln/g, 'log');
+            return s;
+        }
+
+        function parseLimit(v) {
+            if(!v) return 0;
+            if(v === 'infinity' || v === 'inf') return Infinity;
+            if(v === '-infinity' || v === '-inf') return -Infinity;
+            if(v === 'e') return Math.E;
+            if(v === 'pi') return Math.PI;
+            try { return parseFloat(nerdamer(v).text('decimals')); } catch { return parseFloat(v); }
+        }
+
+        // Updated with Inverse Trig, Reciprocal Trig
+        function identifyStandardFormula(fnStr) {
+            const s = fnStr.replace(/\s/g, '').toLowerCase();
+            
+            // Power Rule
+            if (/^x(\^\d+)?$/.test(s)) {
+                if (s === 'x') return `\\int x^1 dx = \\frac{x^2}{2}`;
+                if (s === '1/x' || s === 'x^-1') return `\\int \\frac{1}{x} dx = \\ln|x|`;
+                return `\\int x^n dx = \\frac{x^{n+1}}{n+1}`;
+            }
+
+            // Expanded Standard Map
+            const map = {
+                'sin(x)': '\\int \\sin(x) dx = -\\cos(x)',
+                'cos(x)': '\\int \\cos(x) dx = \\sin(x)',
+                'tan(x)': '\\int \\tan(x) dx = -\\ln|\\cos(x)|',
+                'cot(x)': '\\int \\cot(x) dx = \\ln|\\sin(x)|',
+                'sec(x)': '\\int \\sec(x) dx = \\ln|\\sec(x) + \\tan(x)|',
+                'csc(x)': '\\int \\csc(x) dx = -\\ln|\\csc(x) + \\cot(x)|',
+                'sec(x)^2': '\\int \\sec^2(x) dx = \\tan(x)',
+                'csc(x)^2': '\\int \\csc^2(x) dx = -\\cot(x)',
+                'sec(x)*tan(x)': '\\int \\sec(x) \\tan(x) dx = \\sec(x)',
+                'csc(x)*cot(x)': '\\int \\csc(x) \\cot(x) dx = -\\csc(x)',
+                'exp(x)': '\\int e^x dx = e^x',
+                'e^x': '\\int e^x dx = e^x',
+                '1/x': '\\int \\frac{1}{x} dx = \\ln|x|',
+                '1/(1+x^2)': '\\int \\frac{dx}{1+x^2} = \\arctan(x)',
+                '1/sqrt(1-x^2)': '\\int \\frac{dx}{\\sqrt{1-x^2}} = \\arcsin(x)'
+            };
+
+            return map[s] || null;
+        }
+
+        function getLinearArgs(fnStr) {
+            try {
+                if (fnStr.includes('^')) {
+                    const match = fnStr.match(/\(([^)]+)\)\^(\d+)/);
+                    if (match) {
+                        const inner = match[1];
+                        const power = match[2];
+                        const xCoef = nerdamer(`diff(${inner}, x)`).text();
+                        if (!xCoef.includes('x')) { 
+                            return { a: xCoef, b: '?', u: inner, type: 'power', n: power };
+                        }
+                    }
+                }
+                const funcs = ['sin', 'cos', 'tan', 'exp', 'log', 'sqrt', 'sec', 'csc', 'asin', 'atan'];
+                for (let f of funcs) {
+                    if (fnStr.startsWith(f + '(') && fnStr.endsWith(')')) {
+                        const inner = fnStr.substring(f.length + 1, fnStr.length - 1);
+                        const diffVal = nerdamer(`diff(${inner}, x)`).text();
+                        if (!diffVal.includes('x') && diffVal !== '0') {
+                            return { a: diffVal, b: '?', u: inner, type: 'func', fname: f };
+                        }
+                    }
+                }
+            } catch(e) { return null; }
+            return null;
+        }
+
+        // Updated Step Generator with Advanced Logic
+        function generateSteps(fnStr, resultTex, t, simpTex) {
+            let html = "";
+            const s = fnStr.replace(/\s/g, '').toLowerCase();
+
+            const addStep = (title, content) => {
+                html += `
+                    <div class="step-container">
+                        <div class="step-dot"></div>
+                        <p class="text-sky-400 text-xs font-bold mb-2 uppercase tracking-wider">${title}</p>
+                        <div class="text-slate-300 text-sm overflow-x-auto pb-2 leading-relaxed">${content}</div>
+                    </div>
+                `;
+            };
+
+            addStep(t.steps.rewrite, `$$ I = \\int ${formatLatex(simpTex)} \\, dx $$`);
+
+            const exactStd = identifyStandardFormula(fnStr);
+            const linearData = getLinearArgs(fnStr);
+
+            // 1. GAUSSIAN INTEGRAL CHECK
+            if (s.includes('exp(-x^2)') || s.includes('e^(-x^2)')) {
+                addStep(t.steps.analysis, `<span class="text-fuchsia-400 font-bold dev-glow">${t.methodGaussian}</span>`);
+                addStep(t.steps.process, `
+                    ${t.descGaussian} <br><br>
+                    ${t.formula} $$ \\int e^{-x^2} dx = \\frac{\\sqrt{\\pi}}{2} \\text{erf}(x) $$
+                `);
+            }
+            // 2. GAMMA FUNCTION / FEYNMAN CHECK (Dirichlet)
+            else if (s === 'sin(x)/x') {
+                addStep(t.steps.analysis, `<span class="text-fuchsia-400 font-bold dev-glow">${t.methodFeynman}</span>`);
+                addStep(t.steps.process, `
+                    ${t.descFeynman} <br>
+                    $$ \\int_{0}^{\\infty} \\frac{\\sin x}{x} dx = \\frac{\\pi}{2} $$ <br>
+                    (This is known as the Dirichlet Integral).
+                `);
+            }
+            // 3. STANDARD FORMULA
+            else if (exactStd) {
+                addStep(t.steps.analysis, `<span class="text-emerald-400 font-bold">${t.methodStandard}</span>`);
+                addStep(t.steps.process, `
+                    ${t.msgMatch}
+                    $$ ${exactStd} $$
+                `);
+            }
+            // 4. INVERSE TRIG FORMS
+            else if (s.includes('1/(a^2+x^2)') || (s.includes('1/') && s.includes('x^2') && !s.includes('sin') && !s.includes('exp'))) {
+                 // Check for arctan form: 1/(a^2 + x^2)
+                 if(s.match(/1\/\(\d+\+x\^2\)/) || s.match(/1\/\(x\^2\+\d+\)/)) {
+                    let num = s.match(/\d+/)[0];
+                    let a = Math.sqrt(parseInt(num));
+                    if(Number.isInteger(a)) {
+                        addStep(t.steps.analysis, `<span class="text-emerald-400 font-bold">${t.methodInvTrig}</span>`);
+                        addStep(t.steps.process, `
+                            ${t.formula} $$ \\int \\frac{dx}{a^2 + x^2} = \\frac{1}{a} \\arctan(\\frac{x}{a}) $$
+                            ${t.stepSub} $a = ${a}$:
+                            $$ I = \\frac{1}{${a}} \\arctan(\\frac{x}{${a}}) $$
+                        `);
+                    } else {
+                         // General fallback for messy inverse trig
+                         addStep(t.steps.analysis, `<span class="text-emerald-400 font-bold">${t.methodInvTrig}</span>`);
+                         addStep(t.steps.process, `${t.msgMatch} $$ \\int \\frac{dx}{a^2+x^2} = \\frac{1}{a}\\arctan(\\frac{x}{a}) $$`);
+                    }
+                 }
+                 // Check for arcsin form
+                 else if (s.includes('sqrt') && s.includes('-x^2')) {
+                    addStep(t.steps.analysis, `<span class="text-emerald-400 font-bold">${t.methodInvTrig}</span>`);
+                    addStep(t.steps.process, `
+                        ${t.formula} $$ \\int \\frac{dx}{\\sqrt{a^2 - x^2}} = \\arcsin(\\frac{x}{a}) $$
+                    `);
+                 } else {
+                     addStep(t.steps.analysis, `<span class="text-emerald-400 font-bold">${t.stepGeneral}</span>`);
+                     addStep(t.steps.process, `${t.stepGenDesc}`);
+                 }
+            }
+            // 5. U-SUBSTITUTION
+            else if (linearData && linearData.a !== '1') {
+                const u = linearData.u;
+                const a = linearData.a;
+                const du_latex = `(${a}) dx`;
+                const dx_latex = `\\frac{1}{${a}} du`;
+                
+                let formulaUsed = "";
+                if (linearData.type === 'func') {
+                    const baseFunc = linearData.fname + '(x)'; 
+                    const std = identifyStandardFormula(baseFunc);
+                    if (std) formulaUsed = std; 
+                } else if (linearData.type === 'power') {
+                     formulaUsed = `\\int u^n du = \\frac{u^{n+1}}{n+1}`;
+                }
+
+                addStep(t.steps.analysis, `
+                    <span class="text-emerald-400 font-bold">${t.methodSub}</span><br>
+                    ${t.obsLinear.replace('$u$', `$${linearData.u}$`)}
+                `);
+
+                addStep(t.steps.process, `
+                    1. ${t.stepLet}: 
+                    $$ u = ${formatLatex(nerdamer(u).toTeX())} $$
+                    2. ${t.findDeriv}
+                    $$ du = ${du_latex} \\Rightarrow dx = ${dx_latex} $$
+                    3. ${t.stepSub}:
+                    $$ I = \\frac{1}{${a}} \\int ... du $$
+                    4. ${t.stepApply}:
+                    $$ ${formulaUsed} $$
+                    5. ${t.subBack}
+                    $$ I = ${formatLatex(resultTex)} $$
+                `);
+            }
+            // 6. INTEGRATION BY PARTS
+            else if ((s.includes('x*') && (s.includes('sin') || s.includes('cos') || s.includes('exp'))) || (s.includes('log') && !s.includes('x*'))) {
+                const isLog = s.includes('log');
+                const u_expr = isLog ? 'log(x)' : 'x';
+                const dv_expr = isLog ? (fnStr.replace('log(x)','').replace('*','') || '1') : fnStr.replace('x*','');
+                
+                const du_val = nerdamer(`diff(${u_expr}, x)`).toTeX();
+                const v_val = nerdamer(`integrate(${dv_expr}, x)`).toTeX();
+                const vdu = nerdamer(`(${nerdamer(`integrate(${dv_expr}, x)`).text()}) * (${nerdamer(`diff(${u_expr}, x)`).text()})`).toTeX();
+
+                addStep(t.steps.analysis, `<span class="text-emerald-400 font-bold">${t.methodParts}</span>`);
+                addStep(t.steps.process, `
+                    ${t.formula} $$ \\int u dv = uv - \\int v du $$
+                    <div class="pl-3 border-l-2 border-slate-600 my-2">
+                        $$ u = ${formatLatex(nerdamer(u_expr).toTeX())} \\Rightarrow du = ${formatLatex(du_val)} dx $$
+                        $$ dv = ${formatLatex(nerdamer(dv_expr).toTeX())} dx \\Rightarrow v = ${formatLatex(v_val)} $$
+                    </div>
+                    ${t.stepSub}:
+                    $$ I = (${formatLatex(nerdamer(u_expr).toTeX())})(${formatLatex(v_val)}) - \\int (${formatLatex(vdu)}) dx $$
+                `);
+            }
+            // 7. TRIG POWERS
+            else if ((s.includes('sin') || s.includes('cos')) && s.includes('^2')) {
+                const identity = s.includes('sin') ? "\\sin^2 x = \\frac{1 - \\cos(2x)}{2}" : "\\cos^2 x = \\frac{1 + \\cos(2x)}{2}";
+                const subTex = s.includes('sin') ? "1 - \\cos(2x)" : "1 + \\cos(2x)";
+                
+                addStep(t.steps.analysis, `<span class="text-emerald-400 font-bold">${t.methodTrig}</span>`);
+                addStep(t.steps.process, `
+                    ${t.stepHalf}:
+                    $$ ${identity} $$
+                    ${t.subIn}
+                    $$ I = \\frac{1}{2} \\int (${subTex}) dx $$
+                    ${t.trigHint}
+                `);
+            }
+            else {
+                addStep(t.steps.analysis, `<span class="text-emerald-400 font-bold">${t.stepGeneral}</span>`);
+                addStep(t.steps.process, `${t.stepGenDesc}`);
+            }
+
+            addStep(t.steps.final, `$$ I = ${formatLatex(resultTex)} + C $$`);
+            return html;
+        }
+
+        function calculate() {
+            const raw = document.getElementById('fn-input').value;
+            const aRaw = document.getElementById('a-input').value;
+            const bRaw = document.getElementById('b-input').value;
+            if(!raw) return;
+            lastFn = raw;
+
+            const fn = smartParse(raw);
+            const t = isKhmer ? lang.kh : lang.en;
+            
+            const mathOut = document.getElementById('math-display');
+            const stepOut = document.getElementById('steps-container');
+            const resCard = document.getElementById('result-card');
+            const decSec = document.getElementById('decimal-section');
+
+            let aVal, bVal;
+            if (mode === 'definite') {
+                aVal = parseLimit(aRaw);
+                bVal = parseLimit(bRaw);
+            } else {
+                aVal = -5; bVal = 5; 
+            }
+
+            try {
+                // Try integration
+                let indefObj = nerdamer(`integrate(${fn}, x)`);
+                let indefTex = indefObj.toTeX();
+                const simpFn = nerdamer(fn).toTeX();
+
+                let stepsHtml = generateSteps(fn, indefTex, t, simpFn);
+                let mainLatex = "";
+
+                if (mode === 'indefinite') {
+                    decSec.classList.add('hidden');
+                    mainLatex = `$$ \\int ${formatLatex(simpFn)} dx = ${formatLatex(indefTex)} + C $$`;
+                } 
+                else {
+                    decSec.classList.remove('hidden');
+                    document.getElementById('decimal-val').classList.add('hidden');
+
+                    let exactTex = "?";
+                    let calculated = false;
+
+                    // Handling Infinity for Gaussian
+                    if (fn.includes('exp(-x^2)') && Math.abs(aVal) === Infinity && Math.abs(bVal) === Infinity) {
+                        exactTex = "\\sqrt{\\pi}";
+                        calculated = true;
+                        storedDecimal = Math.sqrt(Math.PI).toFixed(5);
+                    } else {
+                        // Symbolic attempt
+                        try {
+                            const Fb = indefObj.sub('x', `(${bRaw})`);
+                            const Fa = indefObj.sub('x', `(${aRaw})`);
+                            const exactRes = Fb.subtract(Fa);
+                            exactTex = exactRes.toTeX();
+                            
+                            const val = exactRes.text('decimals');
+                            storedDecimal = parseFloat(val).toFixed(5);
+                            if(!isNaN(storedDecimal) && isFinite(storedDecimal)) {
+                                calculated = true;
+                            }
+                        } catch(e) {}
+                    }
+
+                    // Numeric Fallback
+                    if (!calculated) {
+                        const safeA = (Math.abs(aVal) === Infinity) ? (aVal < 0 ? -100 : 100) : aVal;
+                        const safeB = (Math.abs(bVal) === Infinity) ? (bVal < 0 ? -100 : 100) : bVal;
+                        storedDecimal = numericIntegration(fn, safeA, safeB);
+                        if(exactTex === "?" || exactTex.includes('integrate')) exactTex = storedDecimal;
+                    }
+
+                    // Formatting long results
+                    if (exactTex.length > 150) exactTex = storedDecimal;
+
+                    mainLatex = `$$ \\int_{${aRaw}}^{${bRaw}} ${formatLatex(simpFn)} dx = ${formatLatex(exactTex)} $$`;
+                    
+                    stepsHtml += `
+                        <div class="step-container">
+                            <div class="step-dot"></div>
+                            <p class="text-sky-400 text-xs font-bold mb-2 uppercase">${t.steps.limits}</p>
+                            <div class="text-slate-300 text-sm overflow-x-auto">
+                                $$ \\left[ F(x) \\right]_{a}^{b} = F(${bRaw}) - F(${aRaw}) $$ <br>
+                                ${t.stepLimitsSub}: <br>
+                                <div class="mt-3 pt-3 border-t border-slate-700 font-bold text-emerald-400">
+                                    $$ = ${formatLatex(exactTex)} $$
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                mathOut.innerHTML = mainLatex;
+                stepOut.innerHTML = stepsHtml;
+                resCard.classList.remove('hidden');
+                if(window.MathJax) MathJax.typesetPromise();
+                
+                // Don't graph infinity limits
+                if(Math.abs(aVal) !== Infinity && Math.abs(bVal) !== Infinity) {
+                    drawGraph(fn, aVal, bVal, mode==='definite');
+                } else {
+                    drawGraph(fn, -5, 5, false);
+                }
+
+            } catch(e) {
+                console.error(e);
+                alert(isKhmer ? "សូមពិនិត្យមើលសមីការម្តងទៀត! (ឧ. x*sin(x))" : "Check input format! (e.g. x*sin(x))");
+            }
+        }
+
+        function numericIntegration(expr, a, b) {
+            try {
+                let jsExpr = expr.replace(/\^/g, '**').replace(/log/g, 'Math.log');
+                ['sin','cos','tan','sqrt','exp','asin','acos','atan'].forEach(f => jsExpr = jsExpr.replace(new RegExp(f,'g'), `Math.${f}`));
+                jsExpr = jsExpr.replace(/e/g, 'Math.E').replace(/pi/g, 'Math.PI');
+                const f = new Function('x', `return ${jsExpr}`);
+                const n = 2000, h = (b-a)/n;
+                let sum = f(a)+f(b);
+                for(let i=1;i<n;i+=2) sum+=4*f(a+i*h);
+                for(let i=2;i<n-1;i+=2) sum+=2*f(a+i*h);
+                return (h/3*sum).toFixed(5);
+            } catch { return "Error"; }
+        }
+
+        function drawGraph(expr, min, max, isDef) {
+            try {
+                const w = document.getElementById('graph-area').clientWidth;
+                const range = Math.abs(max - min);
+                const padding = range === 0 ? 2 : range * 0.5;
+                const plotMin = Math.min(min, max) - padding;
+                const plotMax = Math.max(min, max) + padding;
+                
+                functionPlot({
+                    target: '#graph-area', 
+                    width: w, 
+                    height: 240,
+                    yAxis: { domain: [-4, 4] }, 
+                    xAxis: { domain: [isDef ? plotMin : -6, isDef ? plotMax : 6] },
+                    grid: true, 
+                    theme: 'dark',
+                    data: [{ 
+                        fn: expr.replace(/log/g,'ln'), 
+                        color: '#38bdf8', 
+                        closed: isDef,
+                        range: isDef ? [min, max] : [-10, 10],
+                        skipTip: true
+                    }]
+                });
+            } catch {}
+        }
+    </script>
+</body>
+</html>
