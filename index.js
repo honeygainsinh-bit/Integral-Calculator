@@ -1,4 +1,4 @@
-require('dotenv').config();
+Require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -15,7 +15,7 @@ app.set('trust proxy', 1); // សំខាន់សម្រាប់ Render
 app.use(cors());
 app.use(express.json());
 
-const MODEL_NAME = "gemini-2.5-lite"; 
+const MODEL_NAME = "gemini-2.5-flash"; 
 
 // Tracking Variables
 let totalPlays = 0;           
@@ -60,7 +60,6 @@ const limiter = rateLimit({
 app.use(express.static(path.join(__dirname, 'public'))); 
 
 // 🔥 ដំណោះស្រាយ "Cannot GET /"
-// បើសិនជាវារក index.html មិនឃើញ វានឹងបង្ហាញអក្សរនេះជំនួសវិញ
 app.get('/', (req, res) => {
     res.status(200).send(`
         <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
@@ -95,11 +94,43 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
         totalPlays++;
         uniqueVisitors.add(req.ip);
 
+        // =========================================================
+        // 🔥 LOGIC ថ្មី៖ ជំរុញ AI តាមកម្រិតស្តង់ដារ (Graduated Boosting)
+        // =========================================================
+        let finalPrompt = prompt;
+        const lowerCasePrompt = prompt.toLowerCase();
+        
+        // 1. Level: IMO / Very Hard (Most Extreme Boost - មិនរាប់ tokens)
+        if (lowerCasePrompt.includes('imo gold') || lowerCasePrompt.includes('unsolvable') || lowerCasePrompt.includes('extremely hard')) {
+            const boostingInstruction = "\n\nCRITICAL BOOST: GENERATE A STANDARD IMO-LEVEL PROBLEM. Ensure this problem is abstract, requiring deep, non-standard mathematical insight and advanced concepts beyond typical curriculum. The problem MUST be intended to be virtually unsolvable for a high school student. Maximize mathematical complexity, abstraction, and the obscurity of the solution path. DO NOT simplify the mathematics. Use complex LaTeX formatting and avoid obvious solutions.";
+            finalPrompt = prompt + boostingInstruction;
+            console.log(`🔥🔥 IMO (Very Hard) Boost Applied for: ${req.ip}`);
+        
+        // 2. Level: Hard (Strong Boost - មិនរាប់ tokens)
+        } else if (lowerCasePrompt.includes('imo shortlist') || lowerCasePrompt.includes('hard') || lowerCasePrompt.includes('very difficult')) {
+            const boostingInstruction = "\n\nCRITICAL BOOST: Ensure this problem is a standard highly difficult problem, requiring multi-step problem-solving, abstract thinking, and concepts from the highest level of the standard curriculum. Make the calculation complex and the solution path obscured. Use challenging LaTeX formatting.";
+            finalPrompt = prompt + boostingInstruction;
+            console.log(`🔥 Hard Difficulty Boost Applied for: ${req.ip}`);
+
+        // 3. Level: Medium (Moderate Boost - ផ្តោតលើការសន្សំ Tokens)
+        } else if (lowerCasePrompt.includes('medium') || lowerCasePrompt.includes('intermediate')) {
+            const boostingInstruction = "\n\nCRITICAL BOOST: Ensure this problem is a standard moderately difficult problem, requiring careful application of standard formulas and tricky, multi-part calculations (2+ steps). The problem should require two or more clear steps to solve. **Keep the overall problem structure as concise as possible to save tokens.** Use slightly complex LaTeX.";
+            finalPrompt = prompt + boostingInstruction;
+            console.log(`✨ Medium Difficulty (Token Optimized) Boost Applied for: ${req.ip}`);
+        
+        // 4. Level: Easy (Standard Baccalaureate G12 - ផ្តោតខ្លាំងបំផុតលើការសន្សំ Tokens)
+        } else if (lowerCasePrompt.includes('easy') || lowerCasePrompt.includes('standard')) {
+            const boostingInstruction = "\n\nCRITICAL BOOST: Ensure this problem is the simplest standard Baccalaureate (G12) problem possible, requiring direct application of a single formula. The calculation must be extremely simple and straightforward. **STRICTLY MINIMIZE ALL TEXT LENGTH AND LATEX COMPLEXITY IN BOTH THE QUESTION AND OPTIONS TO SAVE TOKENS.** The problem text must be clear and concise.";
+            finalPrompt = prompt + boostingInstruction;
+            console.log(`💡 Easy Difficulty (Maximum Token Optimized) Boost Applied for: ${req.ip}`);
+        }
+        // =========================================================
+
         // AI Generation
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
 
-        const result = await model.generateContent(prompt);
+        const result = await model.generateContent(finalPrompt); 
         const response = await result.response;
         const text = response.text();
 
