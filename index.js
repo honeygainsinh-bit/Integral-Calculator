@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
+const { Pool } = require('pg'); // 🔥 NEW: PostgreSQL Client
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -11,7 +12,7 @@ const port = process.env.PORT || 3000;
 // ==========================================
 // 1. SETUP & CONFIG
 // ==========================================
-app.set('trust proxy', 1); // សំខាន់សម្រាប់ Render
+app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
@@ -30,37 +31,65 @@ app.use((req, res, next) => {
 });
 
 // ==========================================
-// 2. RATE LIMITER (មាន Rule ពិសេសសម្រាប់ Owner)
+// 2. DATABASE CONFIGURATION (PostgreSQL) 🔥 NEW
+// ==========================================
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    // SSL is required for Render's external connections
+    ssl: {
+        rejectUnauthorized: false 
+    }
+});
+
+// Function to initialize the DB table if it doesn't exist
+async function initializeDatabase() {
+    try {
+        const client = await pool.connect();
+        const query = `
+            CREATE TABLE IF NOT EXISTS leaderboard (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(25) NOT NULL,
+                score INTEGER NOT NULL,
+                difficulty VARCHAR(15) NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+        `;
+        await client.query(query);
+        console.log("✅ Database initialized: 'leaderboard' table ready.");
+        client.release();
+    } catch (err) {
+        console.error("❌ Database initialization error:", err.message);
+        throw err; // Stop server if DB initialization fails
+    }
+}
+
+// ==========================================
+// 3. RATE LIMITER
 // ==========================================
 const limiter = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, // 8 ម៉ោង
-    max: 10, // អ្នកធម្មតាបាន 10 ដង
+    windowMs: 8 * 60 * 60 * 1000, 
+    max: 10, 
     message: { 
         error: "Rate limit exceeded", 
         message: "⚠️ អ្នកបានប្រើប្រាស់អស់ចំនួនកំណត់ហើយ (10ដង ក្នុង 8ម៉ោង)។ សូមសម្រាកសិន!" 
     },
     keyGenerator: (req) => req.ip,
     
-    // 🔥 ពិសេស៖ រំលង (Skip) Rate Limit បើសិនជា IP នោះជា Owner
     skip: (req) => {
-        const myIp = process.env.OWNER_IP; // យក IP ពី Render Environment
+        const myIp = process.env.OWNER_IP; 
         if (req.ip === myIp) {
             console.log(`👑 Owner Access Detected: ${req.ip} (Unlimited)`);
-            return true; // អនុញ្ញាតអោយកេងបានសេរី
+            return true;
         }
         return false;
     }
 });
 
 // ==========================================
-// 3. STATIC FILES & ONLINE CHECK
+// 4. STATIC FILES & ONLINE CHECK
 // ==========================================
-
-// បង្ហាញ Game ពី Folder public
 app.use(express.static(path.join(__dirname, 'public'))); 
 
-// 🔥 ដំណោះស្រាយ "Cannot GET /"
-// បើសិនជាវារក index.html មិនឃើញ វានឹងបង្ហាញអក្សរនេះជំនួសវិញ
 app.get('/', (req, res) => {
     res.status(200).send(`
         <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
@@ -72,7 +101,7 @@ app.get('/', (req, res) => {
 });
 
 // ==========================================
-// 4. API ROUTES
+// 5. API ROUTES
 // ==========================================
 
 // Check Stats
@@ -85,17 +114,15 @@ app.get('/stats', (req, res) => {
     });
 });
 
-// Generate Problem
+// Generate Problem (Existing Gemini Logic)
 app.post('/api/generate-problem', limiter, async (req, res) => {
     try {
         const { prompt } = req.body;
         if (!prompt) return res.status(400).json({ error: "Prompt is required" });
 
-        // Update Tracking
         totalPlays++;
         uniqueVisitors.add(req.ip);
 
-        // AI Generation
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
 
@@ -106,11 +133,77 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
         res.json({ text });
 
     } catch (error) {
-        console.error("❌ Error:", error.message);
+        console.error("❌ Gemini API Error:", error.message);
         res.status(500).json({ error: "Internal Server Error", details: error.message });
     }
 });
 
-app.listen(port, () => {
-    console.log(`🚀 Server running on port ${port}`);
+
+// 🔥 NEW: Leaderboard Submission API
+app.post('/api/leaderboard/submit', async (req, res) => {
+    const { username, score, difficulty } = req.body;
+
+    // Server-side Validation
+    if (!username || typeof score !== 'number' || score <= 0 || username.trim().length < 3) {
+        return res.status(400).json({ success: false, message: "Invalid data: Username must be 3+ chars and score > 0." });
+    }
+
+    try {
+        const client = await pool.connect();
+        const query = `
+            INSERT INTO leaderboard(username, score, difficulty)
+            VALUES($1, $2, $3);
+        `;
+        // Limit username length for DB safety
+        const values = [username.trim().substring(0, 25), score, difficulty];
+        await client.query(query, values);
+        client.release();
+
+        res.status(201).json({ success: true, message: "Score saved successfully." });
+
+    } catch (err) {
+        console.error("❌ Score submission error:", err.message);
+        res.status(500).json({ success: false, message: "Failed to save score due to server error." });
+    }
 });
+
+
+// 🔥 NEW: Leaderboard Retrieval API
+app.get('/api/leaderboard/top', async (req, res) => {
+    try {
+        const client = await pool.connect();
+        const query = `
+            SELECT username, score, difficulty
+            FROM leaderboard
+            ORDER BY score DESC, created_at ASC
+            LIMIT 10;
+        `;
+        const result = await client.query(query);
+        client.release();
+
+        // Return only the rows of data
+        res.json(result.rows);
+
+    } catch (err) {
+        console.error("❌ Leaderboard retrieval error:", err.message);
+        res.status(500).json({ success: false, message: "Failed to retrieve leaderboard." });
+    }
+});
+
+
+// ==========================================
+// 6. START SERVER
+// ==========================================
+async function startServer() {
+    try {
+        // Initialize DB table before starting the server
+        await initializeDatabase();
+        app.listen(port, () => {
+            console.log(`🚀 Server running on port ${port}`);
+        });
+    } catch (error) {
+        console.error("🛑 Server failed to start due to Database error. Check DATABASE_URL and permissions.");
+    }
+}
+
+startServer();
