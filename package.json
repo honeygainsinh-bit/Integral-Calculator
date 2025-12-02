@@ -1,17 +1,17 @@
 {
   "name": "math-game-api-final",
   "version": "1.0.0",
-  "description": "Final Backend API for Math Game with Rate Limiter and File Serving",
+  "description": "Final Backend API for Math Game with Rate Limiter and File Serving (OpenAI backend)",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",             // 💡 កំណែថ្មី
-    "express": "^4.19.2",            // 💡 កំណែថ្មី
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
     "express-rate-limit": "^7.1.5",
-    "openai": "^4.29.5"              // 🔥 ថ្មី៖ ជំនួស @google/generative-ai
+    "openai": "^4.29.5"
   },
   "engines": {
     "node": ">=18.0.0"
