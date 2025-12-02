@@ -4,7 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
-const { Pool } = require('pg'); // 🔥 NEW: PostgreSQL Client
+const { Pool } = require('pg'); // PostgreSQL Client
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -31,17 +31,15 @@ app.use((req, res, next) => {
 });
 
 // ==========================================
-// 2. DATABASE CONFIGURATION (PostgreSQL) 🔥 NEW
+// 2. DATABASE CONFIGURATION (PostgreSQL)
 // ==========================================
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    // SSL is required for Render's external connections
     ssl: {
         rejectUnauthorized: false 
     }
 });
 
-// Function to initialize the DB table if it doesn't exist
 async function initializeDatabase() {
     try {
         const client = await pool.connect();
@@ -59,7 +57,7 @@ async function initializeDatabase() {
         client.release();
     } catch (err) {
         console.error("❌ Database initialization error:", err.message);
-        throw err; // Stop server if DB initialization fails
+        throw err;
     }
 }
 
@@ -116,6 +114,7 @@ app.get('/stats', (req, res) => {
 
 // Generate Problem (Existing Gemini Logic)
 app.post('/api/generate-problem', limiter, async (req, res) => {
+    // ... (Gemini generation code remains the same) ...
     try {
         const { prompt } = req.body;
         if (!prompt) return res.status(400).json({ error: "Prompt is required" });
@@ -123,6 +122,7 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
         totalPlays++;
         uniqueVisitors.add(req.ip);
 
+        // Uses the hidden GEMINI_API_KEY from environment variables
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
 
@@ -139,7 +139,7 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
 });
 
 
-// 🔥 NEW: Leaderboard Submission API
+// Leaderboard Submission API
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
 
@@ -154,7 +154,6 @@ app.post('/api/leaderboard/submit', async (req, res) => {
             INSERT INTO leaderboard(username, score, difficulty)
             VALUES($1, $2, $3);
         `;
-        // Limit username length for DB safety
         const values = [username.trim().substring(0, 25), score, difficulty];
         await client.query(query, values);
         client.release();
@@ -168,7 +167,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 });
 
 
-// 🔥 NEW: Leaderboard Retrieval API
+// Leaderboard Retrieval API
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -181,7 +180,6 @@ app.get('/api/leaderboard/top', async (req, res) => {
         const result = await client.query(query);
         client.release();
 
-        // Return only the rows of data
         res.json(result.rows);
 
     } catch (err) {
@@ -195,8 +193,16 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // 6. START SERVER
 // ==========================================
 async function startServer() {
+    // Check for necessary keys
+    if (!process.env.DATABASE_URL) {
+        console.error("🛑 CRITICAL: DATABASE_URL is missing. Check Render settings.");
+        throw new Error("Missing DATABASE_URL");
+    }
+
+    // Confirmation that Firebase client keys are loaded (even if not used here)
+    console.log(`🔑 Firebase Project ID Loaded: ${process.env.FIREBASE_PROJECT_ID ? 'Yes' : 'No'}`);
+    
     try {
-        // Initialize DB table before starting the server
         await initializeDatabase();
         app.listen(port, () => {
             console.log(`🚀 Server running on port ${port}`);
