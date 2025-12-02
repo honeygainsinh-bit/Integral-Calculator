@@ -1,4 +1,3 @@
-// Dependencies 
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -10,62 +9,93 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // ==========================================
-// 1. SETUP & TRACKING
+// 1. SETUP & CONFIG
 // ==========================================
-app.set('trust proxy', 1); 
+app.set('trust proxy', 1); // សំខាន់សម្រាប់ Render
 app.use(cors());
 app.use(express.json());
 
-let totalPlays = 0;           
-const uniqueVisitors = new Set();
 const MODEL_NAME = "gemini-2.5-flash"; 
 
-// Middleware: Log រាល់ការចូល
+// Tracking Variables
+let totalPlays = 0;           
+const uniqueVisitors = new Set();
+
+// Middleware: Log Request
 app.use((req, res, next) => {
     const ip = req.ip;
     const time = new Date().toLocaleTimeString('km-KH');
-    console.log(`[${time}] 📡 Request form IP: ${ip} | Path: ${req.path}`);
+    console.log(`[${time}] 📡 IP: ${ip} | Path: ${req.path}`);
     next();
 });
 
 // ==========================================
-// 2. STATIC FILE FIX (ដំណោះស្រាយ Cannot GET /)
-// ==========================================
-app.use(express.static(path.join(__dirname, 'public'))); 
-
-
-// ==========================================
-// 3. RATE LIMITER (10 ដង / 8 ម៉ោង)
+// 2. RATE LIMITER (មាន Rule ពិសេសសម្រាប់ Owner)
 // ==========================================
 const limiter = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, max: 10,
-    message: { error: "Rate limit exceeded", message: "⚠️ អ្នកបានប្រើប្រាស់អស់ចំនួនកំណត់ហើយ (10ដង ក្នុង 8ម៉ោង)។ សូមសម្រាកសិន!" },
-    keyGenerator: (req, res) => { return req.ip; }
+    windowMs: 8 * 60 * 60 * 1000, // 8 ម៉ោង
+    max: 10, // អ្នកធម្មតាបាន 10 ដង
+    message: { 
+        error: "Rate limit exceeded", 
+        message: "⚠️ អ្នកបានប្រើប្រាស់អស់ចំនួនកំណត់ហើយ (10ដង ក្នុង 8ម៉ោង)។ សូមសម្រាកសិន!" 
+    },
+    keyGenerator: (req) => req.ip,
+    
+    // 🔥 ពិសេស៖ រំលង (Skip) Rate Limit បើសិនជា IP នោះជា Owner
+    skip: (req) => {
+        const myIp = process.env.OWNER_IP; // យក IP ពី Render Environment
+        if (req.ip === myIp) {
+            console.log(`👑 Owner Access Detected: ${req.ip} (Unlimited)`);
+            return true; // អនុញ្ញាតអោយកេងបានសេរី
+        }
+        return false;
+    }
+});
+
+// ==========================================
+// 3. STATIC FILES & ONLINE CHECK
+// ==========================================
+
+// បង្ហាញ Game ពី Folder public
+app.use(express.static(path.join(__dirname, 'public'))); 
+
+// 🔥 ដំណោះស្រាយ "Cannot GET /"
+// បើសិនជាវារក index.html មិនឃើញ វានឹងបង្ហាញអក្សរនេះជំនួសវិញ
+app.get('/', (req, res) => {
+    res.status(200).send(`
+        <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
+            <h1 style="color: #22c55e;">Server is Online 🟢</h1>
+            <p>Backend API is running smoothly.</p>
+            <p style="color: gray; font-size: 0.8rem;">Note: If you don't see the game, check your 'public' folder.</p>
+        </div>
+    `);
 });
 
 // ==========================================
 // 4. API ROUTES
 // ==========================================
 
-// A. /stats (Admin Check)
+// Check Stats
 app.get('/stats', (req, res) => {
     res.json({
-        server_status: "Online 🟢", model_used: MODEL_NAME,
-        total_games_generated: totalPlays, total_unique_players: uniqueVisitors.size
+        status: "Online",
+        total_plays: totalPlays,
+        unique_players: uniqueVisitors.size,
+        owner_ip_configured: process.env.OWNER_IP ? "Yes" : "No"
     });
 });
 
-// B. /api/generate-problem (Main Logic)
+// Generate Problem
 app.post('/api/generate-problem', limiter, async (req, res) => {
     try {
         const { prompt } = req.body;
         if (!prompt) return res.status(400).json({ error: "Prompt is required" });
 
-        // --- TRACKING UPDATE ---
-        totalPlays++; uniqueVisitors.add(req.ip);
-        console.log(`✅ Generating Problem... (Total: ${totalPlays} | User: ${req.ip})`);
+        // Update Tracking
+        totalPlays++;
+        uniqueVisitors.add(req.ip);
 
-        // --- AI GENERATION ---
+        // AI Generation
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
 
@@ -76,11 +106,11 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
         res.json({ text });
 
     } catch (error) {
-        console.error("❌ Error Generating Content:", error.message);
+        console.error("❌ Error:", error.message);
         res.status(500).json({ error: "Internal Server Error", details: error.message });
     }
 });
 
 app.listen(port, () => {
-    console.log(`🚀 Server is running on port ${port}`);
+    console.log(`🚀 Server running on port ${port}`);
 });
