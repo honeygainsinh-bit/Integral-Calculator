@@ -2,88 +2,86 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-// 🔥 ថ្មី៖ ប្រើ OpenAI Library ជំនួស GoogleGenerativeAI
-const OpenAI = require('openai'); 
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
-
-// ==========================================
-// 1. SETUP & CONFIG
-// ==========================================
-
-// 🔥 ថ្មី៖ ពិនិត្យមើលសោ API របស់ OpenAI
-if (!process.env.OPENAI_API_KEY) { 
-    console.error("❌ FATAL: OPENAI_API_KEY មិនត្រូវបានកំណត់នៅក្នុង .env ទេ។");
-    process.exit(1); 
-}
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.set('trust proxy', 1); 
+// ==========================================
+// 1. SETUP & CONFIG
+// ==========================================
+app.set('trust proxy', 1); // សំខាន់សម្រាប់ Render
 app.use(cors());
 app.use(express.json());
 
-// 🔥 ថ្មី៖ កំណត់ Model របស់ OpenAI
-const MODEL_NAME = "gpt-3.5-turbo"; 
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "default_secret"; 
-
-// 🔥 ថ្មី៖ បង្កើត Client របស់ OpenAI (ប្រសើរជាងបង្កើតវាខាងក្នុង route ម្តងៗ)
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+const MODEL_NAME = "gemini-2.5-lite"; 
 
 // Tracking Variables
 let totalPlays = 0;           
 const uniqueVisitors = new Set();
-// ... (Middleware Log Request គឺនៅដដែល) ...
 
-// [លុបកូដ Middleware: Log Request ព្រោះវាដដែល]
+// Middleware: Log Request
+app.use((req, res, next) => {
+    const ip = req.ip;
+    const time = new Date().toLocaleTimeString('km-KH');
+    console.log(`[${time}] 📡 IP: ${ip} | Path: ${req.path}`);
+    next();
+});
 
 // ==========================================
-// 2. RATE LIMITER (នៅដដែល)
+// 2. RATE LIMITER (មាន Rule ពិសេសសម្រាប់ Owner)
 // ==========================================
-// ... (កូដ Rate Limiter គឺនៅដដែល) ...
 const limiter = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, 
-    max: 10, 
+    windowMs: 8 * 60 * 60 * 1000, // 8 ម៉ោង
+    max: 10, // អ្នកធម្មតាបាន 10 ដង
     message: { 
         error: "Rate limit exceeded", 
         message: "⚠️ អ្នកបានប្រើប្រាស់អស់ចំនួនកំណត់ហើយ (10ដង ក្នុង 8ម៉ោង)។ សូមសម្រាកសិន!" 
     },
     keyGenerator: (req) => req.ip,
+    
+    // 🔥 ពិសេស៖ រំលង (Skip) Rate Limit បើសិនជា IP នោះជា Owner
     skip: (req) => {
-        const myIp = process.env.OWNER_IP; 
+        const myIp = process.env.OWNER_IP; // យក IP ពី Render Environment
         if (req.ip === myIp) {
             console.log(`👑 Owner Access Detected: ${req.ip} (Unlimited)`);
-            return true; 
+            return true; // អនុញ្ញាតអោយកេងបានសេរី
         }
         return false;
     }
 });
 
-// [លុបកូដ STATIC FILES & ONLINE CHECK ព្រោះវាដដែល]
+// ==========================================
+// 3. STATIC FILES & ONLINE CHECK
+// ==========================================
+
+// បង្ហាញ Game ពី Folder public
+app.use(express.static(path.join(__dirname, 'public'))); 
+
+// 🔥 ដំណោះស្រាយ "Cannot GET /"
+// បើសិនជាវារក index.html មិនឃើញ វានឹងបង្ហាញអក្សរនេះជំនួសវិញ
+app.get('/', (req, res) => {
+    res.status(200).send(`
+        <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
+            <h1 style="color: #22c55e;">Server is Online 🟢</h1>
+            <p>Backend API is running smoothly.</p>
+            <p style="color: gray; font-size: 0.8rem;">Note: If you don't see the game, check your 'public' folder.</p>
+        </div>
+    `);
+});
 
 // ==========================================
 // 4. API ROUTES
 // ==========================================
 
-// Middleware: 🔒 ការពារ API (សម្រាប់តែ /stats)
-const protectStats = (req, res, next) => {
-    const key = req.headers['x-admin-key'];
-    if (key && key === ADMIN_API_KEY) {
-        return next();
-    }
-    res.status(401).json({ error: "Access Denied", message: "🔒 សូមផ្តល់ X-Admin-Key ដែលត្រឹមត្រូវ។" });
-};
-
-// Check Stats (នៅដដែល)
-app.get('/stats', protectStats, (req, res) => {
+// Check Stats
+app.get('/stats', (req, res) => {
     res.json({
         status: "Online",
         total_plays: totalPlays,
         unique_players: uniqueVisitors.size,
-        owner_ip_configured: process.env.OWNER_IP ? "Yes" : "No",
-        admin_key_configured: process.env.ADMIN_API_KEY ? "Yes" : "No"
+        owner_ip_configured: process.env.OWNER_IP ? "Yes" : "No"
     });
 });
 
@@ -97,37 +95,19 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
         totalPlays++;
         uniqueVisitors.add(req.ip);
 
-        // 🔥 ថ្មី៖ ការហៅទៅកាន់ OpenAI Chat Completions API
-        const completion = await openai.chat.completions.create({
-            model: MODEL_NAME,
-            // 💡 ប្រើ System Role ដើម្បីកំណត់រចនាសម្ព័ន្ធ output
-            messages: [
-                { 
-                    role: "system", 
-                    content: `You are an expert problem generator. Always respond strictly in the requested JSON format: 
-                    {"question": "The question text", "answer": "The correct answer", "difficulty": "Easy, Medium, or Hard"}` 
-                },
-                { role: "user", content: prompt },
-            ],
-            // 🔥 ថ្មី៖ បើក JSON Mode សម្រាប់ GPT-3.5 Turbo
-            response_format: { type: "json_object" }, 
-        });
+        // AI Generation
+        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: MODEL_NAME });
 
-        const responseText = completion.choices[0].message.content;
-        
-        // ដោយសារយើងប្រើ JSON mode វានឹងដំណើរការជានិច្ច 
-        const responseJson = JSON.parse(responseText); 
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        const text = response.text();
 
-        res.json(responseJson); 
+        res.json({ text });
 
     } catch (error) {
         console.error("❌ Error:", error.message);
-        console.error("   Failed Prompt:", req.body.prompt); 
-        res.status(500).json({ 
-            error: "Internal Server Error", 
-            message: "មានបញ្ហាក្នុងការបង្កើតមាតិកា AI។",
-            details: error.message 
-        });
+        res.status(500).json({ error: "Internal Server Error", details: error.message });
     }
 });
 
