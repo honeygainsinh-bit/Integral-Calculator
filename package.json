@@ -1,19 +1,11 @@
 {
-  "name": "math-game-api",
+  "name": "math-game-api-final",
   "version": "1.0.0",
-  "description": "Backend API for Math Game using Gemini 2.5",
+  "description": "Final Backend API for Math Game with Rate Limiter and File Serving",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
-  "keywords": [
-    "nodejs",
-    "express",
-    "gemini",
-    "math-game"
-  ],
-  "author": "Chiang Sinhsinh",
-  "license": "ISC",
   "dependencies": {
     "@google/generative-ai": "^0.1.3",
     "cors": "^2.8.5",
