@@ -4,7 +4,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
-import { GoogleGenerativeAI } from '@google/genai'; // Note the correct package name for new SDK
+import { GoogleGenerativeAI } from '@google/genai';
 import rateLimit from 'express-rate-limit';
 import { Pool } from 'pg'; 
 import { fileURLToPath } from 'url'; 
@@ -32,6 +32,14 @@ const MODEL_NAME = "gemini-2.5-flash";
 let totalPlays = 0;           
 const uniqueVisitors = new Set();
 
+// Helper function to calculate the start of the current day (00:00:00 UTC)
+function getStartOfTodayUTC() {
+    const today = new Date();
+    // Set time to midnight UTC (00:00:00.000)
+    today.setUTCHours(0, 0, 0, 0); 
+    return today;
+}
+
 // Middleware: Log Request
 app.use((req, res, next) => {
     const ip = req.ip;
@@ -53,7 +61,6 @@ const pool = new Pool({
 async function initializeDatabase() {
     try {
         const client = await pool.connect();
-        // 💡 កែតម្រូវ៖ ត្រូវប្រាកដថា table មាន ip_address column
         const query = `
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -102,8 +109,6 @@ const limiter = rateLimit({
 app.use(express.static(path.join(__dirname, 'public'))); 
 
 app.get('/', (req, res) => {
-    // This route is mainly for health check on Render, serving the index.html from 'public' if not found.
-    // The health check response is now embedded here:
     res.status(200).send(`
         <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
             <h1 style="color: #22c55e;">Server is Online 🟢</h1>
@@ -130,35 +135,34 @@ app.get('/stats', (req, res) => {
 app.post('/api/generate-problem', limiter, async (req, res) => {
     const clientIP = req.ip;
     try {
-        // 💡 កែតម្រូវ៖ ទទួលយកទាំង prompt និង difficulty
         const { prompt, difficulty } = req.body; 
         if (!prompt) return res.status(400).json({ error: "Prompt is required" });
 
-        // 🛑 NEW CHECK: DAILY CHALLENGE GENERATION LIMIT (1 time / 24h / IP)
+        // 🛑 DAILY CHALLENGE GENERATION LIMIT (1 time / day / IP - GLOBAL RESET)
         if (difficulty === 'Daily Challenge') {
             const client = await pool.connect();
             try {
-                const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+                // 💡 កែតម្រូវសំខាន់: ប្រើ Fixed time (Start of UTC day) ជំនួស 24h rolling window
+                const startOfTodayUTC = getStartOfTodayUTC(); 
                 
-                // ពិនិត្យមើលថាតើ IP នេះបាន submit score សម្រាប់ Daily Challenge ក្នុងរយៈពេល 24 ម៉ោងហើយឬនៅ?
+                // Check if this IP has already submitted a score since the start of today UTC
                 const checkQuery = `
                     SELECT created_at FROM leaderboard
                     WHERE ip_address = $1 
                     AND difficulty = 'Daily Challenge'
                     AND created_at >= $2;
                 `;
-                const checkResult = await client.query(checkQuery, [clientIP, twentyFourHoursAgo]);
+                const checkResult = await client.query(checkQuery, [clientIP, startOfTodayUTC]);
 
                 if (checkResult.rows.length > 0) {
-                    // ប្រសិនបើរកឃើញ នឹងបដិសេធមិនឱ្យបង្កើតលំហាត់
-                    console.log(`🛑 Daily Challenge Generation Blocked: IP ${clientIP} already played today.`);
+                    // Block generation
+                    console.log(`🛑 Daily Challenge Generation Blocked: IP ${clientIP} already played today (UTC).`);
                     return res.status(403).json({ 
                         error: "Daily Challenge Limit Exceeded", 
-                        message: "🛑 លំហាត់ប្រចាំថ្ងៃនេះ អ្នកបានចុចលេងម្តងរួចហើយ ក្នុងរយៈពេល ២៤ ម៉ោង។"
+                        message: "🛑 លំហាត់ប្រចាំថ្ងៃនេះ អ្នកបានចុចលេងម្តងរួចហើយ សម្រាប់ថ្ងៃនេះ។ នឹង Reset នៅពាក់កណ្តាលអធ្រាត្រ UTC។"
                     });
                 }
             } finally {
-                // ត្រូវប្រាកដថា release client វិញ
                 client.release();
             }
         }
@@ -189,7 +193,7 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
 });
 
 
-// Leaderboard Submission API (Kept the IP check for integrity/fallback)
+// Leaderboard Submission API (Kept the Global Reset check for integrity/fallback)
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
     const clientIP = req.ip; 
@@ -202,9 +206,10 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     try {
         const client = await pool.connect();
         
-        // 1. CHECK DAILY CHALLENGE LIMIT (AS FALLBACK)
+        // 1. CHECK DAILY CHALLENGE LIMIT (AS FALLBACK - Global Reset)
         if (difficulty === 'Daily Challenge') {
-            const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            // 💡 កែតម្រូវសំខាន់: ប្រើ Fixed time (Start of UTC day)
+            const startOfTodayUTC = getStartOfTodayUTC();
             
             const checkQuery = `
                 SELECT created_at FROM leaderboard
@@ -212,15 +217,14 @@ app.post('/api/leaderboard/submit', async (req, res) => {
                 AND difficulty = 'Daily Challenge'
                 AND created_at >= $2;
             `;
-            const checkResult = await client.query(checkQuery, [clientIP, twentyFourHoursAgo]);
+            const checkResult = await client.query(checkQuery, [clientIP, startOfTodayUTC]);
 
             if (checkResult.rows.length > 0) {
-                // We allow the submission ONLY if the score is significantly higher, but for simplicity, we block it entirely.
                 client.release();
-                console.log(`🛑 Daily Challenge Submission Blocked (Fallback): IP ${clientIP} already submitted today.`);
+                console.log(`🛑 Daily Challenge Submission Blocked (Fallback - Global): IP ${clientIP} already submitted today (UTC).`);
                 return res.status(403).json({ 
                     success: false, 
-                    message: "អ្នកបានរក្សាទុកពិន្ទុសម្រាប់ Daily Challenge ម្តងរួចហើយ ក្នុងរយៈពេល ២៤ ម៉ោង!" 
+                    message: "អ្នកបានរក្សាទុកពិន្ទុសម្រាប់ Daily Challenge ម្តងរួចហើយ សម្រាប់ថ្ងៃនេះ។" 
                 });
             }
         }
@@ -248,7 +252,6 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
-        // 💡 កែតម្រូវ៖ សម្រាប់ការរាប់ពិន្ទុសរុប គួរតែទាញយកពិន្ទុទាំងអស់
         const query = `
             SELECT username, score, difficulty
             FROM leaderboard;
@@ -282,6 +285,7 @@ async function startServer() {
         await initializeDatabase();
         app.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);
+            console.log(`⏰ Daily Challenge Reset Time: Midnight UTC (00:00:00)`);
         });
     } catch (error) {
         console.error("🛑 Server failed to start due to Database initialization error. Check DATABASE_URL and permissions.");
