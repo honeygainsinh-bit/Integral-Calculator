@@ -72,7 +72,6 @@ const limiter = rateLimit({
         message: "⚠️ អ្នកបានប្រើប្រាស់អស់ចំនួនកំណត់ហើយ (10ដង ក្នុង 8ម៉ោង)។ សូមសម្រាកសិន!" 
     },
     keyGenerator: (req) => req.ip,
-    
     skip: (req) => {
         const myIp = process.env.OWNER_IP; 
         if (req.ip === myIp) {
@@ -112,9 +111,8 @@ app.get('/stats', (req, res) => {
     });
 });
 
-// Generate Problem (Existing Gemini Logic)
+// Generate Problem (Gemini)
 app.post('/api/generate-problem', limiter, async (req, res) => {
-    // ... (Gemini generation code remains the same) ...
     try {
         const { prompt } = req.body;
         if (!prompt) return res.status(400).json({ error: "Prompt is required" });
@@ -122,7 +120,6 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
         totalPlays++;
         uniqueVisitors.add(req.ip);
 
-        // Uses the hidden GEMINI_API_KEY from environment variables
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
 
@@ -143,9 +140,8 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
 
-    // Server-side Validation
     if (!username || typeof score !== 'number' || score <= 0 || username.trim().length < 3) {
-        return res.status(400).json({ success: false, message: "Invalid data: Username must be 3+ chars and score > 0." });
+        return res.status(400).json({ success: false, message: "Invalid data." });
     }
 
     try {
@@ -162,22 +158,29 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 
     } catch (err) {
         console.error("❌ Score submission error:", err.message);
-        res.status(500).json({ success: false, message: "Failed to save score due to server error." });
+        res.status(500).json({ success: false, message: "Failed to save score." });
     }
 });
 
 
-// Leaderboard Retrieval API
+// 🔥🔥 កន្លែងដែលបានកែសម្រួល (CRITICAL FIX) 🔥🔥
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
+        
+        // ទាញយក Limit ពី Frontend (បើអត់មាន យក 1000 ជំនួស 10)
+        const limit = parseInt(req.query.limit) || 1000;
+
         const query = `
             SELECT username, score, difficulty
             FROM leaderboard
-            ORDER BY score DESC, created_at ASC
-            LIMIT 10;
+            ORDER BY score DESC, created_at DESC
+            LIMIT $1; 
         `;
-        const result = await client.query(query);
+        
+        // LIMIT $1 មានន័យថាទាញយកតាមចំនួនដែលយើងកំណត់ (1000)
+        // ធ្វើបែបនេះ Frontend នឹងទទួលបានទិន្នន័យគ្រប់គ្រាន់ដើម្បីបូកសរុបពិន្ទុ
+        const result = await client.query(query, [limit]);
         client.release();
 
         res.json(result.rows);
@@ -193,13 +196,11 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // 6. START SERVER
 // ==========================================
 async function startServer() {
-    // Check for necessary keys
     if (!process.env.DATABASE_URL) {
-        console.error("🛑 CRITICAL: DATABASE_URL is missing. Check Render settings.");
+        console.error("🛑 CRITICAL: DATABASE_URL is missing.");
         throw new Error("Missing DATABASE_URL");
     }
 
-    // Confirmation that Firebase client keys are loaded (even if not used here)
     console.log(`🔑 Firebase Project ID Loaded: ${process.env.FIREBASE_PROJECT_ID ? 'Yes' : 'No'}`);
     
     try {
@@ -208,7 +209,7 @@ async function startServer() {
             console.log(`🚀 Server running on port ${port}`);
         });
     } catch (error) {
-        console.error("🛑 Server failed to start due to Database error. Check DATABASE_URL and permissions.");
+        console.error("🛑 Server failed to start due to Database error.");
     }
 }
 
