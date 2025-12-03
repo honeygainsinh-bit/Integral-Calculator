@@ -1,214 +1,269 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const rateLimit = require('express-rate-limit');
-const { Pool } = require('pg'); // PostgreSQL Client
+// index.js (Server Side)
 
-const app = express();
-const port = process.env.PORT || 3000;
+import express from 'express';
+import { GoogleGenAI } from '@google/genai';
+import { Pool } from 'pg';
+import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 
-// ==========================================
-// 1. SETUP & CONFIG
-// ==========================================
-app.set('trust proxy', 1);
-app.use(cors());
-app.use(express.json());
+// --- CONFIGURATION & INITIALIZATION ---
 
-const MODEL_NAME = "gemini-2.5-flash"; 
-
-// Tracking Variables
-let totalPlays = 0;           
-const uniqueVisitors = new Set();
-
-// Middleware: Log Request
-app.use((req, res, next) => {
-    const ip = req.ip;
-    const time = new Date().toLocaleTimeString('km-KH');
-    console.log(`[${time}] 📡 IP: ${ip} | Path: ${req.path}`);
-    next();
-});
-
-// ==========================================
-// 2. DATABASE CONFIGURATION (PostgreSQL)
-// ==========================================
+// 1. Database Setup
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: {
-        rejectUnauthorized: false 
-    }
+    ssl: { rejectUnauthorized: false } // Required for external connections like Render/Heroku
 });
 
-async function initializeDatabase() {
+// 2. AI Setup
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const modelName = "gemini-2.5-flash"; // Powerful and cost-effective model
+
+// 3. Express App Setup
+const app = express();
+const PORT = process.env.PORT || 5000;
+const OWNER_IP = process.env.OWNER_IP; // IP of the developer/owner (for testing/unlimited play)
+
+// Middleware
+app.use(cors()); // Allow cross-origin requests
+app.use(express.json()); // To parse JSON bodies
+
+// --- DATABASE FUNCTIONS ---
+
+/**
+ * Initializes the database tables if they don't exist.
+ */
+async function initDatabase() {
     try {
-        const client = await pool.connect();
-        const query = `
+        await pool.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
-                username VARCHAR(25) NOT NULL,
+                username VARCHAR(50) NOT NULL,
                 score INTEGER NOT NULL,
-                difficulty VARCHAR(15) NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                difficulty VARCHAR(20),
+                played_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                ip_address VARCHAR(45) -- To log the user IP
             );
-        `;
-        await client.query(query);
-        console.log("✅ Database initialized: 'leaderboard' table ready.");
-        client.release();
-    } catch (err) {
-        console.error("❌ Database initialization error:", err.message);
-        throw err;
+        `);
+        console.log("Leaderboard table ensured.");
+
+        // Table to track IP limits for daily challenges and general plays
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS ip_play_limits (
+                id SERIAL PRIMARY KEY,
+                ip_address VARCHAR(45) NOT NULL,
+                daily_seed VARCHAR(10), -- e.g., '2025-12-03'
+                is_daily_challenge BOOLEAN NOT NULL DEFAULT FALSE,
+                last_play_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (ip_address, daily_seed) -- Enforce 1 daily play per IP
+            );
+        `);
+        console.log("IP Play Limits table ensured.");
+        
+    } catch (error) {
+        console.error("Error initializing database:", error.message);
+        throw error; // Propagate error to crash server if DB fails to start
     }
 }
 
-// ==========================================
-// 3. RATE LIMITER
-// ==========================================
-const limiter = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, 
-    max: 10, 
-    message: { 
-        error: "Rate limit exceeded", 
-        message: "⚠️ អ្នកបានប្រើប្រាស់អស់ចំនួនកំណត់ហើយ (10ដង ក្នុង 8ម៉ោង)។ សូមសម្រាកសិន!" 
-    },
-    keyGenerator: (req) => req.ip,
-    
-    skip: (req) => {
-        const myIp = process.env.OWNER_IP; 
-        if (req.ip === myIp) {
-            console.log(`👑 Owner Access Detected: ${req.ip} (Unlimited)`);
-            return true;
+
+// --- RATE LIMITING MIDDLEWARES ---
+
+/**
+ * 1. Daily Challenge Limiter (1 request per daily seed per IP)
+ * - Uses database for persistent, accurate tracking.
+ */
+const dailyLimiter = async (req, res, next) => {
+    const isDaily = req.body.is_daily_challenge;
+    const seed = req.body.problem_seed; // Expected format YYYY-MM-DD
+    const clientIp = req.ip;
+
+    // Owner bypass
+    if (clientIp === OWNER_IP) {
+        return next();
+    }
+
+    // Only apply DB check if it's a daily challenge with a valid seed
+    if (isDaily && seed) {
+        try {
+            const result = await pool.query(
+                'SELECT COUNT(*) FROM ip_play_limits WHERE ip_address = $1 AND daily_seed = $2 AND is_daily_challenge = TRUE',
+                [clientIp, seed]
+            );
+
+            if (result.rows[0].count > 0) {
+                return res.status(429).json({ 
+                    success: false, 
+                    message: "អ្នកបានលេង Daily Challenge សម្រាប់ថ្ងៃនេះរួចហើយ។ សូមរង់ចាំថ្ងៃស្អែក។" 
+                });
+            }
+        } catch (error) {
+            console.error("Daily Limiter DB error:", error);
+            // Allow access if DB check fails to prevent blocking all users on DB error
         }
-        return false;
+    }
+    
+    // Proceed if not a daily challenge or if daily check passed
+    next();
+};
+
+/**
+ * 2. General Challenge Limiter (10 requests per 8 hours per IP)
+ * - Uses the standard express-rate-limit memory store.
+ */
+const generalLimiter = rateLimit({
+    windowMs: 8 * 60 * 60 * 1000, // 8 hours
+    max: 10, // Limit each IP to 10 requests per windowMs
+    keyGenerator: (req) => {
+        // Owner bypass
+        if (req.ip === OWNER_IP) {
+            return req.ip + "_UNLIMITED";
+        }
+        // Only apply to general plays (not daily)
+        if (req.body.is_daily_challenge) {
+            return req.ip + "_DAILY_BYPASS"; // Use a unique key to effectively skip limit for daily
+        }
+        return req.ip;
+    },
+    handler: (req, res) => {
+        res.status(429).json({
+            success: false,
+            message: "អ្នកបានប្រើប្រាស់ចំនួនលេងអតិបរមា (10 ដង/8 ម៉ោង) របស់លំហាត់ទូទៅរួចហើយ។ សូមរង់ចាំបន្តិច។"
+        });
     }
 });
 
-// ==========================================
-// 4. STATIC FILES & ONLINE CHECK
-// ==========================================
-app.use(express.static(path.join(__dirname, 'public'))); 
 
+// --- API ENDPOINTS ---
+
+/**
+ * GET /
+ * Health check endpoint.
+ */
 app.get('/', (req, res) => {
-    res.status(200).send(`
-        <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
-            <h1 style="color: #22c55e;">Server is Online 🟢</h1>
-            <p>Backend API is running smoothly.</p>
-            <p style="color: gray; font-size: 0.8rem;">Note: If you don't see the game, check your 'public' folder.</p>
-        </div>
-    `);
+    res.send({ status: "OK", message: "Math Game API is running.", port: PORT, ip: req.ip });
 });
 
-// ==========================================
-// 5. API ROUTES
-// ==========================================
+/**
+ * POST /api/generate-problem
+ * Generates a math problem using the Gemini API.
+ */
+app.post('/api/generate-problem', dailyLimiter, generalLimiter, async (req, res) => {
+    const { prompt, is_daily_challenge, problem_seed } = req.body;
+    const clientIp = req.ip;
+    
+    if (!prompt) {
+        return res.status(400).json({ success: false, message: "Prompt is required." });
+    }
 
-// Check Stats
-app.get('/stats', (req, res) => {
-    res.json({
-        status: "Online",
-        total_plays: totalPlays,
-        unique_players: uniqueVisitors.size,
-        owner_ip_configured: process.env.OWNER_IP ? "Yes" : "No"
-    });
-});
-
-// Generate Problem (Existing Gemini Logic)
-app.post('/api/generate-problem', limiter, async (req, res) => {
-    // ... (Gemini generation code remains the same) ...
     try {
-        const { prompt } = req.body;
-        if (!prompt) return res.status(400).json({ error: "Prompt is required" });
+        // 1. Generate Problem using Gemini
+        const response = await ai.models.generateContent({
+            model: modelName,
+            contents: prompt,
+            config: {
+                systemInstruction: "You are a professional Cambodian high school math problem generator. You strictly follow all formatting rules including the [PROBLEM] and [ANSWER] tags, and use LaTeX for math formulas. Ensure the options ក, ខ, គ, ឃ are mathematically distinct.",
+                temperature: 0.7,
+                maxOutputTokens: 2048
+            }
+        });
+        
+        const text = response.text;
+        
+        // 2. Log play for rate limiting
+        if (is_daily_challenge && problem_seed) {
+            // Log daily challenge play (only if daily challenge)
+            await pool.query(
+                'INSERT INTO ip_play_limits (ip_address, daily_seed, is_daily_challenge, last_play_time) VALUES ($1, $2, TRUE, NOW()) ON CONFLICT (ip_address, daily_seed) DO NOTHING',
+                [clientIp, problem_seed]
+            );
+        } else {
+            // General plays are handled by generalLimiter (memory store) - no DB write needed here.
+        }
 
-        totalPlays++;
-        uniqueVisitors.add(req.ip);
+        res.json({ success: true, text });
+        
+    } catch (error) {
+        console.error("Gemini API or Logging Error:", error.message);
+        res.status(500).json({ success: false, message: "Server error during problem generation.", error: error.message });
+    }
+});
 
-        // Uses the hidden GEMINI_API_KEY from environment variables
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+/**
+ * POST /api/leaderboard/submit
+ * Submits a new score to the leaderboard.
+ */
+app.post('/api/leaderboard/submit', async (req, res) => {
+    const { username, score, difficulty, is_daily_challenge, problem_seed, ip_address } = req.body;
+    const clientIp = req.ip;
 
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const text = response.text();
+    if (!username || typeof score !== 'number' || score <= 0) {
+        return res.status(400).json({ success: false, message: "Invalid submission data." });
+    }
 
-        res.json({ text });
+    try {
+        // 1. Check/Log daily challenge play (if this score submission is for a daily challenge)
+        if (is_daily_challenge && problem_seed) {
+            const check = await pool.query(
+                'SELECT COUNT(*) FROM ip_play_limits WHERE ip_address = $1 AND daily_seed = $2 AND is_daily_challenge = TRUE',
+                [clientIp, problem_seed]
+            );
+
+            // Double check: if they already played, prevent score submission
+            if (check.rows[0].count > 0 && clientIp !== OWNER_IP) {
+                return res.status(429).json({
+                    success: false,
+                    message: "អ្នកបានបា៉ះ Daily Challenge រួចហើយ។ មិនអាចរក្សាទុកពិន្ទុបានទេ! (Error Code: DB_DUP_DAILY)"
+                });
+            }
+            
+            // Log the play now, since submission is successful
+            await pool.query(
+                'INSERT INTO ip_play_limits (ip_address, daily_seed, is_daily_challenge, last_play_time) VALUES ($1, $2, TRUE, NOW()) ON CONFLICT (ip_address, daily_seed) DO UPDATE SET last_play_time = NOW()',
+                [clientIp, problem_seed]
+            );
+        }
+
+        // 2. Insert into Leaderboard
+        const result = await pool.query(
+            'INSERT INTO leaderboard (username, score, difficulty, ip_address) VALUES ($1, $2, $3, $4) RETURNING *',
+            [username, score, difficulty, clientIp]
+        );
+
+        res.json({ success: true, data: result.rows[0] });
 
     } catch (error) {
-        console.error("❌ Gemini API Error:", error.message);
-        res.status(500).json({ error: "Internal Server Error", details: error.message });
+        console.error("Score submission error:", error.message);
+        res.status(500).json({ success: false, message: "Error saving score." });
     }
 });
 
-
-// Leaderboard Submission API
-app.post('/api/leaderboard/submit', async (req, res) => {
-    const { username, score, difficulty } = req.body;
-
-    // Server-side Validation
-    if (!username || typeof score !== 'number' || score <= 0 || username.trim().length < 3) {
-        return res.status(400).json({ success: false, message: "Invalid data: Username must be 3+ chars and score > 0." });
-    }
-
-    try {
-        const client = await pool.connect();
-        const query = `
-            INSERT INTO leaderboard(username, score, difficulty)
-            VALUES($1, $2, $3);
-        `;
-        const values = [username.trim().substring(0, 25), score, difficulty];
-        await client.query(query, values);
-        client.release();
-
-        res.status(201).json({ success: true, message: "Score saved successfully." });
-
-    } catch (err) {
-        console.error("❌ Score submission error:", err.message);
-        res.status(500).json({ success: false, message: "Failed to save score due to server error." });
-    }
-});
-
-
-// Leaderboard Retrieval API
+/**
+ * GET /api/leaderboard/top
+ * Retrieves the top 10 scores.
+ */
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
-        const client = await pool.connect();
-        const query = `
-            SELECT username, score, difficulty
-            FROM leaderboard
-            ORDER BY score DESC, created_at ASC
-            LIMIT 10;
-        `;
-        const result = await client.query(query);
-        client.release();
-
+        const result = await pool.query(
+            'SELECT username, score, difficulty FROM leaderboard ORDER BY score DESC, played_at ASC LIMIT 10'
+        );
         res.json(result.rows);
-
-    } catch (err) {
-        console.error("❌ Leaderboard retrieval error:", err.message);
-        res.status(500).json({ success: false, message: "Failed to retrieve leaderboard." });
+    } catch (error) {
+        console.error("Leaderboard fetch error:", error.message);
+        res.status(500).json({ success: false, message: "Error fetching leaderboard." });
     }
 });
 
 
-// ==========================================
-// 6. START SERVER
-// ==========================================
+// --- SERVER START ---
 async function startServer() {
-    // Check for necessary keys
-    if (!process.env.DATABASE_URL) {
-        console.error("🛑 CRITICAL: DATABASE_URL is missing. Check Render settings.");
-        throw new Error("Missing DATABASE_URL");
-    }
-
-    // Confirmation that Firebase client keys are loaded (even if not used here)
-    console.log(`🔑 Firebase Project ID Loaded: ${process.env.FIREBASE_PROJECT_ID ? 'Yes' : 'No'}`);
-    
     try {
-        await initializeDatabase();
-        app.listen(port, () => {
-            console.log(`🚀 Server running on port ${port}`);
+        await initDatabase();
+        app.listen(PORT, () => {
+            console.log(`🚀 Server running on port ${PORT}`);
         });
     } catch (error) {
-        console.error("🛑 Server failed to start due to Database error. Check DATABASE_URL and permissions.");
+        console.error("CRITICAL: Failed to start server due to DB or setup error.", error);
+        process.exit(1); // Exit with status 1 on critical failure
     }
 }
 
