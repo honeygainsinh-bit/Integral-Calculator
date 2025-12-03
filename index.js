@@ -34,6 +34,7 @@ const db = new sqlite3.Database('./math_game.db', (err) => {
 });
 
 // --- Gemini AI Setup ---
+// ប្រើ Environment Variable ឈ្មោះ GEMINI_API_KEY
 if (!process.env.GEMINI_API_KEY) {
     console.warn("⚠️ WARNING: GEMINI_API_KEY is not set. AI functionality will be disabled.");
 }
@@ -119,7 +120,7 @@ app.get('/api/leaderboard/top', (req, res) => {
         
         const leaderboard = rows.map(row => ({
             username: row.username,
-            score: row.total_score // ប្រើពិន្ទុសរុប
+            score: row.total_score 
         }));
         
         res.json(leaderboard);
