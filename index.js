@@ -2,8 +2,7 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import cors from 'cors';
 import sqlite3 from 'sqlite3';
-// 💥 មុខងារ AI ត្រូវបានដកចេញ ដើម្បីដោះស្រាយបញ្ហា Build Failed
-// import { GoogleGenAI } from '@google/genai'; 
+import { GoogleGenAI } from '@google/genai'; 
 
 // --- ការកំណត់រចនាសម្ព័ន្ធមូលដ្ឋាន ---
 const app = express();
@@ -34,18 +33,45 @@ const db = new sqlite3.Database('./math_game.db', (err) => {
     }
 });
 
+// --- Gemini AI Setup ---
+if (!process.env.GEMINI_API_KEY) {
+    console.warn("⚠️ WARNING: GEMINI_API_KEY is not set. AI functionality will be disabled.");
+}
+const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI(process.env.GEMINI_API_KEY) : null;
+const model = "gemini-2.5-flash"; 
+
 // ===========================================
 // --- Endpoints សម្រាប់ API ---
 // ===========================================
 
-// --- 1. Endpoint សម្រាប់បង្កើតសំណួរគណិតវិទ្យា (ជំនួសដោយ Hardcoded Response) ---
-// 💥 Endpoint នេះត្រូវបានកែប្រែដើម្បីឆ្លើយតបថា AI ត្រូវបានបិទ
-app.post('/api/generate-question', (req, res) => {
-    // ឆ្លើយតបទៅ Client ថា AI ត្រូវបានបិទបណ្តោះអាសន្ន
-    return res.status(503).json({ 
-        success: false, 
-        message: "AI question generation is temporarily disabled due to server dependency issues." 
-    });
+// --- 1. Endpoint សម្រាប់បង្កើតសំណួរគណិតវិទ្យា (AI) ---
+app.post('/api/generate-question', async (req, res) => {
+    if (!ai) {
+        return res.status(503).json({ success: false, message: "AI service unavailable. GEMINI_API_KEY not set on server." });
+    }
+
+    const { difficulty, type } = req.body; 
+    
+    const prompt = `Generate a single ${type} math question suitable for ${difficulty} level. The question must be in Cambodian language (Khmer). The response MUST be a pure JSON object in this format: { "question": "The question text here in Khmer.", "answer": "The correct answer as a number or simple text." }`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: model,
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+            }
+        });
+
+        const jsonText = response.text.trim();
+        const data = JSON.parse(jsonText);
+        
+        res.json({ success: true, question: data.question, answer: data.answer });
+
+    } catch (error) {
+        console.error("❌ Gemini API Error:", error);
+        res.status(500).json({ success: false, message: "Failed to generate question from AI.", details: error.message });
+    }
 });
 
 // --- 2. Endpoint សម្រាប់រក្សាទុកពិន្ទុថ្មី ---
