@@ -83,8 +83,8 @@ async function initializeDatabase() {
 // ==========================================
 // 3. RATE LIMITER (General)
 // ==========================================
-// Limit each IP to 10 requests per 8 hours
-const limiter = rateLimit({
+// 💡 កែតម្រូវ៖ បង្កើត Limiter សម្រាប់តែលំហាត់ធម្មតា (General Rate Limiter)
+const generalLimiter = rateLimit({
     windowMs: 8 * 60 * 60 * 1000, 
     max: 10, 
     message: { 
@@ -102,6 +102,18 @@ const limiter = rateLimit({
         return false;
     }
 });
+
+// 💡 NEW: Middleware ដើម្បីអនុវត្ត Limiter លុះត្រាតែវាមិនមែនជា Daily Challenge
+const conditionalLimiter = (req, res, next) => {
+    // Check req.body.difficulty which is available after app.use(express.json())
+    if (req.body && req.body.difficulty === 'Daily Challenge') {
+        console.log(`✅ Daily Challenge detected: Skipping general 10/8h limit for IP ${req.ip}`);
+        next(); 
+    } else {
+        // Apply the general 10/8h limit for all other problems
+        generalLimiter(req, res, next);
+    }
+};
 
 // ==========================================
 // 4. STATIC FILES & ONLINE CHECK
@@ -131,8 +143,8 @@ app.get('/stats', (req, res) => {
     });
 });
 
-// Generate Problem (Daily Challenge Limit Check Included)
-app.post('/api/generate-problem', limiter, async (req, res) => {
+// Generate Problem (Uses Conditional Limiter)
+app.post('/api/generate-problem', conditionalLimiter, async (req, res) => {
     const clientIP = req.ip;
     try {
         const { prompt, difficulty } = req.body; 
@@ -142,10 +154,8 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
         if (difficulty === 'Daily Challenge') {
             const client = await pool.connect();
             try {
-                // 💡 កែតម្រូវសំខាន់: ប្រើ Fixed time (Start of UTC day) ជំនួស 24h rolling window
                 const startOfTodayUTC = getStartOfTodayUTC(); 
                 
-                // Check if this IP has already submitted a score since the start of today UTC
                 const checkQuery = `
                     SELECT created_at FROM leaderboard
                     WHERE ip_address = $1 
@@ -208,7 +218,6 @@ app.post('/api/leaderboard/submit', async (req, res) => {
         
         // 1. CHECK DAILY CHALLENGE LIMIT (AS FALLBACK - Global Reset)
         if (difficulty === 'Daily Challenge') {
-            // 💡 កែតម្រូវសំខាន់: ប្រើ Fixed time (Start of UTC day)
             const startOfTodayUTC = getStartOfTodayUTC();
             
             const checkQuery = `
