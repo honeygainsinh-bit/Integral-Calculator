@@ -1,305 +1,147 @@
-// index.js (Server Side)
-
-import 'dotenv/config'; 
 import express from 'express';
+import bodyParser from 'body-parser';
 import cors from 'cors';
-import path from 'path';
-import { GoogleGenerativeAI } from '@google/genai';
-import rateLimit from 'express-rate-limit';
-import { Pool } from 'pg'; 
-import { fileURLToPath } from 'url'; 
+import sqlite3 from 'sqlite3';
+// ត្រូវប្រាកដថា package នេះត្រូវបានដំឡើងត្រឹមត្រូវក្នុង package.json
+import { GoogleGenAI } from '@google/genai'; 
 
-// ES Module equivalent of __dirname
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
+// --- ការកំណត់រចនាសម្ព័ន្ធមូលដ្ឋាន ---
 const app = express();
-const PORT = process.env.PORT || 5000; 
+// ប្រើ Port ពី Environment Variable (សម្រាប់ Render) ឬ 3000
+const PORT = process.env.PORT || 3000; 
 
-// ==========================================
-// 1. SETUP & CONFIG
-// ==========================================
-// CRITICAL for getting correct req.ip on Render/Proxy servers
-app.set('trust proxy', 1); 
+// Middleware
 app.use(cors());
-app.use(express.json());
+app.use(bodyParser.json());
 
-// Initialize AI and Model
-const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const MODEL_NAME = "gemini-2.5-flash"; 
-
-// Tracking Variables
-let totalPlays = 0;           
-const uniqueVisitors = new Set();
-
-// Helper function to calculate the start of the current day (00:00:00 UTC)
-function getStartOfTodayUTC() {
-    const today = new Date();
-    // Set time to midnight UTC (00:00:00.000)
-    today.setUTCHours(0, 0, 0, 0); 
-    return today;
-}
-
-// Middleware: Log Request
-app.use((req, res, next) => {
-    const ip = req.ip;
-    const time = new Date().toLocaleTimeString('km-KH');
-    console.log(`[${time}] 📡 IP: ${ip} | Path: ${req.path}`);
-    next();
-});
-
-// ==========================================
-// 2. DATABASE CONFIGURATION (PostgreSQL)
-// ==========================================
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: {
-        rejectUnauthorized: false 
-    }
-});
-
-async function initializeDatabase() {
-    try {
-        const client = await pool.connect();
-        const query = `
-            CREATE TABLE IF NOT EXISTS leaderboard (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(25) NOT NULL,
-                score INTEGER NOT NULL,
-                difficulty VARCHAR(15) NOT NULL,
-                ip_address VARCHAR(45), 
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );
-        `;
-        await client.query(query);
-        console.log("✅ Database initialized: 'leaderboard' table ready. (IP column included)");
-        client.release();
-    } catch (err) {
-        console.error("❌ Database initialization error:", err.message);
-        throw err;
-    }
-}
-
-// ==========================================
-// 3. RATE LIMITER (General)
-// ==========================================
-// 💡 កែតម្រូវ៖ បង្កើត Limiter សម្រាប់តែលំហាត់ធម្មតា (General Rate Limiter)
-const generalLimiter = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, 
-    max: 10, 
-    message: { 
-        error: "Rate limit exceeded", 
-        message: "⚠️ អ្នកបានប្រើប្រាស់អស់ចំនួនកំណត់ហើយ (10ដង ក្នុង 8ម៉ោង)។ សូមសម្រាកសិន!" 
-    },
-    keyGenerator: (req) => req.ip,
-    
-    skip: (req) => {
-        const myIp = process.env.OWNER_IP; 
-        if (req.ip === myIp) {
-            console.log(`👑 Owner Access Detected: ${req.ip} (Unlimited)`);
-            return true;
-        }
-        return false;
-    }
-});
-
-// 💡 NEW: Middleware ដើម្បីអនុវត្ត Limiter លុះត្រាតែវាមិនមែនជា Daily Challenge
-const conditionalLimiter = (req, res, next) => {
-    // Check req.body.difficulty which is available after app.use(express.json())
-    if (req.body && req.body.difficulty === 'Daily Challenge') {
-        console.log(`✅ Daily Challenge detected: Skipping general 10/8h limit for IP ${req.ip}`);
-        next(); 
+// --- Database (SQLite) Setup ---
+// បង្កើតឬភ្ជាប់ទៅ database
+const db = new sqlite3.Database('./math_game.db', (err) => {
+    if (err) {
+        console.error('❌ Error opening database:', err.message);
     } else {
-        // Apply the general 10/8h limit for all other problems
-        generalLimiter(req, res, next);
+        console.log('✅ Connected to the SQLite database.');
+        // បង្កើតតារាង scores ប្រសិនបើវាមិនទាន់មាន
+        db.run(`CREATE TABLE IF NOT EXISTS scores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            score INTEGER NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`, (err) => {
+            if (err) {
+                console.error("❌ Error creating table:", err.message);
+            } else {
+                console.log("✅ Scores table ready.");
+            }
+        });
     }
-};
-
-// ==========================================
-// 4. STATIC FILES & ONLINE CHECK
-// ==========================================
-app.use(express.static(path.join(__dirname, 'public'))); 
-
-app.get('/', (req, res) => {
-    res.status(200).send(`
-        <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
-            <h1 style="color: #22c55e;">Server is Online 🟢</h1>
-            <p>Backend API is running smoothly on port ${PORT}.</p>
-        </div>
-    `);
 });
 
-// ==========================================
-// 5. API ROUTES
-// ==========================================
+// --- Gemini AI Setup ---
+// ប្រើ Environment Variable ឈ្មោះ GEMINI_API_KEY
+if (!process.env.GEMINI_API_KEY) {
+    console.warn("⚠️ WARNING: GEMINI_API_KEY is not set. AI functionality will not work.");
+}
+const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI(process.env.GEMINI_API_KEY) : null;
+const model = "gemini-2.5-flash"; // ប្រើ model សម្រាប់ដំណើរការលឿន
 
-// Check Stats
-app.get('/stats', (req, res) => {
-    res.json({
-        status: "Online",
-        total_plays: totalPlays,
-        unique_players: uniqueVisitors.size,
-        owner_ip_configured: process.env.OWNER_IP ? "Yes" : "No"
+// ===========================================
+// --- Endpoints សម្រាប់ API ---
+// ===========================================
+
+// --- 1. Endpoint សម្រាប់បង្កើតសំណួរគណិតវិទ្យា (AI) ---
+app.post('/api/generate-question', async (req, res) => {
+    if (!ai) {
+        // បើគ្មាន Key គឺមិនអាចដំណើរការ AI បានទេ
+        return res.status(503).json({ success: false, message: "AI service unavailable. GEMINI_API_KEY not set on server." });
+    }
+
+    const { difficulty, type } = req.body; 
+    
+    // Prompt ដើម្បីបង្ខំឱ្យ AI បញ្ចេញ JSON ខ្មែរ
+    const prompt = `Generate a single ${type} math question suitable for ${difficulty} level, specifically designed for a quiz game. 
+    The question must be in Cambodian language (Khmer).
+    The response MUST be a pure JSON object in this format: 
+    { "question": "The question text here in Khmer.", "answer": "The correct answer as a number or simple text." }
+    Do not include any extra text, comments, or formatting outside the JSON object.`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: model,
+            contents: prompt,
+            config: {
+                // ប្រើ responseMimeType ដើម្បីបង្ខំឱ្យ AI បញ្ចេញ JSON
+                responseMimeType: "application/json",
+            }
+        });
+
+        const jsonText = response.text.trim();
+        const data = JSON.parse(jsonText);
+        
+        res.json({ success: true, question: data.question, answer: data.answer });
+
+    } catch (error) {
+        console.error("❌ Gemini API Error:", error);
+        res.status(500).json({ success: false, message: "Failed to generate question from AI.", details: error.message });
+    }
+});
+
+// --- 2. Endpoint សម្រាប់រក្សាទុកពិន្ទុថ្មី ---
+app.post('/api/scores', (req, res) => {
+    const { username, score } = req.body;
+
+    if (!username || typeof score !== 'number' || score < 0) {
+        return res.status(400).json({ success: false, message: "Invalid username or score." });
+    }
+    
+    const safeUsername = username.trim(); 
+
+    const sql = `INSERT INTO scores (username, score) VALUES (?, ?)`;
+    db.run(sql, [safeUsername, score], function(err) {
+        if (err) {
+            console.error("❌ Database Error:", err.message);
+            return res.status(500).json({ success: false, message: "Failed to save score." });
+        }
+        console.log(`✅ A score of ${score} was added for user: ${safeUsername}`);
+        res.json({ success: true, message: "Score saved successfully.", id: this.lastID });
     });
 });
 
-// Generate Problem (Uses Conditional Limiter)
-app.post('/api/generate-problem', conditionalLimiter, async (req, res) => {
-    const clientIP = req.ip;
-    try {
-        const { prompt, difficulty } = req.body; 
-        if (!prompt) return res.status(400).json({ error: "Prompt is required" });
+// --- 3. Endpoint សម្រាប់ទាញយក Leaderboard (សរុបពិន្ទុតាមឈ្មោះ) ---
+app.get('/api/leaderboard/top', (req, res) => {
+    // SQL Query ថ្មីដែលប្រើ SUM() និង GROUP BY ដើម្បីសរុបពិន្ទុឈ្មោះដូចគ្នា
+    const sql = `
+        SELECT 
+            username, 
+            SUM(score) as total_score 
+        FROM 
+            scores 
+        GROUP BY 
+            username 
+        ORDER BY 
+            total_score DESC 
+        LIMIT 10
+    `;
 
-        // 🛑 DAILY CHALLENGE GENERATION LIMIT (1 time / day / IP - GLOBAL RESET)
-        if (difficulty === 'Daily Challenge') {
-            const client = await pool.connect();
-            try {
-                const startOfTodayUTC = getStartOfTodayUTC(); 
-                
-                const checkQuery = `
-                    SELECT created_at FROM leaderboard
-                    WHERE ip_address = $1 
-                    AND difficulty = 'Daily Challenge'
-                    AND created_at >= $2;
-                `;
-                const checkResult = await client.query(checkQuery, [clientIP, startOfTodayUTC]);
-
-                if (checkResult.rows.length > 0) {
-                    // Block generation
-                    console.log(`🛑 Daily Challenge Generation Blocked: IP ${clientIP} already played today (UTC).`);
-                    return res.status(403).json({ 
-                        error: "Daily Challenge Limit Exceeded", 
-                        message: "🛑 លំហាត់ប្រចាំថ្ងៃនេះ អ្នកបានចុចលេងម្តងរួចហើយ សម្រាប់ថ្ងៃនេះ។ នឹង Reset នៅពាក់កណ្តាលអធ្រាត្រ UTC។"
-                    });
-                }
-            } finally {
-                client.release();
-            }
+    db.all(sql, [], (err, rows) => {
+        if (err) {
+            console.error("❌ Database Error:", err.message);
+            return res.status(500).json({ success: false, message: "Database query failed." });
         }
-        // 🏁 END DAILY CHALLENGE CHECK 
-
-        totalPlays++;
-        uniqueVisitors.add(req.ip);
         
-        const model = ai.getGenerativeModel({ model: MODEL_NAME });
-
-        const result = await model.generateContent({
-            contents: prompt,
-            config: {
-                systemInstruction: "You are a professional Cambodian high school math problem generator. You strictly follow all formatting rules including the [PROBLEM] and [ANSWER] tags, and use LaTeX for math formulas. Ensure the options ក, ខ, គ, ឃ are mathematically distinct and the final problem is solvable.",
-                temperature: 0.7,
-                maxOutputTokens: 2048
-            }
-        });
+        // ប្រើ total_score ដែលបាន SUM សម្រាប់ Leaderboard
+        const leaderboard = rows.map(row => ({
+            username: row.username,
+            // ប្តូរឈ្មោះពី total_score ត្រឡប់ទៅ score វិញសម្រាប់ Client 
+            score: row.total_score 
+        }));
         
-        const text = result.text;
-
-        res.json({ text });
-
-    } catch (error) {
-        console.error("❌ Gemini API Error:", error.message);
-        res.status(500).json({ error: "Internal Server Error", details: error.message });
-    }
+        res.json(leaderboard);
+    });
 });
 
 
-// Leaderboard Submission API (Kept the Global Reset check for integrity/fallback)
-app.post('/api/leaderboard/submit', async (req, res) => {
-    const { username, score, difficulty } = req.body;
-    const clientIP = req.ip; 
-
-    // Server-side Validation
-    if (!username || typeof score !== 'number' || score <= 0 || username.trim().length < 3) {
-        return res.status(400).json({ success: false, message: "Invalid data: Username must be 3+ chars and score > 0." });
-    }
-
-    try {
-        const client = await pool.connect();
-        
-        // 1. CHECK DAILY CHALLENGE LIMIT (AS FALLBACK - Global Reset)
-        if (difficulty === 'Daily Challenge') {
-            const startOfTodayUTC = getStartOfTodayUTC();
-            
-            const checkQuery = `
-                SELECT created_at FROM leaderboard
-                WHERE ip_address = $1 
-                AND difficulty = 'Daily Challenge'
-                AND created_at >= $2;
-            `;
-            const checkResult = await client.query(checkQuery, [clientIP, startOfTodayUTC]);
-
-            if (checkResult.rows.length > 0) {
-                client.release();
-                console.log(`🛑 Daily Challenge Submission Blocked (Fallback - Global): IP ${clientIP} already submitted today (UTC).`);
-                return res.status(403).json({ 
-                    success: false, 
-                    message: "អ្នកបានរក្សាទុកពិន្ទុសម្រាប់ Daily Challenge ម្តងរួចហើយ សម្រាប់ថ្ងៃនេះ។" 
-                });
-            }
-        }
-
-        // 2. INSERT SCORE (including IP address)
-        const insertQuery = `
-            INSERT INTO leaderboard(username, score, difficulty, ip_address)
-            VALUES($1, $2, $3, $4);
-        `;
-        const values = [username.trim().substring(0, 25), score, difficulty, clientIP];
-        await client.query(insertQuery, values);
-        
-        client.release();
-
-        res.status(201).json({ success: true, message: "Score saved successfully." });
-
-    } catch (err) {
-        console.error("❌ Score submission error:", err.message);
-        res.status(500).json({ success: false, message: "Failed to save score due to server error." });
-    }
+// --- Start Server ---
+app.listen(PORT, () => {
+    console.log(`🚀 Server is running on port ${PORT}`);
 });
-
-
-// Leaderboard Retrieval API (No change)
-app.get('/api/leaderboard/top', async (req, res) => {
-    try {
-        const client = await pool.connect();
-        const query = `
-            SELECT username, score, difficulty
-            FROM leaderboard;
-        `;
-        const result = await client.query(query);
-        client.release();
-
-        res.json(result.rows);
-
-    } catch (err) {
-        console.error("❌ Leaderboard retrieval error:", err.message);
-        res.status(500).json({ success: false, message: "Failed to retrieve leaderboard." });
-    }
-});
-
-
-// ==========================================
-// 6. START SERVER
-// ==========================================
-async function startServer() {
-    // Check for necessary keys
-    if (!process.env.DATABASE_URL) {
-        console.error("🛑 CRITICAL: DATABASE_URL is missing. Check Render settings.");
-        return process.exit(1); 
-    }
-    if (!process.env.GEMINI_API_KEY) {
-        console.error("🛑 WARNING: GEMINI_API_KEY is missing. Problem generation will fail.");
-    }
-    
-    try {
-        await initializeDatabase();
-        app.listen(PORT, () => {
-            console.log(`🚀 Server running on port ${PORT}`);
-            console.log(`⏰ Daily Challenge Reset Time: Midnight UTC (00:00:00)`);
-        });
-    } catch (error) {
-        console.error("🛑 Server failed to start due to Database initialization error. Check DATABASE_URL and permissions.");
-        process.exit(1);
-    }
-}
-
-startServer();
