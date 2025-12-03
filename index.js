@@ -1,10 +1,10 @@
-require('dotenv').config();
+Require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
-const { Pool } = require('pg'); // PostgreSQL Client
+const { Pool } = require('pg');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -49,11 +49,15 @@ async function initializeDatabase() {
                 username VARCHAR(25) NOT NULL,
                 score INTEGER NOT NULL,
                 difficulty VARCHAR(15) NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                
+                -- NEW FIELDS FOR DAILY/CHALLENGE TRACKING
+                is_daily_challenge BOOLEAN DEFAULT FALSE, 
+                problem_seed VARCHAR(50) 
             );
         `;
         await client.query(query);
-        console.log("✅ Database initialized: 'leaderboard' table ready.");
+        console.log("✅ Database initialized: 'leaderboard' table ready with new fields.");
         client.release();
     } catch (err) {
         console.error("❌ Database initialization error:", err.message);
@@ -112,21 +116,31 @@ app.get('/stats', (req, res) => {
     });
 });
 
-// Generate Problem (Existing Gemini Logic)
+/**
+ * Generate Problem (Gemini Logic) - UPDATED TO ACCEPT SEED
+ * This supports both Challenge Mode (Seed based) and Daily Challenge.
+ */
 app.post('/api/generate-problem', limiter, async (req, res) => {
-    // ... (Gemini generation code remains the same) ...
     try {
-        const { prompt } = req.body;
+        // Now extracting both 'prompt' and optional 'seed'
+        const { prompt, seed } = req.body; 
         if (!prompt) return res.status(400).json({ error: "Prompt is required" });
 
         totalPlays++;
         uniqueVisitors.add(req.ip);
 
-        // Uses the hidden GEMINI_API_KEY from environment variables
+        // Append the seed to the prompt to enforce deterministic generation if provided
+        let finalPrompt = prompt;
+        if (seed) {
+            // This rule instructs the model to use the seed for deterministic/reproducible output
+            finalPrompt += ` CRITICAL RULE: Use this deterministic seed for generation: ${seed}.`;
+            console.log(`[Seed Mode] Seed used: ${seed}`);
+        }
+
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
 
-        const result = await model.generateContent(prompt);
+        const result = await model.generateContent(finalPrompt);
         const response = await result.response;
         const text = response.text();
 
@@ -139,9 +153,12 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
 });
 
 
-// Leaderboard Submission API
+/**
+ * Leaderboard Submission API - UPDATED TO INCLUDE NEW FIELDS
+ */
 app.post('/api/leaderboard/submit', async (req, res) => {
-    const { username, score, difficulty } = req.body;
+    // Extract new optional fields: is_daily_challenge, problem_seed
+    const { username, score, difficulty, is_daily_challenge, problem_seed } = req.body; 
 
     // Server-side Validation
     if (!username || typeof score !== 'number' || score <= 0 || username.trim().length < 3) {
@@ -151,10 +168,16 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     try {
         const client = await pool.connect();
         const query = `
-            INSERT INTO leaderboard(username, score, difficulty)
-            VALUES($1, $2, $3);
+            INSERT INTO leaderboard(username, score, difficulty, is_daily_challenge, problem_seed)
+            VALUES($1, $2, $3, $4, $5);
         `;
-        const values = [username.trim().substring(0, 25), score, difficulty];
+        const values = [
+            username.trim().substring(0, 25), 
+            score, 
+            difficulty, 
+            is_daily_challenge || false, // Default to false if not provided
+            problem_seed || null
+        ];
         await client.query(query, values);
         client.release();
 
@@ -167,24 +190,60 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 });
 
 
-// Leaderboard Retrieval API
+/**
+ * Leaderboard Retrieval API (Overall Top 10) - UNCHANGED
+ */
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
         const query = `
-            SELECT username, score, difficulty
+            SELECT username, SUM(score) as total_score, COUNT(*) as games_played
             FROM leaderboard
-            ORDER BY score DESC, created_at ASC
+            GROUP BY username
+            ORDER BY total_score DESC
             LIMIT 10;
         `;
         const result = await client.query(query);
         client.release();
 
-        res.json(result.rows);
+        // Map the result keys to match the frontend expectation (if needed, but usually sum is better for ranked overall)
+        res.json(result.rows.map(row => ({
+            username: row.username,
+            score: parseInt(row.total_score),
+            games_played: parseInt(row.games_played)
+        })));
 
     } catch (err) {
         console.error("❌ Leaderboard retrieval error:", err.message);
         res.status(500).json({ success: false, message: "Failed to retrieve leaderboard." });
+    }
+});
+
+/**
+ * NEW API: Daily Challenge Leaderboard Retrieval
+ */
+app.get('/api/leaderboard/daily-top', async (req, res) => {
+    try {
+        const client = await pool.connect();
+        // Query to get the top score for TODAY's Daily Challenge (assuming seed is the date YYYY-MM-DD)
+        const todaySeed = new Date().toISOString().slice(0, 10); // Get YYYY-MM-DD
+        
+        const query = `
+            SELECT username, score
+            FROM leaderboard
+            WHERE is_daily_challenge = TRUE
+              AND problem_seed = $1
+            ORDER BY score DESC, created_at ASC
+            LIMIT 10;
+        `;
+        const result = await client.query(query, [todaySeed]);
+        client.release();
+
+        res.json(result.rows);
+
+    } catch (err) {
+        console.error("❌ Daily Leaderboard retrieval error:", err.message);
+        res.status(500).json({ success: false, message: "Failed to retrieve daily leaderboard." });
     }
 });
 
@@ -193,14 +252,12 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // 6. START SERVER
 // ==========================================
 async function startServer() {
-    // Check for necessary keys
     if (!process.env.DATABASE_URL) {
         console.error("🛑 CRITICAL: DATABASE_URL is missing. Check Render settings.");
         throw new Error("Missing DATABASE_URL");
     }
 
-    // Confirmation that Firebase client keys are loaded (even if not used here)
-    console.log(`🔑 Firebase Project ID Loaded: ${process.env.FIREBASE_PROJECT_ID ? 'Yes' : 'No'}`);
+    console.log(`🔑 Gemini API Key Loaded: ${process.env.GEMINI_API_KEY ? 'Yes' : 'No'}`);
     
     try {
         await initializeDatabase();
