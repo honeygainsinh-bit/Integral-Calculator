@@ -1,10 +1,11 @@
-Require('dotenv').config();
+// **FIXED: Changed Require to require (lowercase 'r') to fix deployment error**
+require('dotenv').config(); 
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
-const { Pool } = require('pg');
+const { Pool } = require('pg'); // PostgreSQL Client
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -51,7 +52,7 @@ async function initializeDatabase() {
                 difficulty VARCHAR(15) NOT NULL,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 
-                -- NEW FIELDS FOR DAILY/CHALLENGE TRACKING
+                -- NEW FIELDS FOR DAILY/CHALLENGE TRACKING (Supporting features 1 & 3)
                 is_daily_challenge BOOLEAN DEFAULT FALSE, 
                 problem_seed VARCHAR(50) 
             );
@@ -117,8 +118,8 @@ app.get('/stats', (req, res) => {
 });
 
 /**
- * Generate Problem (Gemini Logic) - UPDATED TO ACCEPT SEED
- * This supports both Challenge Mode (Seed based) and Daily Challenge.
+ * Generate Problem (Gemini Logic) - UPDATED TO ACCEPT SEED (Feature 3)
+ * The client side can send a seed for deterministic daily/challenge generation.
  */
 app.post('/api/generate-problem', limiter, async (req, res) => {
     try {
@@ -132,7 +133,6 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
         // Append the seed to the prompt to enforce deterministic generation if provided
         let finalPrompt = prompt;
         if (seed) {
-            // This rule instructs the model to use the seed for deterministic/reproducible output
             finalPrompt += ` CRITICAL RULE: Use this deterministic seed for generation: ${seed}.`;
             console.log(`[Seed Mode] Seed used: ${seed}`);
         }
@@ -154,7 +154,7 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
 
 
 /**
- * Leaderboard Submission API - UPDATED TO INCLUDE NEW FIELDS
+ * Leaderboard Submission API - UPDATED TO INCLUDE NEW FIELDS (Features 1 & 3)
  */
 app.post('/api/leaderboard/submit', async (req, res) => {
     // Extract new optional fields: is_daily_challenge, problem_seed
@@ -191,11 +191,12 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 
 
 /**
- * Leaderboard Retrieval API (Overall Top 10) - UNCHANGED
+ * Leaderboard Retrieval API (Overall Top 10)
  */
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
+        // Sum score by username to show total performance
         const query = `
             SELECT username, SUM(score) as total_score, COUNT(*) as games_played
             FROM leaderboard
@@ -206,7 +207,6 @@ app.get('/api/leaderboard/top', async (req, res) => {
         const result = await client.query(query);
         client.release();
 
-        // Map the result keys to match the frontend expectation (if needed, but usually sum is better for ranked overall)
         res.json(result.rows.map(row => ({
             username: row.username,
             score: parseInt(row.total_score),
@@ -220,14 +220,15 @@ app.get('/api/leaderboard/top', async (req, res) => {
 });
 
 /**
- * NEW API: Daily Challenge Leaderboard Retrieval
+ * NEW API: Daily Challenge Leaderboard Retrieval (Feature 3)
  */
 app.get('/api/leaderboard/daily-top', async (req, res) => {
     try {
         const client = await pool.connect();
-        // Query to get the top score for TODAY's Daily Challenge (assuming seed is the date YYYY-MM-DD)
-        const todaySeed = new Date().toISOString().slice(0, 10); // Get YYYY-MM-DD
+        // Get today's seed (date)
+        const todaySeed = new Date().toISOString().slice(0, 10); 
         
+        // Find the top scores submitted for today's daily challenge
         const query = `
             SELECT username, score
             FROM leaderboard
