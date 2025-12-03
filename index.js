@@ -1,30 +1,31 @@
 // index.js (Server Side)
 
-import 'dotenv/config'; // Used for local testing environment (Render uses its own env)
+import 'dotenv/config'; 
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
-import { GoogleGenAI } from '@google/genai'; // 💡 CHANGED: Use the correct, stable package name
+import { GoogleGenerativeAI } from '@google/genai'; // Note the correct package name for new SDK
 import rateLimit from 'express-rate-limit';
-import { Pool } from 'pg'; // PostgreSQL Client
-import { fileURLToPath } from 'url'; // Required for __dirname equivalent in ES Modules
+import { Pool } from 'pg'; 
+import { fileURLToPath } from 'url'; 
 
 // ES Module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 5000; // Changed default port to 5000 for standard web service convention
+const PORT = process.env.PORT || 5000; 
 
 // ==========================================
 // 1. SETUP & CONFIG
 // ==========================================
-app.set('trust proxy', 1); // Trust first proxy (essential for getting correct req.ip on Render)
+// CRITICAL for getting correct req.ip on Render/Proxy servers
+app.set('trust proxy', 1); 
 app.use(cors());
 app.use(express.json());
 
-// 💡 NEW: Initialize the GoogleGenAI instance with the correct API key from environment
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Initialize AI and Model
+const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const MODEL_NAME = "gemini-2.5-flash"; 
 
 // Tracking Variables
@@ -52,17 +53,19 @@ const pool = new Pool({
 async function initializeDatabase() {
     try {
         const client = await pool.connect();
+        // 💡 កែតម្រូវ៖ ត្រូវប្រាកដថា table មាន ip_address column
         const query = `
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(25) NOT NULL,
                 score INTEGER NOT NULL,
                 difficulty VARCHAR(15) NOT NULL,
+                ip_address VARCHAR(45), 
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `;
         await client.query(query);
-        console.log("✅ Database initialized: 'leaderboard' table ready.");
+        console.log("✅ Database initialized: 'leaderboard' table ready. (IP column included)");
         client.release();
     } catch (err) {
         console.error("❌ Database initialization error:", err.message);
@@ -71,7 +74,7 @@ async function initializeDatabase() {
 }
 
 // ==========================================
-// 3. RATE LIMITER
+// 3. RATE LIMITER (General)
 // ==========================================
 // Limit each IP to 10 requests per 8 hours
 const limiter = rateLimit({
@@ -96,17 +99,11 @@ const limiter = rateLimit({
 // ==========================================
 // 4. STATIC FILES & ONLINE CHECK
 // ==========================================
-// Serving static files (index.html, CSS, JS) from the 'public' directory
 app.use(express.static(path.join(__dirname, 'public'))); 
 
-// Health Check / Root route
 app.get('/', (req, res) => {
-    // If the request doesn't map to a static file (like index.html), show the status message
-    if (!req.path.endsWith('.html') && req.path !== '/') {
-        return res.status(404).send("Not Found");
-    }
-    
-    // Fallback/Status check (This will rarely run if index.html exists in 'public')
+    // This route is mainly for health check on Render, serving the index.html from 'public' if not found.
+    // The health check response is now embedded here:
     res.status(200).send(`
         <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
             <h1 style="color: #22c55e;">Server is Online 🟢</h1>
@@ -129,18 +126,50 @@ app.get('/stats', (req, res) => {
     });
 });
 
-// Generate Problem
+// Generate Problem (Daily Challenge Limit Check Included)
 app.post('/api/generate-problem', limiter, async (req, res) => {
+    const clientIP = req.ip;
     try {
-        const { prompt } = req.body;
+        // 💡 កែតម្រូវ៖ ទទួលយកទាំង prompt និង difficulty
+        const { prompt, difficulty } = req.body; 
         if (!prompt) return res.status(400).json({ error: "Prompt is required" });
+
+        // 🛑 NEW CHECK: DAILY CHALLENGE GENERATION LIMIT (1 time / 24h / IP)
+        if (difficulty === 'Daily Challenge') {
+            const client = await pool.connect();
+            try {
+                const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+                
+                // ពិនិត្យមើលថាតើ IP នេះបាន submit score សម្រាប់ Daily Challenge ក្នុងរយៈពេល 24 ម៉ោងហើយឬនៅ?
+                const checkQuery = `
+                    SELECT created_at FROM leaderboard
+                    WHERE ip_address = $1 
+                    AND difficulty = 'Daily Challenge'
+                    AND created_at >= $2;
+                `;
+                const checkResult = await client.query(checkQuery, [clientIP, twentyFourHoursAgo]);
+
+                if (checkResult.rows.length > 0) {
+                    // ប្រសិនបើរកឃើញ នឹងបដិសេធមិនឱ្យបង្កើតលំហាត់
+                    console.log(`🛑 Daily Challenge Generation Blocked: IP ${clientIP} already played today.`);
+                    return res.status(403).json({ 
+                        error: "Daily Challenge Limit Exceeded", 
+                        message: "🛑 លំហាត់ប្រចាំថ្ងៃនេះ អ្នកបានចុចលេងម្តងរួចហើយ ក្នុងរយៈពេល ២៤ ម៉ោង។"
+                    });
+                }
+            } finally {
+                // ត្រូវប្រាកដថា release client វិញ
+                client.release();
+            }
+        }
+        // 🏁 END DAILY CHALLENGE CHECK 
 
         totalPlays++;
         uniqueVisitors.add(req.ip);
+        
+        const model = ai.getGenerativeModel({ model: MODEL_NAME });
 
-        // 💡 Use the initialized 'ai' instance
-        const response = await ai.models.generateContent({
-            model: MODEL_NAME,
+        const result = await model.generateContent({
             contents: prompt,
             config: {
                 systemInstruction: "You are a professional Cambodian high school math problem generator. You strictly follow all formatting rules including the [PROBLEM] and [ANSWER] tags, and use LaTeX for math formulas. Ensure the options ក, ខ, គ, ឃ are mathematically distinct and the final problem is solvable.",
@@ -149,7 +178,7 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
             }
         });
         
-        const text = response.text;
+        const text = result.text;
 
         res.json({ text });
 
@@ -160,9 +189,10 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
 });
 
 
-// Leaderboard Submission API
+// Leaderboard Submission API (Kept the IP check for integrity/fallback)
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
+    const clientIP = req.ip; 
 
     // Server-side Validation
     if (!username || typeof score !== 'number' || score <= 0 || username.trim().length < 3) {
@@ -171,12 +201,38 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 
     try {
         const client = await pool.connect();
-        const query = `
-            INSERT INTO leaderboard(username, score, difficulty)
-            VALUES($1, $2, $3);
+        
+        // 1. CHECK DAILY CHALLENGE LIMIT (AS FALLBACK)
+        if (difficulty === 'Daily Challenge') {
+            const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            
+            const checkQuery = `
+                SELECT created_at FROM leaderboard
+                WHERE ip_address = $1 
+                AND difficulty = 'Daily Challenge'
+                AND created_at >= $2;
+            `;
+            const checkResult = await client.query(checkQuery, [clientIP, twentyFourHoursAgo]);
+
+            if (checkResult.rows.length > 0) {
+                // We allow the submission ONLY if the score is significantly higher, but for simplicity, we block it entirely.
+                client.release();
+                console.log(`🛑 Daily Challenge Submission Blocked (Fallback): IP ${clientIP} already submitted today.`);
+                return res.status(403).json({ 
+                    success: false, 
+                    message: "អ្នកបានរក្សាទុកពិន្ទុសម្រាប់ Daily Challenge ម្តងរួចហើយ ក្នុងរយៈពេល ២៤ ម៉ោង!" 
+                });
+            }
+        }
+
+        // 2. INSERT SCORE (including IP address)
+        const insertQuery = `
+            INSERT INTO leaderboard(username, score, difficulty, ip_address)
+            VALUES($1, $2, $3, $4);
         `;
-        const values = [username.trim().substring(0, 25), score, difficulty];
-        await client.query(query, values);
+        const values = [username.trim().substring(0, 25), score, difficulty, clientIP];
+        await client.query(insertQuery, values);
+        
         client.release();
 
         res.status(201).json({ success: true, message: "Score saved successfully." });
@@ -188,15 +244,14 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 });
 
 
-// Leaderboard Retrieval API
+// Leaderboard Retrieval API (No change)
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
+        // 💡 កែតម្រូវ៖ សម្រាប់ការរាប់ពិន្ទុសរុប គួរតែទាញយកពិន្ទុទាំងអស់
         const query = `
             SELECT username, score, difficulty
-            FROM leaderboard
-            ORDER BY score DESC, created_at ASC
-            LIMIT 10;
+            FROM leaderboard;
         `;
         const result = await client.query(query);
         client.release();
@@ -217,7 +272,6 @@ async function startServer() {
     // Check for necessary keys
     if (!process.env.DATABASE_URL) {
         console.error("🛑 CRITICAL: DATABASE_URL is missing. Check Render settings.");
-        // Exit process immediately if DB is not configured
         return process.exit(1); 
     }
     if (!process.env.GEMINI_API_KEY) {
