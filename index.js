@@ -12,14 +12,12 @@ const port = process.env.PORT || 3000;
 // ==========================================
 // 1. SETUP & CONFIG
 // ==========================================
-// ⚠️ Trust proxy is critical for getting the correct IP in environments like Render
 app.set('trust proxy', 1); 
 app.use(cors());
 app.use(express.json());
 
 const MODEL_NAME = "gemini-2.5-flash"; 
 
-// Tracking Variables
 let totalPlays = 0;           
 const uniqueVisitors = new Set();
 
@@ -53,7 +51,6 @@ async function initializeDatabase() {
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `;
-        // Table to track IP usage for Daily Challenge (1/day)
         const queryLimits = `
             CREATE TABLE IF NOT EXISTS ip_play_limits (
                 ip_address VARCHAR(45) NOT NULL,
@@ -76,9 +73,8 @@ async function initializeDatabase() {
 // 3. RATE LIMITERS (Mixed Window)
 // ==========================================
 
-// 🎯 Limiter សម្រាប់លំហាត់ទូទៅ: ១០ ដង ក្នុង ៨ ម៉ោង (General Play Limit)
 const generalLimiter = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, // 8 hours
+    windowMs: 8 * 60 * 60 * 1000, // 8 hours (General Play Limit)
     max: 10, 
     message: { 
         error: "Rate limit exceeded", 
@@ -91,7 +87,6 @@ const generalLimiter = rateLimit({
             console.log(`👑 Owner Access Detected: ${req.ip} (Unlimited)`);
             return true;
         }
-        // Skip General Limiter if it's a Daily Challenge, handled by dailyLimiter
         if (req.body.is_daily_challenge) {
             return true; 
         }
@@ -99,24 +94,20 @@ const generalLimiter = rateLimit({
     }
 });
 
-// 📅 Limiter សម្រាប់ Daily Challenge: ១ ដង ក្នុងមួយ Seed/ថ្ងៃ (Database Check)
 async function dailyLimiter(req, res, next) {
     const { is_daily_challenge, problem_seed } = req.body;
     const ip = req.ip;
 
     if (!is_daily_challenge || !problem_seed) {
-        // If not a daily challenge, proceed to the next middleware (generalLimiter)
         return next();
     }
     
-    // Owner IP exception
     if (ip === process.env.OWNER_IP) {
         return next();
     }
 
     const client = await pool.connect();
     try {
-        // Check if this IP has already generated/attempted this specific daily seed
         const dailyCheckQuery = `
             SELECT COUNT(*) FROM ip_play_limits 
             WHERE ip_address = $1 AND daily_seed = $2;
@@ -130,7 +121,6 @@ async function dailyLimiter(req, res, next) {
             });
         }
         
-        // Register the attempt BEFORE generation (blocks immediate replays)
         const insertDailyAttempt = `
             INSERT INTO ip_play_limits (ip_address, daily_seed)
             VALUES ($1, $2);
@@ -152,8 +142,6 @@ async function dailyLimiter(req, res, next) {
 app.use(express.static(path.join(__dirname, 'public'))); 
 
 app.get('/', (req, res) => {
-    // Check if the request is for the root path, usually served by the static files.
-    // We keep this check for API debugging only.
     res.status(200).send(`
         <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
             <h1 style="color: #22c55e;">Server is Online 🟢</h1>
@@ -167,7 +155,6 @@ app.get('/', (req, res) => {
 // 5. API ROUTES
 // ==========================================
 
-// Check Stats
 app.get('/stats', (req, res) => {
     res.json({
         status: "Online",
@@ -179,9 +166,7 @@ app.get('/stats', (req, res) => {
     });
 });
 
-// Generate Problem (Applies Daily Check, then General 10/8h Limit)
 app.post('/api/generate-problem', dailyLimiter, generalLimiter, async (req, res) => {
-    // Requires: { prompt, is_daily_challenge, problem_seed }
     const { prompt } = req.body;
     
     try {
@@ -205,13 +190,9 @@ app.post('/api/generate-problem', dailyLimiter, generalLimiter, async (req, res)
     }
 });
 
-
-// Leaderboard Submission API (No limit check here, limits are enforced at generation)
 app.post('/api/leaderboard/submit', async (req, res) => {
-    // Requires: { username, score, difficulty, is_daily_challenge, problem_seed, ip_address, topic_name }
     const { username, score, difficulty } = req.body;
 
-    // Server-side Validation
     if (!username || typeof score !== 'number' || score <= 0 || username.trim().length < 3) {
         return res.status(400).json({ success: false, message: "Invalid data: Username must be 3+ chars and score > 0." });
     }
@@ -234,8 +215,6 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     }
 });
 
-
-// Leaderboard Retrieval API
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -258,7 +237,7 @@ app.get('/api/leaderboard/top', async (req, res) => {
 
 
 // ==========================================
-// 6. START SERVER
+// 6. START SERVER (FIXED: Added parentheses)
 // ==========================================
 async function startServer() {
     if (!process.env.DATABASE_URL) {
@@ -276,4 +255,5 @@ async function startServer() {
     }
 }
 
+// ⚠️ FIX: Function call is now correct!
 startServer();
