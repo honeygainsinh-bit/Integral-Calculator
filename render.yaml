@@ -1,14 +1,16 @@
 services:
-  # ឈ្មោះ Service របស់អ្នកគឺ Integral-Calculator
+  # ត្រូវដាក់គម្លាត 2 spaces ពីមុខ type
   - type: web
     name: Integral-Calculator
     runtime: node
-    # កំណត់ថាត្រូវដំឡើង apt buildpack
+    # ត្រូវដាក់គម្លាត 4 spaces ពីមុខ buildpacks
     buildpacks:
+      # ត្រូវដាក់គម្លាត 6 spaces ពីមុខ - url
       - url: https://github.com/heroku/heroku-buildpack-apt
-    # កំណត់ថាត្រូវដំឡើង Cairo, Pango, etc.
+    # ត្រូវដាក់គម្លាត 4 spaces ពីមុខ apt
     apt:
       packages:
+        # ត្រូវដាក់គម្លាត 6 spaces ពីមុខ - libcairo2-dev
         - libcairo2-dev
         - libpango1.0-dev
         - libjpeg-turbo8-dev
