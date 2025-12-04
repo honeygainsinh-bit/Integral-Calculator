@@ -5,8 +5,8 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg'); 
-// ✅ នាំយក Canvas មកប្រើ (លុប registerFont ចេញពី require និងពី Startup)
-const { createCanvas, loadImage } = require('canvas');
+// នាំយក Canvas មកប្រើ
+const { registerFont, createCanvas, loadImage } = require('canvas');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -18,7 +18,14 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// 🚫 កូដចុះឈ្មោះ Font Moul ត្រូវបានលុបចេញពី Startup ទាំងស្រុងដើម្បីដោះស្រាយបញ្ហា Crash
+// ✅ រក្សាប្លុកកូដចុះឈ្មោះ Font Moul ដើម
+try {
+    const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
+    registerFont(fontPath, { family: 'Moul' });
+    console.log("✅ Font 'Moul' loaded successfully.");
+} catch (e) {
+    console.warn("⚠️ Warning: Could not find font 'Moul.ttf' in the public folder.");
+}
 
 const MODEL_NAME = "gemini-2.5-flash"; 
 
@@ -28,6 +35,7 @@ const uniqueVisitors = new Set();
 
 // Middleware: Log Request
 app.use((req, res, next) => {
+    // ប្រើ Log ជាភាសាអង់គ្លេស
     console.log(`[${new Date().toLocaleTimeString('en-US')}] 📡 ${req.method} ${req.path}`);
     next();
 });
@@ -160,9 +168,6 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // ==========================================
 
 app.post('/api/submit-request', async (req, res) => {
-    
-    // ... (Code for API submit request is kept the same)
-
     const { username, score } = req.body;
     
     if (!username || score === undefined || score === null) {
@@ -279,13 +284,13 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.fillRect(0, 0, width, height);
 
         // ==========================================
-        // 🎨 DESIGN & TEXT RENDERING (ENGLISH - Standard Font)
+        // 🎨 DESIGN & TEXT RENDERING (ENGLISH - Keeping Original Font Names)
         // ==========================================
         
         ctx.textAlign = 'center';
 
-        // 1. Opening Phrase 
-        ctx.font = '45px Arial, sans-serif'; 
+        // 1. Opening Phrase (Original Font Name: "Moul")
+        ctx.font = '45px "Moul", sans-serif'; 
         ctx.fillStyle = '#334155'; // Dark Slate Gray (សម្រាប់ផ្ទៃស)
         ctx.fillText("This Certificate of Achievement is Proudly Presented to", width / 2, 450); 
 
@@ -298,7 +303,8 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.shadowColor = "rgba(180, 83, 9, 0.6)"; 
         ctx.shadowBlur = 10;
         
-        ctx.font = 'bold 150px Arial, sans-serif'; // Font Arial (ធំល្មម)
+        // រក្សា Font Name ដើម: "Moul"
+        ctx.font = 'bold 150px "Moul", sans-serif'; 
         ctx.fillStyle = gradient;
         ctx.fillText(username.toUpperCase(), width / 2, 650);
 
@@ -306,19 +312,20 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.shadowColor = "transparent";
         ctx.shadowBlur = 0;
 
-        // 3. Content Title
-        ctx.font = '40px Arial, sans-serif';
+        // 3. Content Title (Original Font Name: "Arial")
+        ctx.font = '40px "Arial", sans-serif';
         ctx.fillStyle = '#1e293b'; // Dark color
         ctx.fillText(`For outstanding achievement in the Math Quiz Pro challenge.`, width / 2, 780);
 
-        // 4. Score
-        ctx.font = 'bold 50px Arial, sans-serif';
+        // 4. Score (Original Font Name: "Arial")
+        ctx.font = 'bold 50px "Arial", sans-serif';
         ctx.fillStyle = '#b91c1c'; // Red
         ctx.fillText(`Final Score: ${score}`, width / 2, 870);
 
         // 5. Content Body (English)
         ctx.fillStyle = '#1e293b'; // Dark color
-        ctx.font = '35px Arial, sans-serif'; 
+        // រក្សា Font Name ដើម: "Moul"
+        ctx.font = '35px "Moul", sans-serif'; 
         const lineHeight = 65; 
         let startY = 1000;
 
@@ -332,12 +339,12 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.fillStyle = '#15803d'; // Green
         ctx.fillText("We wish you continued success in your academic journey and future endeavors.", width / 2, startY + (lineHeight * 2) + 15);
 
-        // 6. Date
+        // 6. Date (Original Font Name: "Arial")
         ctx.fillStyle = '#64748b'; // Gray
-        ctx.font = 'bold 30px Arial, sans-serif'; 
+        ctx.font = 'bold 30px "Arial", sans-serif'; 
         ctx.fillText(`Issued on: ${englishDate}`, width / 2, 1280);
 
-        // 7. Footer
+        // 7. Footer (Original Font Name: "Courier New")
         ctx.font = 'bold 30px "Courier New", monospace';
         ctx.fillStyle = '#0369a1'; // Blue
         
