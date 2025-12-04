@@ -44,7 +44,7 @@ async function initializeDatabase() {
     try {
         const client = await pool.connect();
         
-        // Table 1: Leaderboard (តារាងពិន្ទុ)
+        // Table 1: Leaderboard
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -55,7 +55,7 @@ async function initializeDatabase() {
             );
         `);
 
-        // Table 2: Certificate Requests (តារាងស្នើសុំលិខិតសរសើរ) - ថ្មី
+        // Table 2: Certificate Requests
         await client.query(`
             CREATE TABLE IF NOT EXISTS certificate_requests (
                 id SERIAL PRIMARY KEY,
@@ -203,8 +203,11 @@ app.get('/api/leaderboard/top', async (req, res) => {
 app.post('/api/submit-request', async (req, res) => {
     const { username, score, date } = req.body;
     
-    // Validate
-    if (!username || !score) {
+    // =========================================================
+    // 🔥 កន្លែងកែប្រែសំខាន់ (FIXED VALIDATION) 🔥
+    // យើងអនុញ្ញាតឱ្យ score មានតម្លៃ 0 (កុំប្រើ !score)
+    // =========================================================
+    if (!username || score === undefined || score === null) {
         return res.status(400).json({ success: false, message: "Missing username or score" });
     }
 
