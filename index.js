@@ -5,7 +5,6 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg'); 
-// នាំយក Canvas មកប្រើ
 const { registerFont, createCanvas, loadImage } = require('canvas');
 
 const app = express();
@@ -18,29 +17,27 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// ចុះឈ្មោះ Font (Moul សម្រាប់ Admin Panel ឬប្រើតាមតម្រូវការ)
+// Load Font
 try {
     const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
     registerFont(fontPath, { family: 'Moul' });
-    console.log("✅ Font 'Moul' loaded successfully.");
 } catch (e) {
-    console.warn("⚠️ Warning: Font 'Moul.ttf' not found. Using system fonts.");
+    console.warn("⚠️ Warning: Font 'Moul.ttf' not found.");
 }
 
 const MODEL_NAME = "gemini-2.5-flash"; 
 
-// Tracking Variables
+// Tracking
 let totalPlays = 0;           
 const uniqueVisitors = new Set();
 
-// Middleware: Log Request
 app.use((req, res, next) => {
     console.log(`[${new Date().toLocaleTimeString('km-KH')}] 📡 ${req.method} ${req.path}`);
     next();
 });
 
 // ==========================================
-// 2. DATABASE CONFIGURATION
+// 2. DATABASE
 // ==========================================
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -50,8 +47,6 @@ const pool = new Pool({
 async function initializeDatabase() {
     try {
         const client = await pool.connect();
-        
-        // Table Leaderboard
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -61,8 +56,6 @@ async function initializeDatabase() {
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
-
-        // Table Certificate Requests
         await client.query(`
             CREATE TABLE IF NOT EXISTS certificate_requests (
                 id SERIAL PRIMARY KEY,
@@ -72,8 +65,7 @@ async function initializeDatabase() {
                 request_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
-
-        console.log("✅ Database initialized: Tables ready.");
+        console.log("✅ Database initialized.");
         client.release();
     } catch (err) {
         console.error("❌ Database initialization error:", err.message);
@@ -92,7 +84,7 @@ const limiter = rateLimit({
 });
 
 // ==========================================
-// 4. STATIC FILES & HOME ROUTE
+// 4. STATIC FILES
 // ==========================================
 app.use(express.static(path.join(__dirname, 'public'))); 
 
@@ -102,14 +94,14 @@ app.get('/', (req, res) => {
             <h1 style="color: #22c55e;">Server is Online 🟢</h1>
             <p>Math Quiz Pro Backend</p>
             <div style="margin-top: 20px; padding: 10px; background: #f0f9ff; display: inline-block; border-radius: 8px;">
-                <a href="/admin/requests" style="text-decoration: none; color: #0284c7; font-weight: bold;">👮‍♂️ ចូលមើលសំណើសុំលិខិតសរសើរ (Admin)</a>
+                <a href="/admin/requests" style="text-decoration: none; color: #0284c7; font-weight: bold;">👮‍♂️ Admin Panel</a>
             </div>
         </div>
     `);
 });
 
 // ==========================================
-// 5. API ROUTES (General & Leaderboard)
+// 5. API ROUTES
 // ==========================================
 
 app.get('/stats', (req, res) => {
@@ -137,17 +129,15 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
 
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
-    if (!username || typeof score !== 'number' || score <= 0 || username.trim().length < 3) {
-        return res.status(400).json({ success: false, message: "Invalid data." });
-    }
+    if (!username || typeof score !== 'number') return res.status(400).json({ success: false });
     try {
         const client = await pool.connect();
         await client.query('INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
             [username.trim().substring(0, 25), score, difficulty]);
         client.release();
-        res.status(201).json({ success: true, message: "Score saved." });
+        res.status(201).json({ success: true });
     } catch (err) {
-        res.status(500).json({ success: false, message: "DB Error" });
+        res.status(500).json({ success: false });
     }
 });
 
@@ -158,35 +148,23 @@ app.get('/api/leaderboard/top', async (req, res) => {
         client.release();
         res.json(result.rows);
     } catch (err) {
-        res.status(500).json({ success: false, message: "DB Error" });
+        res.status(500).json({ success: false });
     }
 });
 
-// ==========================================
-// 6. CERTIFICATE REQUEST API
-// ==========================================
-
-// ✅ API ទទួលសំណើ
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
-    
-    if (!username || score === undefined || score === null) {
-        return res.status(400).json({ success: false, message: "Missing username or score" });
-    }
-
+    if (!username || score === undefined) return res.status(400).json({ success: false });
     try {
         const client = await pool.connect();
         await client.query('INSERT INTO certificate_requests (username, score, request_date) VALUES ($1, $2, NOW())', [username, score]);
         client.release();
-        console.log(`📩 Certificate Request: ${username} (Score: ${score})`);
         res.json({ success: true });
     } catch (err) {
-        console.error("Submit Request Error:", err.message);
-        res.status(500).json({ success: false, message: "Server Error" });
+        res.status(500).json({ success: false });
     }
 });
 
-// ✅ Admin HTML View
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -202,59 +180,36 @@ app.get('/admin/requests', async (req, res) => {
             <title>Admin - Certificate Requests</title>
             <style>
                 body { font-family: sans-serif; padding: 20px; background: #f1f5f9; }
-                h1 { color: #1e3a8a; }
-                table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
+                table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; }
                 th, td { padding: 15px; border-bottom: 1px solid #e2e8f0; text-align: left; }
                 th { background: #3b82f6; color: white; }
-                tr:hover { background: #f8fafc; }
-                .btn-gen { 
-                    background: #2563eb; color: white; text-decoration: none; 
-                    padding: 8px 12px; border-radius: 6px; font-weight: bold; font-size: 0.9rem;
-                    display: inline-flex; align-items: center; gap: 5px;
-                }
-                .btn-gen:hover { background: #1d4ed8; }
+                .btn-gen { background: #2563eb; color: white; padding: 8px 12px; border-radius: 6px; text-decoration: none; }
             </style>
         </head>
         <body>
-            <h1>👮‍♂️ Admin Panel - សំណើសុំលិខិតសរសើរ</h1>
+            <h1>👮‍♂️ Admin Panel</h1>
             <table>
-                <thead>
-                    <tr>
-                        <th>#ID</th>
-                        <th>ឈ្មោះ (Username)</th>
-                        <th>ពិន្ទុ (Score)</th>
-                        <th>កាលបរិច្ឆេទ</th>
-                        <th>សកម្មភាព (Action)</th>
-                    </tr>
-                </thead>
+                <thead><tr><th>ID</th><th>Name</th><th>Score</th><th>Date</th><th>Action</th></tr></thead>
                 <tbody>`;
-
-        if (result.rows.length === 0) {
-            html += `<tr><td colspan="5" style="text-align:center; padding: 20px; color: gray;">មិនទាន់មានសំណើថ្មីៗទេ។</td></tr>`;
-        } else {
-            result.rows.forEach(row => {
-                const isHighScore = row.score >= 500;
-                html += `
-                    <tr>
-                        <td>${row.id}</td>
-                        <td style="font-weight:bold; color: #334155;">${row.username}</td>
-                        <td style="color:${isHighScore ? '#16a34a' : '#dc2626'}; font-weight:bold;">${row.score}</td>
-                        <td>${new Date(row.request_date).toLocaleDateString('km-KH')}</td>
-                        <td>
-                            <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-gen">🖨️ បង្កើតលិខិត (English)</a>
-                        </td>
-                    </tr>`;
-            });
-        }
+        
+        result.rows.forEach(row => {
+            html += `<tr>
+                <td>${row.id}</td>
+                <td><b>${row.username}</b></td>
+                <td>${row.score}</td>
+                <td>${new Date(row.request_date).toLocaleDateString('en-US')}</td>
+                <td><a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-gen">Generate Certificate</a></td>
+            </tr>`;
+        });
         html += `</tbody></table></body></html>`;
         res.send(html);
     } catch (err) {
-        res.status(500).send("Error loading admin panel.");
+        res.status(500).send("Error");
     }
 });
 
 // ==========================================
-// 7. GENERATE CERTIFICATE LOGIC (ENGLISH & PROFESSIONAL)
+// 7. GENERATE CERTIFICATE (PREMIUM & LAUDATORY)
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -266,136 +221,92 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         if (result.rows.length === 0) return res.status(404).send("Not Found");
 
         const { username, score, request_date } = result.rows[0];
+        const dateStr = new Date(request_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
-        // --- English Date Format ---
-        const dateObj = new Date(request_date);
-        const dateStr = dateObj.toLocaleDateString('en-US', { 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric' 
-        });
-
-        // --- Setup Canvas (2000x1414) ---
         const width = 2000; 
         const height = 1414;
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
 
-        // --- Load Template ---
         const templatePath = path.join(__dirname, 'public', 'certificate-template.png');
         try {
             const image = await loadImage(templatePath);
             ctx.drawImage(image, 0, 0, width, height);
         } catch (e) {
-            return res.status(500).send("Error: 'certificate-template.png' not found in public folder.");
+            return res.status(500).send("Error: 'certificate-template.png' not found.");
         }
 
-        // ==========================================
-        // 🎨 PROFESSIONAL DESIGN (ENGLISH)
-        // ==========================================
-        
         ctx.textAlign = 'center';
 
-        // 1. MAIN HEADER
-        // Title: CERTIFICATE
-        ctx.font = 'bold 100px "Times New Roman", serif'; 
-        ctx.fillStyle = '#1e3a8a'; // Dark Blue (Professional)
-        ctx.fillText("CERTIFICATE", width / 2, 450);
+        // 1. HEADER (Excellence)
+        ctx.font = 'bold 90px "Times New Roman", serif'; 
+        ctx.fillStyle = '#1e3a8a'; 
+        ctx.fillText("CERTIFICATE OF EXCELLENCE", width / 2, 450); // Changed to Excellence
 
-        // Sub-Title: OF ACHIEVEMENT
-        ctx.font = '50px "Times New Roman", serif';
-        ctx.letterSpacing = "10px"; // Add spacing for elegance
-        ctx.fillText("OF ACHIEVEMENT", width / 2, 520);
-        ctx.letterSpacing = "0px"; // Reset
+        ctx.font = 'italic 30px "Times New Roman", serif';
+        ctx.fillStyle = '#64748b'; 
+        ctx.fillText("IS HEREBY PROUDLY PRESENTED TO", width / 2, 530); 
 
-        // 2. PRESENTATION LINE
-        ctx.font = 'italic 35px "Times New Roman", serif'; 
-        ctx.fillStyle = '#64748b'; // Slate Grey
-        ctx.fillText("This certificate is proudly presented to", width / 2, 620); 
+        // 2. NAME (Gold & Glow)
+        ctx.save();
+        const gradient = ctx.createLinearGradient(width/2 - 300, 0, width/2 + 300, 0);
+        gradient.addColorStop(0, "#b45309");   
+        gradient.addColorStop(0.5, "#fcd34d"); 
+        gradient.addColorStop(1, "#b45309");   
 
-        // 3. RECIPIENT NAME (GOLDEN GLOW & ATTRACTIVE) ✨
-        ctx.save(); // Save state for special effects
+        ctx.shadowColor = "rgba(0,0,0,0.3)"; 
+        ctx.shadowBlur = 20;
         
-        // Gold Gradient
-        const gradient = ctx.createLinearGradient(width/2 - 400, 0, width/2 + 400, 0);
-        gradient.addColorStop(0, "#b45309");   // Dark Gold/Bronze
-        gradient.addColorStop(0.3, "#fcd34d"); // Bright Gold
-        gradient.addColorStop(0.5, "#fffbeb"); // Very light Gold (Shine)
-        gradient.addColorStop(0.7, "#fcd34d"); // Bright Gold
-        gradient.addColorStop(1, "#b45309");   // Dark Gold/Bronze
-
-        // Glow Effect (Shadow)
-        ctx.shadowColor = "rgba(0, 0, 0, 0.25)"; 
-        ctx.shadowBlur = 15;
-        ctx.shadowOffsetX = 5;
-        ctx.shadowOffsetY = 5;
-        
-        // Big Font Name
-        ctx.font = 'bold 150px "Arial", sans-serif'; 
+        ctx.font = 'bold 130px "Arial", sans-serif'; 
         ctx.fillStyle = gradient;
-        ctx.fillText(username.toUpperCase(), width / 2, 780);
-        
-        ctx.restore(); // Restore to normal (remove shadow for next text)
+        ctx.fillText(username.toUpperCase(), width / 2, 700);
+        ctx.restore();
 
-        // 4. BODY TEXT
-        ctx.fillStyle = '#334155'; // Dark Grey
-        ctx.font = '35px "Times New Roman", serif'; 
-        const lineHeight = 60; 
-        let startY = 920;
+        // 3. LAUDATORY BODY TEXT (Longer & More Praising)
+        ctx.fillStyle = '#334155'; 
+        ctx.font = '32px "Times New Roman", serif'; 
+        const lineHeight = 55; 
+        let startY = 850;
 
-        ctx.fillText("For demonstrating exceptional problem-solving skills and outstanding", width / 2, startY);
-        ctx.fillText("dedication in the Advanced Mathematics Challenge on BrainTest.fun.", width / 2, startY + lineHeight);
-        
-        // 5. SCORE DISPLAY
-        ctx.font = 'bold 45px "Arial", sans-serif';
-        ctx.fillStyle = '#dc2626'; // Red for visibility
-        ctx.fillText(`FINAL SCORE: ${score}`, width / 2, startY + (lineHeight * 2) + 20);
+        // Line 1
+        ctx.fillText("In recognition of your outstanding performance and intellectual acuity demonstrated", width / 2, startY);
+        // Line 2
+        ctx.fillText("in the Advanced Mathematics Challenge. Your ability to solve complex problems with", width / 2, startY + lineHeight);
+        // Line 3
+        ctx.fillText("speed and precision serves as a testament to your hard work and analytical potential.", width / 2, startY + (lineHeight * 2));
+        // Line 4 (Future Wish)
+        ctx.fillText("We commend your unwavering dedication to learning and academic excellence.", width / 2, startY + (lineHeight * 3));
 
-        // ==========================================
-        // ✍️ FOOTER & SIGNATURES
-        // ==========================================
+        // 4. SCORE
+        ctx.font = 'bold 40px "Arial", sans-serif';
+        ctx.fillStyle = '#b91c1c'; 
+        ctx.fillText(`ACHIEVEMENT SCORE: ${score}`, width / 2, startY + (lineHeight * 4) + 20);
+
+        // 5. FOOTER
         const footerY = 1250;
-        ctx.strokeStyle = '#0f172a'; // Line color
+        ctx.strokeStyle = '#0f172a';
         ctx.lineWidth = 3;
 
-        // --- LEFT: ADMIN (CHHEANG SINHSINH) ---
+        // Left: Admin
         const leftX = 500;
-        // Draw Line
-        ctx.beginPath();
-        ctx.moveTo(leftX - 200, footerY);
-        ctx.lineTo(leftX + 200, footerY);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(leftX - 180, footerY); ctx.lineTo(leftX + 180, footerY); ctx.stroke();
+        ctx.font = 'bold 28px "Arial", sans-serif'; ctx.fillStyle = '#0f172a';
+        ctx.fillText("CHHEANG SINHSINH", leftX, footerY + 40);
+        ctx.font = 'italic 24px "Times New Roman", serif'; ctx.fillStyle = '#64748b';
+        ctx.fillText("Founder & Administrator", leftX, footerY + 75);
 
-        ctx.font = 'bold 30px "Arial", sans-serif';
-        ctx.fillStyle = '#0f172a';
-        ctx.fillText("CHHEANG SINHSINH", leftX, footerY + 45); // Name
+        // Center: Date
+        ctx.font = 'bold 26px "Arial", sans-serif'; ctx.fillStyle = '#94a3b8';
+        ctx.fillText(dateStr, width / 2, footerY + 40);
 
-        ctx.font = 'italic 25px "Times New Roman", serif';
-        ctx.fillStyle = '#64748b';
-        ctx.fillText("Founder & Administrator", leftX, footerY + 80); // Title
-
-        // --- CENTER: DATE ---
-        ctx.font = 'bold 28px "Arial", sans-serif';
-        ctx.fillStyle = '#94a3b8';
-        ctx.fillText(dateStr, width / 2, footerY + 45); 
-
-        // --- RIGHT: WEBSITE (www.braintest.fun) ---
+        // Right: Website
         const rightX = 1500;
-        // Draw Line
-        ctx.beginPath();
-        ctx.moveTo(rightX - 200, footerY);
-        ctx.lineTo(rightX + 200, footerY);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(rightX - 180, footerY); ctx.lineTo(rightX + 180, footerY); ctx.stroke();
+        ctx.font = 'bold 28px "Arial", sans-serif'; ctx.fillStyle = '#0f172a';
+        ctx.fillText("www.braintest.fun", rightX, footerY + 40);
+        ctx.font = 'italic 24px "Times New Roman", serif'; ctx.fillStyle = '#64748b';
+        ctx.fillText("Official Platform", rightX, footerY + 75);
 
-        ctx.font = 'bold 30px "Arial", sans-serif';
-        ctx.fillStyle = '#0f172a';
-        ctx.fillText("www.braintest.fun", rightX, footerY + 45); // URL
-
-        ctx.font = 'italic 25px "Times New Roman", serif';
-        ctx.fillStyle = '#64748b';
-        ctx.fillText("Official Platform", rightX, footerY + 80); // Title
-
-        // Output
         const buffer = canvas.toBuffer('image/png');
         res.set('Content-Type', 'image/png');
         res.send(buffer);
@@ -406,18 +317,14 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
     }
 });
 
-// ==========================================
-// 8. START SERVER
-// ==========================================
 async function startServer() {
     if (!process.env.DATABASE_URL) {
-        console.error("🛑 CRITICAL: DATABASE_URL is missing.");
+        console.error("🛑 DATABASE_URL missing.");
         return;
     }
     await initializeDatabase();
     app.listen(port, () => {
         console.log(`🚀 Server running on port ${port}`);
-        console.log(`🔗 Admin: http://localhost:${port}/admin/requests`);
     });
 }
 
