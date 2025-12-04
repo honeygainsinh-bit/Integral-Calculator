@@ -168,12 +168,11 @@ app.get('/admin/requests', async (req, res) => {
 
 // ==========================================
 // 7. GENERATE CERTIFICATE LOGIC (FINAL STABILITY VERSION) 🎨
-// ⚠️ This function is designed to work fully without any DB connection
+// ⚠️ This function uses placeholder data since DB is off
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
         const id = req.params.id;
-        // ⚠️ Skip DB fetch
         
         // Use placeholder data since DB is off
         const username = 'DIAGNOSTIC TEST PLAYER';
