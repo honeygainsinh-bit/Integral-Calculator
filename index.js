@@ -18,7 +18,7 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// ✅ រក្សាប្លុកកូដចុះឈ្មោះ Font Moul ដើម
+// ✅ រក្សាប្លុកកូដចុះឈ្មោះ Font Moul ដើម (ដើម្បីកុំឲ្យ Server Crash)
 try {
     const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
     registerFont(fontPath, { family: 'Moul' });
@@ -35,7 +35,6 @@ const uniqueVisitors = new Set();
 
 // Middleware: Log Request
 app.use((req, res, next) => {
-    // ប្រើ Log ជាភាសាអង់គ្លេស
     console.log(`[${new Date().toLocaleTimeString('en-US')}] 📡 ${req.method} ${req.path}`);
     next();
 });
@@ -284,13 +283,14 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.fillRect(0, 0, width, height);
 
         // ==========================================
-        // 🎨 DESIGN & TEXT RENDERING (ENGLISH - Keeping Original Font Names)
+        // 🎨 DESIGN & TEXT RENDERING (ENGLISH - Using Arial for Stability)
         // ==========================================
         
         ctx.textAlign = 'center';
 
-        // 1. Opening Phrase (Original Font Name: "Moul")
-        ctx.font = '45px "Moul", sans-serif'; 
+        // 1. Opening Phrase 
+        // ✅ កែ Font Name មក Arial វិញដើម្បីឱ្យអក្សរចេញធំ
+        ctx.font = '45px Arial, sans-serif'; 
         ctx.fillStyle = '#334155'; // Dark Slate Gray (សម្រាប់ផ្ទៃស)
         ctx.fillText("This Certificate of Achievement is Proudly Presented to", width / 2, 450); 
 
@@ -303,8 +303,8 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.shadowColor = "rgba(180, 83, 9, 0.6)"; 
         ctx.shadowBlur = 10;
         
-        // រក្សា Font Name ដើម: "Moul"
-        ctx.font = 'bold 150px "Moul", sans-serif'; 
+        // ✅ កែ Font Name មក Arial វិញដើម្បីឱ្យអក្សរចេញធំ
+        ctx.font = 'bold 150px Arial, sans-serif'; 
         ctx.fillStyle = gradient;
         ctx.fillText(username.toUpperCase(), width / 2, 650);
 
@@ -312,20 +312,19 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.shadowColor = "transparent";
         ctx.shadowBlur = 0;
 
-        // 3. Content Title (Original Font Name: "Arial")
-        ctx.font = '40px "Arial", sans-serif';
+        // 3. Content Title
+        ctx.font = '40px Arial, sans-serif';
         ctx.fillStyle = '#1e293b'; // Dark color
         ctx.fillText(`For outstanding achievement in the Math Quiz Pro challenge.`, width / 2, 780);
 
-        // 4. Score (Original Font Name: "Arial")
-        ctx.font = 'bold 50px "Arial", sans-serif';
+        // 4. Score
+        ctx.font = 'bold 50px Arial, sans-serif';
         ctx.fillStyle = '#b91c1c'; // Red
         ctx.fillText(`Final Score: ${score}`, width / 2, 870);
 
         // 5. Content Body (English)
         ctx.fillStyle = '#1e293b'; // Dark color
-        // រក្សា Font Name ដើម: "Moul"
-        ctx.font = '35px "Moul", sans-serif'; 
+        ctx.font = '35px Arial, sans-serif'; 
         const lineHeight = 65; 
         let startY = 1000;
 
@@ -339,12 +338,12 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.fillStyle = '#15803d'; // Green
         ctx.fillText("We wish you continued success in your academic journey and future endeavors.", width / 2, startY + (lineHeight * 2) + 15);
 
-        // 6. Date (Original Font Name: "Arial")
+        // 6. Date
         ctx.fillStyle = '#64748b'; // Gray
-        ctx.font = 'bold 30px "Arial", sans-serif'; 
+        ctx.font = 'bold 30px Arial, sans-serif'; 
         ctx.fillText(`Issued on: ${englishDate}`, width / 2, 1280);
 
-        // 7. Footer (Original Font Name: "Courier New")
+        // 7. Footer
         ctx.font = 'bold 30px "Courier New", monospace';
         ctx.fillStyle = '#0369a1'; // Blue
         
