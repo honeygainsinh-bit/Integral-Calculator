@@ -1,7 +1,7 @@
 {
   "name": "math-game-api-final",
   "version": "1.0.0",
-  "description": "Final Backend API for Math Game with Rate Limiter and File Serving",
+  "description": "Final Backend API for Math Game - Stable Version",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -12,8 +12,7 @@
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
-    "pg": "^8.11.3",
-    "path": "^0.12.7"
+    "pg": "^8.11.3"
   },
   "engines": {
     "node": ">=18.0.0"
