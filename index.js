@@ -255,8 +255,9 @@ app.get('/admin/requests', async (req, res) => {
 });
 
 
-      // ==========================================
-// 7. GENERATE CERTIFICATE LOGIC (2000x1414) 🎨
+
+     // ==========================================
+// 7. GENERATE CERTIFICATE LOGIC (UPDATED: BRIGHT TEXT & NO ADMIN)
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -289,90 +290,79 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             const image = await loadImage(templatePath);
             ctx.drawImage(image, 0, 0, width, height);
         } catch (e) {
-            return res.status(500).send("Error: រកមិនឃើញ file 'certificate-template.png' ក្នុង folder public");
+            return res.status(500).send("Error: រកមិនឃើញ file 'certificate-template.png'");
         }
 
         // ==========================================
-        // 🎨 DESIGN & TEXT RENDERING (DARK THEME FIXED)
+        // 🎨 DESIGN ADJUSTMENTS (HIGH CONTRAST)
         // ==========================================
         
         ctx.textAlign = 'center';
 
-        // 1. ឃ្លាផ្តើម (Intro) - ពង្រីកអក្សរ និងរុញឡើងលើ
+        // 1. ឃ្លាផ្តើម (ពណ៌ស)
         ctx.font = '40px "Moul"'; 
-        ctx.fillStyle = '#cbd5e1'; 
-        ctx.fillText("លិខិតសរសើរនេះប្រគល់ជូនដោយសេចក្តីគោរពចំពោះ", width / 2, 450); 
+        ctx.fillStyle = '#FFFFFF'; // ពណ៌សសុទ្ធ (ដាច់ខាតត្រូវតែស)
+        ctx.fillText("លិខិតសរសើរនេះប្រគល់ជូនដោយសេចក្តីគោរពចំពោះ", width / 2, 480); 
 
-        // 2. ឈ្មោះអ្នកទទួល (Username) - ពង្រីកអក្សរធំ
-        const gradient = ctx.createLinearGradient(width/2 - 250, 0, width/2 + 250, 0);
-        gradient.addColorStop(0, "#ca8a04");   
-        gradient.addColorStop(0.5, "#fde047"); 
-        gradient.addColorStop(1, "#ca8a04");   
+        // 2. ឈ្មោះអ្នកទទួល (Username) - ពណ៌មាសភ្លឺ
+        // បង្កើត Gradient មាសអោយភ្លឺខ្លាំង
+        const gradient = ctx.createLinearGradient(width/2 - 300, 0, width/2 + 300, 0);
+        gradient.addColorStop(0, "#FFD700");   // Gold
+        gradient.addColorStop(0.5, "#FFFFE0"); // Light Yellow (ភ្លឺ)
+        gradient.addColorStop(1, "#FFD700");   // Gold
 
-        ctx.shadowColor = "rgba(253, 224, 71, 0.6)"; 
-        ctx.shadowBlur = 25;
+        // ដាក់ស្រមោលអោយអក្សរផុស
+        ctx.shadowColor = "rgba(255, 215, 0, 0.8)"; 
+        ctx.shadowBlur = 30;
         
-        ctx.font = '160px "Moul"'; // ដាក់អោយធំច្បាស់
+        ctx.font = '160px "Moul"'; 
         ctx.fillStyle = gradient;
-        ctx.fillText(username, width / 2, 630);
+        ctx.fillText(username, width / 2, 660);
 
         // Reset Shadow
         ctx.shadowColor = "transparent";
         ctx.shadowBlur = 0;
 
-        // 3. ពិន្ទុ (Score)
-        ctx.font = 'bold 55px "Arial", sans-serif'; // ធំជាងមុន
-        ctx.fillStyle = '#ef4444'; 
-        ctx.fillText(`ពិន្ទុសរុប: ${score}`, width / 2, 750);
+        // 3. ពិន្ទុ (Score) - ពណ៌ក្រហមភ្លឺ ឬ ទឹកក្រូច
+        ctx.font = 'bold 60px "Arial", sans-serif';
+        ctx.fillStyle = '#FF4500'; // OrangeRed (ភ្លឺច្បាស់លើផ្ទៃខ្មៅ)
+        ctx.fillText(`ពិន្ទុសរុប: ${score}`, width / 2, 780);
 
-        // 4. ខ្លឹមសារ (Body Text) - ពង្រីកអក្សរ និងរៀបចំគម្លាតបន្ទាត់
-        ctx.fillStyle = '#f1f5f9'; 
-        ctx.font = '38px "Moul"'; // ទំហំសមរម្យសម្រាប់អាន
-        const lineHeight = 75; 
-        let startY = 880;
+        // 4. ខ្លឹមសារ (Body Text) - ពណ៌សសុទ្ធ
+        ctx.fillStyle = '#FFFFFF'; // ពណ៌សសុទ្ធ
+        ctx.font = '40px "Moul"'; 
+        const lineHeight = 80; 
+        let startY = 920;
 
         ctx.fillText("ប្អូនបានបញ្ចេញសមត្ថភាព និងចូលរួមយ៉ាងសកម្មក្នុងការដោះស្រាយលំហាត់គណិតវិទ្យាថ្នាក់ទី ១២", width / 2, startY);
         ctx.fillText("នៅលើគេហទំព័រ braintest.fun ប្រកបដោយភាពត្រឹមត្រូវ និងទទួលបានលទ្ធផលគួរជាទីមោទកៈ។", width / 2, startY + lineHeight);
         ctx.fillText("លិខិតសរសើរនេះ គឺជាសក្ខីភាពបញ្ជាក់ថា ប្អូនគឺជាសិស្សដែលមានការតស៊ូ និងមានមូលដ្ឋានគ្រឹះរឹងមាំ។", width / 2, startY + (lineHeight * 2));
         
-        // ឃ្លាជូនពរ
-        ctx.fillStyle = '#4ade80'; 
-        ctx.fillText("យើងសូមជូនពរឱ្យប្អូនបន្តភាពជោគជ័យក្នុងការសិក្សា និងក្លាយជាធនធានមនុស្សដ៏ល្អសម្រាប់សង្គម។", width / 2, startY + (lineHeight * 3) + 10);
+        // ឃ្លាជូនពរ - ពណ៌បៃតងភ្លឺ
+        ctx.fillStyle = '#00FF7F'; // SpringGreen (ភ្លឺខ្លាំង)
+        ctx.fillText("យើងសូមជូនពរឱ្យប្អូនបន្តភាពជោគជ័យក្នុងការសិក្សា និងក្លាយជាធនធានមនុស្សដ៏ល្អសម្រាប់សង្គម។", width / 2, startY + (lineHeight * 3) + 20);
 
         // ==========================================
-        // 5. ផ្នែកខាងក្រោម (FOOTER SECTION)
+        // 5. ផ្នែកខាងក្រោម (FOOTER - NO ADMIN NAME)
         // ==========================================
 
-        // --- ផ្នែកខាងឆ្វេង៖ កាលបរិច្ឆេទ ---
-        ctx.textAlign = 'left';
-        ctx.fillStyle = '#94a3b8'; 
-        ctx.font = '32px "Moul"'; 
-        // X=250, Y=1220
-        ctx.fillText("រាជធានីភ្នំពេញ, " + khmerDate, 250, 1220);
-
-        // --- ផ្នែកខាងស្តាំ៖ ADMIN & SIGNATURE ---
-        ctx.textAlign = 'center'; // ដាក់ Center ធៀបនឹងចំណុចខាងស្តាំ
-        const rightX = width - 400; // ទីតាំងនៅខាងស្តាំ
-        
-        ctx.fillStyle = '#fbbf24'; // ពណ៌មាស
-        ctx.font = 'bold 35px "Moul"';
-        ctx.fillText("ស្ថាបនិក / Admin", rightX, 1180);
-
-        ctx.fillStyle = '#f8fafc'; // ពណ៌ស
-        ctx.font = 'bold 45px "Moul"';
-        ctx.fillText("CHHEANG SINHSINH", rightX, 1280); // ឈ្មោះ Admin
-
-        // --- ផ្នែកកណ្តាលខាងក្រោមបំផុត៖ WEBSITE ---
+        // --- កាលបរិច្ឆេទ (ដាក់នៅខាងស្តាំដៃ ជំនួសកន្លែងហត្ថលេខា) ---
         ctx.textAlign = 'center';
-        ctx.font = 'bold 30px "Courier New", sans-serif';
-        ctx.fillStyle = '#38bdf8'; 
+        ctx.fillStyle = '#E0E0E0'; // ពណ៌ប្រផេះស្រាលៗ
+        ctx.font = '35px "Moul"'; 
+        // ដាក់នៅខាងស្តាំក្រោម (កន្លែងដែលគេតែងដាក់ថ្ងៃខែ)
+        ctx.fillText("រាជធានីភ្នំពេញ, " + khmerDate, width - 400, 1250);
+
+        // --- WEBSITE (ដាក់នៅកណ្តាលខាងក្រោមបំផុត) ---
+        ctx.font = 'bold 35px "Courier New", sans-serif';
+        ctx.fillStyle = '#00BFFF'; // DeepSkyBlue (ពណ៌ផ្ទៃមេឃភ្លឺ)
         
-        // បន្ទាត់តុបតែងតូចមួយ
+        // បន្ទាត់តុបតែង
         ctx.beginPath();
-        ctx.moveTo(width / 2 - 100, 1340);
-        ctx.lineTo(width / 2 + 100, 1340);
-        ctx.strokeStyle = '#38bdf8'; 
-        ctx.lineWidth = 2;
+        ctx.moveTo(width / 2 - 120, 1330);
+        ctx.lineTo(width / 2 + 120, 1330);
+        ctx.strokeStyle = '#00BFFF'; 
+        ctx.lineWidth = 3;
         ctx.stroke();
 
         ctx.fillText("Website: braintest.fun", width / 2, 1380);
@@ -387,6 +377,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         res.status(500).send("Failed to generate certificate.");
     }
 });
+   
   
 
 // ==========================================
