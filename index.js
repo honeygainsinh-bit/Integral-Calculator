@@ -18,13 +18,14 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// ✅ រក្សាប្លុកកូដចុះឈ្មោះ Font Moul ដើម (ដើម្បីកុំឲ្យ Server Crash)
+// ✅ រក្សាប្លុកកូដចុះឈ្មោះ Font Moul ដើម (ប៉ុន្តែកែសម្រួល Path)
 try {
-    const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
-    registerFont(fontPath, { family: 'Moul' });
+    // ជំនួស path.join ដើមដោយ Path សាមញ្ញសម្រាប់ Render stability
+    registerFont('./public/Moul.ttf', { family: 'Moul' }); 
     console.log("✅ Font 'Moul' loaded successfully.");
 } catch (e) {
-    console.warn("⚠️ Warning: Could not find font 'Moul.ttf' in the public folder.");
+    // បង្ហាញ Error ក្នុង Log បើរកមិនឃើញ
+    console.warn("⚠️ Warning: Could not load Font 'Moul.ttf'. Certificate text may use fallback font.", e.message);
 }
 
 const MODEL_NAME = "gemini-2.5-flash"; 
@@ -167,6 +168,9 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // ==========================================
 
 app.post('/api/submit-request', async (req, res) => {
+    
+    // ... (Code for API submit request is kept the same)
+
     const { username, score } = req.body;
     
     if (!username || score === undefined || score === null) {
@@ -289,7 +293,6 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.textAlign = 'center';
 
         // 1. Opening Phrase 
-        // ✅ កែ Font Name មក Arial វិញដើម្បីឱ្យអក្សរចេញធំ
         ctx.font = '45px Arial, sans-serif'; 
         ctx.fillStyle = '#334155'; // Dark Slate Gray (សម្រាប់ផ្ទៃស)
         ctx.fillText("This Certificate of Achievement is Proudly Presented to", width / 2, 450); 
@@ -303,7 +306,6 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.shadowColor = "rgba(180, 83, 9, 0.6)"; 
         ctx.shadowBlur = 10;
         
-        // ✅ កែ Font Name មក Arial វិញដើម្បីឱ្យអក្សរចេញធំ
         ctx.font = 'bold 150px Arial, sans-serif'; 
         ctx.fillStyle = gradient;
         ctx.fillText(username.toUpperCase(), width / 2, 650);
