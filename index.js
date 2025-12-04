@@ -17,7 +17,7 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// Load Custom Font (Optional - Will fallback to System Fonts if fails)
+// Load Custom Font (Optional)
 try {
     const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
     registerFont(fontPath, { family: 'Moul' });
@@ -26,7 +26,7 @@ try {
     console.warn("⚠️ Note: Custom font not found, using system fonts.");
 }
 
-const MODEL_NAME = "gemini-2.5-flash"; 
+const MODEL_NAME = "gemini-1.5-flash"; 
 
 // Tracking Variables
 let totalPlays = 0;           
@@ -108,7 +108,7 @@ app.get('/', (req, res) => {
 });
 
 // ==========================================
-// 5. API ROUTES
+// 5. API ROUTES (QUIZ & LEADERBOARD)
 // ==========================================
 
 app.get('/stats', (req, res) => {
@@ -177,7 +177,9 @@ app.post('/api/submit-request', async (req, res) => {
     }
 });
 
-// Admin Panel View
+// ==========================================
+// 6. ADMIN PANEL
+// ==========================================
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -248,7 +250,7 @@ app.get('/admin/requests', async (req, res) => {
 });
 
 // ==========================================
-// 6. CERTIFICATE GENERATION LOGIC (High-Res Print Ready)
+// 7. CERTIFICATE GENERATOR (FINAL POLISHED VERSION)
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -261,14 +263,14 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         const { username, score, request_date } = result.rows[0];
 
-        // Format Date (e.g., December 04, 2025)
+        // Format Date
         const dateStr = new Date(request_date).toLocaleDateString('en-US', { 
             year: 'numeric', 
             month: 'long', 
             day: 'numeric' 
         });
 
-        // Canvas Setup (A4 Landscape High Res)
+        // Setup Canvas (High Res A4: 2000x1414)
         const width = 2000; 
         const height = 1414;
         const canvas = createCanvas(width, height);
@@ -280,117 +282,147 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             const image = await loadImage(templatePath);
             ctx.drawImage(image, 0, 0, width, height);
         } catch (e) {
-            // Fallback if image is missing (Just a white background)
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(0,0, width, height);
-            console.error("⚠️ Template image not found.");
+            console.error("⚠️ Template image not found, using white background.");
         }
 
         ctx.textAlign = 'center';
 
-        // --- 1. HEADER (Certificate of Excellence) ---
-        ctx.font = 'bold 95px "Times New Roman", serif'; 
-        ctx.fillStyle = '#0a2558'; // Deep Royal Blue
-        ctx.fillText("CERTIFICATE", width / 2, 430);
+        // --- 1. TITLE SECTION ---
+        // "CERTIFICATE"
+        ctx.font = 'bold 110px "Times New Roman", serif'; 
+        ctx.fillStyle = '#1e3a8a'; // Royal Blue
+        ctx.fillText("CERTIFICATE", width / 2, 350);
         
-        ctx.font = '55px "Times New Roman", serif';
+        // "OF EXCELLENCE"
+        ctx.font = 'bold 45px "Arial", sans-serif';
         ctx.letterSpacing = "15px"; 
-        ctx.fillText("OF EXCELLENCE", width / 2, 510);
-        ctx.letterSpacing = "0px"; // Reset
+        ctx.fillStyle = '#ca8a04'; // Dark Gold
+        ctx.fillText("OF EXCELLENCE", width / 2, 430);
+        ctx.letterSpacing = "0px"; 
 
         // --- 2. PRESENTATION LINE ---
-        ctx.font = 'italic 32px "Times New Roman", serif'; 
-        ctx.fillStyle = '#64748b'; 
-        ctx.fillText("This prestigious award is hereby presented to", width / 2, 620); 
+        ctx.font = 'italic 40px "Times New Roman", serif'; 
+        ctx.fillStyle = '#64748b'; // Slate Grey
+        ctx.fillText("This prestigious award is presented to", width / 2, 560); 
 
-        // --- 3. RECIPIENT NAME (Gold Gradient & Glow) ---
+        // --- 3. CANDIDATE NAME (GOLD & GLOW) ---
         ctx.save(); 
         
-        // Define Gold Gradient
-        const gradient = ctx.createLinearGradient(width/2 - 300, 0, width/2 + 300, 0);
-        gradient.addColorStop(0, "#854d0e");    // Dark Bronze
-        gradient.addColorStop(0.2, "#facc15");  // Bright Yellow Gold
-        gradient.addColorStop(0.5, "#fef08a");  // White/Pale Gold (Shine)
-        gradient.addColorStop(0.8, "#facc15");  // Bright Yellow Gold
-        gradient.addColorStop(1, "#854d0e");    // Dark Bronze
+        // Gold Gradient
+        const gradient = ctx.createLinearGradient(width/2 - 400, 0, width/2 + 400, 0);
+        gradient.addColorStop(0, "#854d0e");    // Bronze
+        gradient.addColorStop(0.2, "#facc15");  // Yellow Gold
+        gradient.addColorStop(0.5, "#ffffaa");  // White Gold (Shine)
+        gradient.addColorStop(0.8, "#facc15");  // Yellow Gold
+        gradient.addColorStop(1, "#854d0e");    // Bronze
 
-        // Add Shadow/Glow
-        ctx.shadowColor = "rgba(0, 0, 0, 0.2)"; 
-        ctx.shadowBlur = 15;
-        ctx.shadowOffsetY = 5;
+        // Shadow/Glow
+        ctx.shadowColor = "rgba(0, 0, 0, 0.25)"; 
+        ctx.shadowBlur = 10;
+        ctx.shadowOffsetY = 6;
         
-        // Render Name
-        ctx.font = 'bold 140px "Arial", sans-serif'; 
+        // Draw Name
+        ctx.font = 'bold 160px "Arial", sans-serif'; 
         ctx.fillStyle = gradient;
-        ctx.fillText(username.toUpperCase(), width / 2, 770);
+        ctx.fillText(username.toUpperCase(), width / 2, 720);
         
         ctx.restore(); 
 
-        // --- 4. LAUDATORY TEXT (Professional Wording) ---
-        ctx.fillStyle = '#334155'; // Dark Slate
-        ctx.font = '34px "Times New Roman", serif'; 
-        const lineHeight = 58; 
-        let startY = 900;
+        // Underline Decoration
+        ctx.beginPath();
+        ctx.moveTo(width / 2 - 350, 760);
+        ctx.lineTo(width / 2 + 350, 760);
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#ca8a04';
+        ctx.stroke();
 
-        // Line 1
-        ctx.fillText("In recognition of your outstanding intellectual acuity and exceptional performance", width / 2, startY);
-        // Line 2
-        ctx.fillText("demonstrated in the Advanced Mathematics Challenge. Your ability to solve complex", width / 2, startY + lineHeight);
-        // Line 3
-        ctx.fillText("problems with precision serves as a testament to your analytical potential.", width / 2, startY + (lineHeight * 2));
+        // --- 4. BODY TEXT (WRAPPED) ---
+        ctx.fillStyle = '#334155'; // Dark Grey
+        ctx.font = '42px "Times New Roman", serif';
+        const lineHeight = 65; 
         
-        // Score Line
-        ctx.font = 'bold 42px "Arial", sans-serif';
-        ctx.fillStyle = '#b91c1c'; // Deep Red
-        ctx.fillText(`ACHIEVEMENT SCORE: ${score}`, width / 2, startY + (lineHeight * 3) + 25);
+        // Text Wrapping Helper
+        function wrapText(context, text, x, y, maxWidth, lineHeight) {
+            const words = text.split(' ');
+            let line = '';
+            let currentY = y;
 
-        // --- 5. FOOTER & SIGNATURES ---
+            for(let n = 0; n < words.length; n++) {
+                const testLine = line + words[n] + ' ';
+                const metrics = context.measureText(testLine);
+                const testWidth = metrics.width;
+                if (testWidth > maxWidth && n > 0) {
+                    context.fillText(line, x, currentY);
+                    line = words[n] + ' ';
+                    currentY += lineHeight;
+                } else {
+                    line = testLine;
+                }
+            }
+            context.fillText(line, x, currentY);
+            return currentY;
+        }
+
+        const bodyText = "In recognition of your outstanding intellectual acuity and exceptional performance demonstrated in the Advanced Mathematics Challenge. Your ability to solve complex problems serves as a testament to your analytical potential.";
+        
+        // Draw Text
+        let endY = wrapText(ctx, bodyText, width / 2, 880, 1600, lineHeight);
+
+        // --- 5. SCORE ---
+        ctx.font = 'bold 55px "Arial", sans-serif';
+        ctx.fillStyle = '#dc2626'; // Red
+        ctx.fillText(`ACHIEVEMENT SCORE: ${score}`, width / 2, endY + 90);
+
+        // --- 6. FOOTER (Signatures & Website) ---
         const footerY = 1260;
-        ctx.strokeStyle = '#1e293b'; 
         ctx.lineWidth = 3;
+        ctx.strokeStyle = '#0f172a';
 
-        // --- LEFT: ADMIN ---
+        // -> LEFT: SIGNATURE
         const leftX = 500;
         ctx.beginPath(); ctx.moveTo(leftX - 180, footerY); ctx.lineTo(leftX + 180, footerY); ctx.stroke();
         
-        ctx.font = 'bold 28px "Arial", sans-serif'; 
+        ctx.font = 'bold 32px "Arial", sans-serif'; 
         ctx.fillStyle = '#0f172a';
-        ctx.fillText("CHHEANG SINHSINH", leftX, footerY + 45); 
-
-        ctx.font = 'italic 24px "Times New Roman", serif';
+        ctx.fillText("CHHEANG SINHSINH", leftX, footerY + 50); 
+        
+        ctx.font = 'italic 28px "Times New Roman", serif';
         ctx.fillStyle = '#64748b';
-        ctx.fillText("Founder & Administrator", leftX, footerY + 80); 
+        ctx.fillText("Founder & Administrator", leftX, footerY + 90); 
 
-        // --- CENTER: DATE ---
-        ctx.font = 'bold 26px "Arial", sans-serif';
-        ctx.fillStyle = '#94a3b8'; // Lighter grey for date
-        ctx.fillText(dateStr, width / 2, footerY + 45); 
+        // -> CENTER: DATE
+        ctx.font = 'bold 30px "Arial", sans-serif';
+        ctx.fillStyle = '#475569';
+        ctx.fillText(dateStr, width / 2, footerY + 50);
 
-        // --- RIGHT: WEBSITE ---
+        // -> RIGHT: WEBSITE (As requested: "website : braintest.fun")
         const rightX = 1500;
         ctx.beginPath(); ctx.moveTo(rightX - 180, footerY); ctx.lineTo(rightX + 180, footerY); ctx.stroke();
         
-        ctx.font = 'bold 28px "Arial", sans-serif'; 
-        ctx.fillStyle = '#0f172a';
-        ctx.fillText("www.braintest.fun", rightX, footerY + 45); 
-
-        ctx.font = 'italic 24px "Times New Roman", serif';
+        // The specific text requested
+        ctx.font = 'bold 35px "Arial", sans-serif'; 
+        ctx.fillStyle = '#2563eb'; // Blue for link feel
+        ctx.fillText("website : braintest.fun", rightX, footerY + 50); 
+        
+        ctx.font = 'italic 28px "Times New Roman", serif';
         ctx.fillStyle = '#64748b';
-        ctx.fillText("Official Platform", rightX, footerY + 80); 
+        ctx.fillText("Official Platform", rightX, footerY + 90); 
 
-        // Final Buffer Generation
+        // Output Buffer
         const buffer = canvas.toBuffer('image/png');
         res.set('Content-Type', 'image/png');
         res.send(buffer);
 
     } catch (err) {
         console.error("Certificate Generation Error:", err);
-        res.status(500).send("Failed to generate certificate. Please check server logs.");
+        res.status(500).send("Failed to generate certificate.");
     }
 });
 
 // ==========================================
-// 7. START SERVER
+// 8. START SERVER
 // ==========================================
 async function startServer() {
     if (!process.env.DATABASE_URL) {
