@@ -1,4 +1,4 @@
-require('dotenv').config();
+Require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -166,11 +166,9 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // 6. CERTIFICATE REQUEST API
 // ==========================================
 
-// ✅ API ទទួលសំណើ (អនុញ្ញាតឱ្យ Score 0)
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
     
-    // FIX: Score អាចស្មើ 0 បាន
     if (!username || score === undefined || score === null) {
         return res.status(400).json({ success: false, message: "Missing username or score" });
     }
@@ -242,7 +240,7 @@ app.get('/admin/requests', async (req, res) => {
                         <td style="color:${isHighScore ? '#16a34a' : '#dc2626'}; font-weight:bold;">${row.score}</td>
                         <td>${new Date(row.request_date).toLocaleDateString('km-KH')}</td>
                         <td>
-                            <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-gen">🖨️ បង្កើតលិខិត</a>
+                            <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-gen">🖨️ បង្កើតលិខិត (Standard)</a>
                         </td>
                     </tr>`;
             });
@@ -255,7 +253,7 @@ app.get('/admin/requests', async (req, res) => {
 });
 
 // ==========================================
-// 7. GENERATE CERTIFICATE LOGIC (2000x1414) 🎨
+// 7. GENERATE STANDARD CERTIFICATE (PROFESSIONAL DESIGN) 🏆
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -274,7 +272,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const months = ["មករា", "កុម្ភៈ", "មីនា", "មេសា", "ឧសភា", "មិថុនា", "កក្កដា", "សីហា", "កញ្ញា", "តុលា", "វិច្ឆិកា", "ធ្នូ"];
         const month = months[dateObj.getMonth()];
         const year = dateObj.getFullYear();
-        const khmerDate = `ថ្ងៃទី ${day} ខែ ${month} ឆ្នាំ ${year}`;
+        const khmerDate = `រាជធានីភ្នំពេញ, ថ្ងៃទី ${day} ខែ ${month} ឆ្នាំ ${year}`;
 
         // --- Setup Canvas (2000x1414) ---
         const width = 2000; 
@@ -288,81 +286,95 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             const image = await loadImage(templatePath);
             ctx.drawImage(image, 0, 0, width, height);
         } catch (e) {
-            return res.status(500).send("Error: រកមិនឃើញ file 'certificate-template.png' ក្នុង folder public");
+            return res.status(500).send("Error: រកមិនឃើញ file 'certificate-template.png'");
         }
 
         // ==========================================
-        // 🎨 DESIGN & TEXT RENDERING (DARK THEME)
+        // 🎨 STANDARD PROFESSIONAL DESIGN (LIGHT THEME)
         // ==========================================
         
         ctx.textAlign = 'center';
 
-        // 1. ឃ្លាផ្តើម
+        // 1. HEADLINE (ចំណងជើង)
+        ctx.font = 'bold 90px "Moul"'; 
+        ctx.fillStyle = '#1e3a8a'; // Navy Blue (ផ្លូវការ)
+        ctx.fillText("លិខិតសរសើរ", width / 2, 400); 
+
+        // 2. INTRO (ប្រគល់ជូន)
         ctx.font = '35px "Moul"'; 
-        ctx.fillStyle = '#cbd5e1'; // ពណ៌ប្រផេះស្រាល
-        ctx.fillText("លិខិតសរសើរនេះប្រគល់ជូនដោយសេចក្តីគោរពចំពោះ", width / 2, 530); 
+        ctx.fillStyle = '#4b5563'; // Gray
+        ctx.fillText("សូមប្រគល់ជូនដោយសេចក្តីគោរពចំពោះ", width / 2, 480);
 
-        // 2. ឈ្មោះអ្នកទទួល (GOLD GLOW) ✨
-        const gradient = ctx.createLinearGradient(width/2 - 250, 0, width/2 + 250, 0);
-        gradient.addColorStop(0, "#ca8a04");   // មាសងងឹត
-        gradient.addColorStop(0.5, "#fde047"); // មាសភ្លឺ
-        gradient.addColorStop(1, "#ca8a04");   // មាសងងឹត
+        // 3. NAME (ឈ្មោះអ្នកទទួល - LUXURY GOLD) ✨
+        // Gradient មាសសុទ្ធ
+        const gradient = ctx.createLinearGradient(width/2 - 300, 0, width/2 + 300, 0);
+        gradient.addColorStop(0, "#b45309");   // Bronze
+        gradient.addColorStop(0.2, "#d97706"); // Gold Dark
+        gradient.addColorStop(0.5, "#f59e0b"); // Gold Light
+        gradient.addColorStop(0.8, "#d97706"); // Gold Dark
+        gradient.addColorStop(1, "#b45309");   // Bronze
 
-        ctx.shadowColor = "rgba(253, 224, 71, 0.6)"; // ស្រមោលពន្លឺមាស
-        ctx.shadowBlur = 25;
+        // Shadow ឱ្យឈ្មោះលេចធ្លោខ្លាំង
+        ctx.shadowColor = "rgba(0,0,0,0.3)";
+        ctx.shadowBlur = 10;
+        ctx.shadowOffsetX = 4;
+        ctx.shadowOffsetY = 4;
         
-        ctx.font = '140px "Moul"'; 
+        ctx.font = '160px "Moul"'; 
         ctx.fillStyle = gradient;
-        ctx.fillText(username, width / 2, 700);
+        ctx.fillText(username, width / 2, 650);
 
         // Reset Shadow
         ctx.shadowColor = "transparent";
         ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
 
-        // 3. ពិន្ទុ
-        ctx.font = 'bold 45px "Arial", sans-serif';
-        ctx.fillStyle = '#ef4444'; // ពណ៌ក្រហមភ្លឺ
-        ctx.fillText(`ពិន្ទុសរុប: ${score}`, width / 2, 820);
-
-        // 4. ខ្លឹមសារ (ពណ៌ស)
-        ctx.fillStyle = '#f1f5f9'; // ពណ៌ស
-        ctx.font = '32px "Moul"'; 
-        const lineHeight = 70; 
-        let startY = 950;
-
-        // ឃ្លាទី ១
-        ctx.fillText("ប្អូនបានបញ្ចេញសមត្ថភាព និងចូលរួមយ៉ាងសកម្មក្នុងការដោះស្រាយលំហាត់គណិតវិទ្យាថ្នាក់ទី ១២", width / 2, startY);
-        
-        // ឃ្លាទី ២
-        ctx.fillText("នៅលើគេហទំព័រ braintest.fun ប្រកបដោយភាពត្រឹមត្រូវ និងទទួលបានលទ្ធផលគួរជាទីមោទកៈ។", width / 2, startY + lineHeight);
-        
-        // ឃ្លាទី ៣
-        ctx.fillText("លិខិតសរសើរនេះ គឺជាសក្ខីភាពបញ្ជាក់ថា ប្អូនគឺជាសិស្សដែលមានការតស៊ូ និងមានមូលដ្ឋានគ្រឹះរឹងមាំ។", width / 2, startY + (lineHeight * 2));
-        
-        // ឃ្លាទី ៤: ជូនពរ
-        ctx.fillStyle = '#4ade80'; // ពណ៌បៃតងភ្លឺ
-        ctx.fillText("យើងសូមជូនពរឱ្យប្អូនបន្តភាពជោគជ័យក្នុងការសិក្សា និងក្លាយជាធនធានមនុស្សដ៏ល្អសម្រាប់សង្គម។", width / 2, startY + (lineHeight * 3) + 15);
-
-        // 5. កាលបរិច្ឆេទ
-        ctx.fillStyle = '#94a3b8'; // ពណ៌ប្រផេះ
-        ctx.font = 'bold 30px "Arial", sans-serif'; 
-        ctx.fillText(khmerDate, width / 2, 1280);
-
-        // 6. Footer (ទទួលបានពី)
-        ctx.font = 'bold 28px "Courier New", sans-serif';
-        ctx.fillStyle = '#38bdf8'; // ពណ៌ផ្ទៃមេឃភ្លឺ
-        
-        // បន្ទាត់តុបតែង
+        // បន្ទាត់សង្កត់ពីក្រោមឈ្មោះ
         ctx.beginPath();
-        ctx.moveTo(width / 2 - 150, 1315);
-        ctx.lineTo(width / 2 + 150, 1315);
-        ctx.strokeStyle = '#64748b'; 
+        ctx.moveTo(width / 2 - 250, 680);
+        ctx.lineTo(width / 2 + 250, 680);
+        ctx.strokeStyle = '#1e3a8a'; // Navy Blue line
         ctx.lineWidth = 3;
         ctx.stroke();
 
-        ctx.fillText("ទទួលបានពី: www.braintest.fun", width / 2, 1360);
+        // 4. SCORE BADGE (ពិន្ទុ)
+        ctx.font = 'bold 45px "Arial", sans-serif';
+        ctx.fillStyle = '#b91c1c'; // Red Dark
+        ctx.fillText(`✨ ពិន្ទុសរុប: ${score} ✨`, width / 2, 760);
 
-        // Output
+        // 5. BODY TEXT (ខ្លឹមសារផ្លូវការ)
+        ctx.fillStyle = '#0f172a'; // Black/Dark Navy
+        ctx.font = '40px "Moul"'; 
+        const lineHeight = 75; 
+        let startY = 880;
+
+        // បែងចែកអត្ថបទជាបន្ទាត់ៗដើម្បីឱ្យស្អាត (Centered)
+        ctx.fillText("ដោយប្អូនបានបញ្ចេញសមត្ថភាព និងការខិតខំប្រឹងប្រែងយ៉ាងល្អប្រសើរ", width / 2, startY);
+        ctx.fillText("ក្នុងការដោះស្រាយលំហាត់គណិតវិទ្យានៅលើប្រព័ន្ធ BRAINTEST.FUN", width / 2, startY + lineHeight);
+        ctx.fillText("ប្រកបដោយភាពវៃឆ្លាត ត្រឹមត្រូវ និងទទួលបានលទ្ធផលជាទីមោទកៈ។", width / 2, startY + (lineHeight * 2));
+        
+        ctx.fillStyle = '#047857'; // Green for wish
+        ctx.fillText("សូមជូនពរឱ្យប្អូនទទួលបានជោគជ័យក្នុងការសិក្សា និងគ្រប់ភារកិច្ច។", width / 2, startY + (lineHeight * 3) + 20);
+
+        // 6. DATE (កាលបរិច្ឆេទ - ខាងឆ្វេង ឬ កណ្តាល)
+        ctx.fillStyle = '#334155'; 
+        ctx.font = 'bold 30px "Moul"'; 
+        ctx.fillText(khmerDate, width / 2, 1250);
+
+        // 7. FOOTER / SIGNATURE (ហត្ថលេខា Digital)
+        const footerY = 1340;
+        
+        // Website Badge
+        ctx.font = 'bold 40px "Courier New", sans-serif';
+        ctx.fillStyle = '#2563eb'; // Royal Blue
+        ctx.fillText("WWW.BRAINTEST.FUN", width / 2, footerY);
+        
+        ctx.font = '20px "Arial", sans-serif';
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText("Official Digital Certificate", width / 2, footerY + 30);
+
+        // Output Image
         const buffer = canvas.toBuffer('image/png');
         res.set('Content-Type', 'image/png');
         res.send(buffer);
