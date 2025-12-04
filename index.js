@@ -5,8 +5,8 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg'); 
-// នាំយក Canvas មកប្រើ
-const { registerFont, createCanvas, loadImage } = require('canvas');
+// ✅ នាំយក Canvas មកប្រើ (លុប registerFont ចេញពី require និងពី Startup)
+const { createCanvas, loadImage } = require('canvas');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -18,14 +18,7 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// ✅ រក្សាប្លុកកូដចុះឈ្មោះ Font Moul ដើម (ដើម្បីឱ្យ Server អាចចាប់ផ្តើមបាន)
-try {
-    const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
-    registerFont(fontPath, { family: 'Moul' });
-    console.log("✅ Font 'Moul' loaded successfully.");
-} catch (e) {
-    console.warn("⚠️ Warning: Could not find font 'Moul.ttf' in the public folder.");
-}
+// 🚫 កូដចុះឈ្មោះ Font Moul ត្រូវបានលុបចេញពី Startup ទាំងស្រុងដើម្បីដោះស្រាយបញ្ហា Crash
 
 const MODEL_NAME = "gemini-2.5-flash"; 
 
@@ -305,7 +298,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.shadowColor = "rgba(180, 83, 9, 0.6)"; 
         ctx.shadowBlur = 10;
         
-        ctx.font = 'bold 150px Arial, sans-serif'; // Font Arial
+        ctx.font = 'bold 150px Arial, sans-serif'; // Font Arial (ធំល្មម)
         ctx.fillStyle = gradient;
         ctx.fillText(username.toUpperCase(), width / 2, 650);
 
