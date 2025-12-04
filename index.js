@@ -17,16 +17,16 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// Load Custom Font (ប្រសិនបើមាន Moul.ttf នៅក្នុង folder public)
+// Load Custom Font (Optional)
 try {
     const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
     registerFont(fontPath, { family: 'Moul' });
-    console.log("✅ Font 'Moul' loaded.");
 } catch (e) {
     console.warn("⚠️ Custom font not found. Using system standard fonts.");
 }
 
-const MODEL_NAME = "gemini-1.5-flash"; 
+// ✅ ដាក់តាមសំណើរបស់អ្នក
+const MODEL_NAME = "gemini-2.5-flash"; 
 
 // Tracking Variables
 let totalPlays = 0;           
@@ -83,8 +83,19 @@ const limiter = rateLimit({
 
 app.use(express.static(path.join(__dirname, 'public'))); 
 
+// --- HOME ROUTE WITH ADMIN BUTTON ---
 app.get('/', (req, res) => {
-    res.send(`<h1 style="text-align:center; margin-top:50px;">BrainTest Backend Online 🟢</h1>`);
+    res.send(`
+        <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
+            <h1 style="color: #22c55e;">BrainTest Backend Online 🟢</h1>
+            <p>System is running smoothly.</p>
+            <div style="margin-top: 30px;">
+                <a href="/admin/requests" style="text-decoration: none; color: white; background-color: #0284c7; padding: 12px 25px; border-radius: 5px; font-weight: bold; font-size: 16px;">
+                    👮‍♂️ Go to Admin Panel
+                </a>
+            </div>
+        </div>
+    `);
 });
 
 app.get('/stats', (req, res) => res.json({ total_plays: totalPlays, unique_players: uniqueVisitors.size }));
@@ -100,6 +111,7 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
         const result = await model.generateContent(prompt);
         res.json({ text: result.response.text() });
     } catch (error) {
+        console.error("Gemini Error:", error);
         res.status(500).json({ error: "AI Error" });
     }
 });
@@ -133,15 +145,40 @@ app.post('/api/submit-request', async (req, res) => {
     } catch (err) { res.status(500).json({ success: false }); }
 });
 
-// Admin Panel
+// --- ADMIN PANEL ---
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
         const result = await client.query('SELECT * FROM certificate_requests ORDER BY request_date DESC LIMIT 50');
         client.release();
-        let html = `<html><body style="font-family:sans-serif; padding:20px;"><h1>Certificate Requests</h1><table border="1" cellpadding="10" style="border-collapse:collapse; width:100%;"><tr><th>ID</th><th>Name</th><th>Score</th><th>Action</th></tr>`;
+        
+        let html = `
+        <html>
+        <head>
+            <title>Admin Dashboard</title>
+            <style>
+                body { font-family: sans-serif; padding: 20px; background: #f1f5f9; }
+                table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+                th, td { padding: 15px; border-bottom: 1px solid #ddd; text-align: left; }
+                th { background: #3b82f6; color: white; }
+                tr:hover { background: #f8fafc; }
+                a { text-decoration: none; background: #22c55e; color: white; padding: 8px 12px; border-radius: 4px; }
+            </style>
+        </head>
+        <body>
+            <h1>👮‍♂️ Certificate Requests</h1>
+            <table><tr><th>ID</th><th>Name</th><th>Score</th><th>Date</th><th>Action</th></tr>`;
+        
+        if(result.rows.length === 0) html += `<tr><td colspan="5" style="text-align:center;">No requests yet.</td></tr>`;
+        
         result.rows.forEach(row => {
-            html += `<tr><td>${row.id}</td><td>${row.username}</td><td>${row.score}</td><td><a href="/admin/generate-cert/${row.id}" target="_blank">🖨️ Print</a></td></tr>`;
+            html += `<tr>
+                <td>${row.id}</td>
+                <td><strong>${row.username}</strong></td>
+                <td style="color:${row.score>=500?'green':'red'}">${row.score}</td>
+                <td>${new Date(row.request_date).toLocaleDateString()}</td>
+                <td><a href="/admin/generate-cert/${row.id}" target="_blank">🖨️ Print</a></td>
+            </tr>`;
         });
         html += `</table></body></html>`;
         res.send(html);
@@ -149,7 +186,7 @@ app.get('/admin/requests', async (req, res) => {
 });
 
 // ==========================================
-// 4. CERTIFICATE GENERATION (FIXED FONTS)
+// 4. CERTIFICATE GENERATOR (ENGLISH + FIXES)
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -180,11 +217,9 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         ctx.textAlign = 'center';
 
-        // NOTE: Using 'serif' and 'sans-serif' ensures it works on Linux/Render
-        
         // --- 1. TITLE ---
         ctx.fillStyle = '#1e3a8a'; // Blue
-        ctx.font = 'bold 110px serif'; // Use generic serif
+        ctx.font = 'bold 110px serif'; 
         ctx.fillText("CERTIFICATE", width / 2, 350);
         
         ctx.fillStyle = '#ca8a04'; // Gold
@@ -205,7 +240,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.fillStyle = gradient;
         ctx.shadowColor = "rgba(0,0,0,0.2)"; ctx.shadowBlur = 10; ctx.shadowOffsetY = 5;
         
-        // Very important: Use 'sans-serif' for bold, clean look on Linux
+        // Use 'sans-serif' to ensure bold visibility on Linux/Render
         ctx.font = 'bold 160px sans-serif'; 
         ctx.fillText(username.toUpperCase(), width / 2, 720);
         ctx.restore(); 
@@ -214,12 +249,11 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.beginPath(); ctx.moveTo(width/2 - 350, 760); ctx.lineTo(width/2 + 350, 760);
         ctx.lineWidth = 4; ctx.strokeStyle = '#ca8a04'; ctx.stroke();
 
-        // --- 4. BODY TEXT ---
+        // --- 4. BODY TEXT (English) ---
         ctx.fillStyle = '#334155';
-        ctx.font = '40px serif'; // Increased size again
-        const bodyText = "In recognition of your outstanding intellectual acuity and exceptional performance demonstrated in the Advanced Mathematics Challenge.";
+        ctx.font = '40px serif'; 
         
-        // Simple manual wrap to ensure visibility
+        // Manual wrapping for guaranteed alignment
         ctx.fillText("In recognition of your outstanding intellectual acuity", width / 2, 880);
         ctx.fillText("and exceptional performance demonstrated in the", width / 2, 940);
         ctx.fillText("Advanced Mathematics Challenge.", width / 2, 1000);
@@ -248,7 +282,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.beginPath(); ctx.moveTo(1350, footerY); ctx.lineTo(1650, footerY); ctx.stroke();
         ctx.font = 'bold 35px sans-serif'; ctx.fillStyle = '#2563eb'; // Blue
         
-        // *** ដាក់តាមសំណើ ***
+        // *** ដាក់តាមសំណើ: website : braintest.fun (No www) ***
         ctx.fillText("website : braintest.fun", 1500, footerY + 50); 
         
         ctx.font = 'italic 25px serif'; ctx.fillStyle = '#64748b';
