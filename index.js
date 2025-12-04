@@ -18,7 +18,8 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// ចុះឈ្មោះ Font ខ្មែរ (Moul) - រក្សាទុកក្នុងកូដដើម ប៉ុន្តែ Certificate ប្រើ Arial ដើម្បីស្ថេរភាព
+// ⚠️ កូដចុះឈ្មោះ Font ខ្មែរ (Moul) ត្រូវបានដាក់ Comment Out ដើម្បីដោះស្រាយបញ្ហា Server Crash
+/*
 try {
     const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
     registerFont(fontPath, { family: 'Moul' });
@@ -26,6 +27,7 @@ try {
 } catch (e) {
     console.warn("⚠️ Warning: រកមិនឃើញ Font 'Moul.ttf' ក្នុង folder public។");
 }
+*/
 
 const MODEL_NAME = "gemini-2.5-flash"; 
 
@@ -253,7 +255,7 @@ app.get('/admin/requests', async (req, res) => {
 });
 
 // ==========================================
-// 7. GENERATE CERTIFICATE LOGIC (FINAL STABILITY VERSION - ARIA L ONLY) 🎨
+// 7. GENERATE CERTIFICATE LOGIC (FINAL STABILITY VERSION) 🎨
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
