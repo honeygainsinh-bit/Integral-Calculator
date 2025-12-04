@@ -1,10 +1,11 @@
-require('dotenv').config();
+Require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg'); 
+const axios = require('axios'); // ✅ នាំចូល Axios
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -51,7 +52,7 @@ async function initializeDatabase() {
             );
         `);
 
-        // ✅ Table Certificate Requests (ដាក់មកវិញ)
+        // Table Certificate Requests
         await client.query(`
             CREATE TABLE IF NOT EXISTS certificate_requests (
                 id SERIAL PRIMARY KEY,
@@ -152,10 +153,9 @@ app.get('/api/leaderboard/top', async (req, res) => {
 });
 
 // ==========================================
-// 6. CERTIFICATE REQUEST API (ដាក់មកវិញ)
+// 6. CERTIFICATE REQUEST API
 // ==========================================
 
-// ✅ API ទទួលសំណើ (អនុញ្ញាតឱ្យ Score 0)
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
     
@@ -175,7 +175,7 @@ app.post('/api/submit-request', async (req, res) => {
     }
 });
 
-// ✅ Admin HTML View (សម្រាប់មើលទិន្នន័យ តែគ្មានប៊ូតុង Print)
+// ✅ Admin HTML View (សម្រាប់មើលទិន្នន័យ)
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -196,6 +196,11 @@ app.get('/admin/requests', async (req, res) => {
                 th, td { padding: 15px; border-bottom: 1px solid #e2e8f0; text-align: left; }
                 th { background: #3b82f6; color: white; }
                 tr:hover { background: #f8fafc; }
+                .btn-gen { 
+                    background: #2563eb; color: white; text-decoration: none; 
+                    padding: 8px 12px; border-radius: 6px; font-weight: bold; font-size: 0.9rem;
+                    display: inline-flex; align-items: center; gap: 5px;
+                }
             </style>
         </head>
         <body>
@@ -207,12 +212,13 @@ app.get('/admin/requests', async (req, res) => {
                         <th>ឈ្មោះ (Username)</th>
                         <th>ពិន្ទុ (Score)</th>
                         <th>កាលបរិច្ឆេទ</th>
+                        <th>សកម្មភាព</th>
                     </tr>
                 </thead>
                 <tbody>`;
 
         if (result.rows.length === 0) {
-            html += `<tr><td colspan="4" style="text-align:center; padding: 20px; color: gray;">មិនទាន់មានសំណើថ្មីៗទេ។</td></tr>`;
+            html += `<tr><td colspan="5" style="text-align:center; padding: 20px; color: gray;">មិនទាន់មានសំណើថ្មីៗទេ។</td></tr>`;
         } else {
             result.rows.forEach(row => {
                 const isHighScore = row.score >= 500;
@@ -222,6 +228,9 @@ app.get('/admin/requests', async (req, res) => {
                         <td style="font-weight:bold; color: #334155;">${row.username}</td>
                         <td style="color:${isHighScore ? '#16a34a' : '#dc2626'}; font-weight:bold;">${row.score}</td>
                         <td>${new Date(row.request_date).toLocaleDateString('km-KH')}</td>
+                        <td>
+                            <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-gen">🌐 មើល Design</a>
+                        </td>
                     </tr>`;
             });
         }
@@ -233,7 +242,55 @@ app.get('/admin/requests', async (req, res) => {
 });
 
 // ==========================================
-// 7. START SERVER
+// 7. GENERATE CERTIFICATE LOGIC (EXTERNAL API) 🎨
+// ==========================================
+app.get('/admin/generate-cert/:id', async (req, res) => {
+    try {
+        const id = req.params.id;
+        const client = await pool.connect();
+        const result = await client.query('SELECT * FROM certificate_requests WHERE id = $1', [id]);
+        client.release();
+
+        if (result.rows.length === 0) return res.status(404).send("Not Found");
+
+        const { username, score } = result.rows[0];
+
+        // ----------------------------------------------------
+        // ✅ Call External API សម្រាប់ Image Generation
+        // ----------------------------------------------------
+        
+        // ⚠️ អ្នកត្រូវកំណត់ EXTERNAL_IMAGE_API_ENDPOINT នៅក្នុង Environment Variables
+        // ឧទាហរណ៍៖ https://your-external-service.com/api/cert
+        const EXTERNAL_API_BASE_URL = process.env.EXTERNAL_IMAGE_API || "http://localhost:8080/default-api-needed-setup"; 
+        
+        const apiUrl = `${EXTERNAL_API_BASE_URL}?name=${encodeURIComponent(username)}&score=${score}`;
+
+        // 1. ធ្វើការ Call API ទៅកាន់ Server ខាងក្រៅ
+        const apiResponse = await axios.get(apiUrl);
+
+        // 2. ទទួល URL រូបភាព (ត្រូវផ្ទៀងផ្ទាត់ Key តាម API ជាក់ស្តែង)
+        const imageUrl = apiResponse.data.imageUrl; 
+        
+        // 3. ផ្ទេរអ្នកប្រើប្រាស់ទៅ URL រូបភាព
+        if (imageUrl) {
+             console.log(`✅ Generated Image URL: ${imageUrl}`);
+             // ប្រើ res.redirect ដើម្បីបង្ហាញរូបភាព PNG ផ្ទាល់
+             res.redirect(imageUrl); 
+        } else {
+             throw new Error("External API did not return image URL.");
+        }
+
+    } catch (err) {
+        console.error("External Generation API Error:", err.message);
+        res.status(500).send(`
+            <h1>❌ Generation Error</h1>
+            <p>មិនអាចបង្កើតរូបភាពបានទេ។ សូមផ្ទៀងផ្ទាត់ EXTERNAL_IMAGE_API និង Axios/Fetch ។</p>
+        `);
+    }
+});
+
+// ==========================================
+// 8. START SERVER
 // ==========================================
 async function startServer() {
     if (!process.env.DATABASE_URL) {
