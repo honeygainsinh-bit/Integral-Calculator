@@ -18,13 +18,13 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// ចុះឈ្មោះ Font ខ្មែរ (Moul)
+// ចុះឈ្មោះ Font (Moul សម្រាប់ Admin Panel ឬប្រើតាមតម្រូវការ)
 try {
     const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
     registerFont(fontPath, { family: 'Moul' });
     console.log("✅ Font 'Moul' loaded successfully.");
 } catch (e) {
-    console.warn("⚠️ Warning: រកមិនឃើញ Font 'Moul.ttf' ក្នុង folder public។");
+    console.warn("⚠️ Warning: Font 'Moul.ttf' not found. Using system fonts.");
 }
 
 const MODEL_NAME = "gemini-2.5-flash"; 
@@ -166,11 +166,10 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // 6. CERTIFICATE REQUEST API
 // ==========================================
 
-// ✅ API ទទួលសំណើ (អនុញ្ញាតឱ្យ Score 0)
+// ✅ API ទទួលសំណើ
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
     
-    // FIX: Score អាចស្មើ 0 បាន
     if (!username || score === undefined || score === null) {
         return res.status(400).json({ success: false, message: "Missing username or score" });
     }
@@ -200,7 +199,7 @@ app.get('/admin/requests', async (req, res) => {
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Admin - សំណើសុំលិខិតសរសើរ</title>
+            <title>Admin - Certificate Requests</title>
             <style>
                 body { font-family: sans-serif; padding: 20px; background: #f1f5f9; }
                 h1 { color: #1e3a8a; }
@@ -242,7 +241,7 @@ app.get('/admin/requests', async (req, res) => {
                         <td style="color:${isHighScore ? '#16a34a' : '#dc2626'}; font-weight:bold;">${row.score}</td>
                         <td>${new Date(row.request_date).toLocaleDateString('km-KH')}</td>
                         <td>
-                            <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-gen">🖨️ បង្កើតលិខិត</a>
+                            <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-gen">🖨️ បង្កើតលិខិត (English)</a>
                         </td>
                     </tr>`;
             });
@@ -255,7 +254,7 @@ app.get('/admin/requests', async (req, res) => {
 });
 
 // ==========================================
-// 7. GENERATE CERTIFICATE LOGIC (2000x1414) 🎨
+// 7. GENERATE CERTIFICATE LOGIC (ENGLISH & PROFESSIONAL)
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -268,13 +267,13 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         const { username, score, request_date } = result.rows[0];
 
-        // --- កាលបរិច្ឆេទខ្មែរ ---
+        // --- English Date Format ---
         const dateObj = new Date(request_date);
-        const day = dateObj.getDate().toString().padStart(2, '0');
-        const months = ["មករា", "កុម្ភៈ", "មីនា", "មេសា", "ឧសភា", "មិថុនា", "កក្កដា", "សីហា", "កញ្ញា", "តុលា", "វិច្ឆិកា", "ធ្នូ"];
-        const month = months[dateObj.getMonth()];
-        const year = dateObj.getFullYear();
-        const khmerDate = `ថ្ងៃទី ${day} ខែ ${month} ឆ្នាំ ${year}`;
+        const dateStr = dateObj.toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+        });
 
         // --- Setup Canvas (2000x1414) ---
         const width = 2000; 
@@ -288,79 +287,113 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             const image = await loadImage(templatePath);
             ctx.drawImage(image, 0, 0, width, height);
         } catch (e) {
-            return res.status(500).send("Error: រកមិនឃើញ file 'certificate-template.png' ក្នុង folder public");
+            return res.status(500).send("Error: 'certificate-template.png' not found in public folder.");
         }
 
         // ==========================================
-        // 🎨 DESIGN & TEXT RENDERING (DARK THEME)
+        // 🎨 PROFESSIONAL DESIGN (ENGLISH)
         // ==========================================
         
         ctx.textAlign = 'center';
 
-        // 1. ឃ្លាផ្តើម
-        ctx.font = '35px "Moul"'; 
-        ctx.fillStyle = '#cbd5e1'; // ពណ៌ប្រផេះស្រាល
-        ctx.fillText("លិខិតសរសើរនេះប្រគល់ជូនដោយសេចក្តីគោរពចំពោះ", width / 2, 530); 
+        // 1. MAIN HEADER
+        // Title: CERTIFICATE
+        ctx.font = 'bold 100px "Times New Roman", serif'; 
+        ctx.fillStyle = '#1e3a8a'; // Dark Blue (Professional)
+        ctx.fillText("CERTIFICATE", width / 2, 450);
 
-        // 2. ឈ្មោះអ្នកទទួល (GOLD GLOW) ✨
-        const gradient = ctx.createLinearGradient(width/2 - 250, 0, width/2 + 250, 0);
-        gradient.addColorStop(0, "#ca8a04");   // មាសងងឹត
-        gradient.addColorStop(0.5, "#fde047"); // មាសភ្លឺ
-        gradient.addColorStop(1, "#ca8a04");   // មាសងងឹត
+        // Sub-Title: OF ACHIEVEMENT
+        ctx.font = '50px "Times New Roman", serif';
+        ctx.letterSpacing = "10px"; // Add spacing for elegance
+        ctx.fillText("OF ACHIEVEMENT", width / 2, 520);
+        ctx.letterSpacing = "0px"; // Reset
 
-        ctx.shadowColor = "rgba(253, 224, 71, 0.6)"; // ស្រមោលពន្លឺមាស
-        ctx.shadowBlur = 25;
+        // 2. PRESENTATION LINE
+        ctx.font = 'italic 35px "Times New Roman", serif'; 
+        ctx.fillStyle = '#64748b'; // Slate Grey
+        ctx.fillText("This certificate is proudly presented to", width / 2, 620); 
+
+        // 3. RECIPIENT NAME (GOLDEN GLOW & ATTRACTIVE) ✨
+        ctx.save(); // Save state for special effects
         
-        ctx.font = '140px "Moul"'; 
+        // Gold Gradient
+        const gradient = ctx.createLinearGradient(width/2 - 400, 0, width/2 + 400, 0);
+        gradient.addColorStop(0, "#b45309");   // Dark Gold/Bronze
+        gradient.addColorStop(0.3, "#fcd34d"); // Bright Gold
+        gradient.addColorStop(0.5, "#fffbeb"); // Very light Gold (Shine)
+        gradient.addColorStop(0.7, "#fcd34d"); // Bright Gold
+        gradient.addColorStop(1, "#b45309");   // Dark Gold/Bronze
+
+        // Glow Effect (Shadow)
+        ctx.shadowColor = "rgba(0, 0, 0, 0.25)"; 
+        ctx.shadowBlur = 15;
+        ctx.shadowOffsetX = 5;
+        ctx.shadowOffsetY = 5;
+        
+        // Big Font Name
+        ctx.font = 'bold 150px "Arial", sans-serif'; 
         ctx.fillStyle = gradient;
-        ctx.fillText(username, width / 2, 700);
+        ctx.fillText(username.toUpperCase(), width / 2, 780);
+        
+        ctx.restore(); // Restore to normal (remove shadow for next text)
 
-        // Reset Shadow
-        ctx.shadowColor = "transparent";
-        ctx.shadowBlur = 0;
+        // 4. BODY TEXT
+        ctx.fillStyle = '#334155'; // Dark Grey
+        ctx.font = '35px "Times New Roman", serif'; 
+        const lineHeight = 60; 
+        let startY = 920;
 
-        // 3. ពិន្ទុ
+        ctx.fillText("For demonstrating exceptional problem-solving skills and outstanding", width / 2, startY);
+        ctx.fillText("dedication in the Advanced Mathematics Challenge on BrainTest.fun.", width / 2, startY + lineHeight);
+        
+        // 5. SCORE DISPLAY
         ctx.font = 'bold 45px "Arial", sans-serif';
-        ctx.fillStyle = '#ef4444'; // ពណ៌ក្រហមភ្លឺ
-        ctx.fillText(`ពិន្ទុសរុប: ${score}`, width / 2, 820);
+        ctx.fillStyle = '#dc2626'; // Red for visibility
+        ctx.fillText(`FINAL SCORE: ${score}`, width / 2, startY + (lineHeight * 2) + 20);
 
-        // 4. ខ្លឹមសារ (ពណ៌ស)
-        ctx.fillStyle = '#f1f5f9'; // ពណ៌ស
-        ctx.font = '32px "Moul"'; 
-        const lineHeight = 70; 
-        let startY = 950;
-
-        // ឃ្លាទី ១
-        ctx.fillText("ប្អូនបានបញ្ចេញសមត្ថភាព និងចូលរួមយ៉ាងសកម្មក្នុងការដោះស្រាយលំហាត់គណិតវិទ្យាថ្នាក់ទី ១២", width / 2, startY);
-        
-        // ឃ្លាទី ២
-        ctx.fillText("នៅលើគេហទំព័រ braintest.fun ប្រកបដោយភាពត្រឹមត្រូវ និងទទួលបានលទ្ធផលគួរជាទីមោទកៈ។", width / 2, startY + lineHeight);
-        
-        // ឃ្លាទី ៣
-        ctx.fillText("លិខិតសរសើរនេះ គឺជាសក្ខីភាពបញ្ជាក់ថា ប្អូនគឺជាសិស្សដែលមានការតស៊ូ និងមានមូលដ្ឋានគ្រឹះរឹងមាំ។", width / 2, startY + (lineHeight * 2));
-        
-        // ឃ្លាទី ៤: ជូនពរ
-        ctx.fillStyle = '#4ade80'; // ពណ៌បៃតងភ្លឺ
-        ctx.fillText("យើងសូមជូនពរឱ្យប្អូនបន្តភាពជោគជ័យក្នុងការសិក្សា និងក្លាយជាធនធានមនុស្សដ៏ល្អសម្រាប់សង្គម។", width / 2, startY + (lineHeight * 3) + 15);
-
-        // 5. កាលបរិច្ឆេទ
-        ctx.fillStyle = '#94a3b8'; // ពណ៌ប្រផេះ
-        ctx.font = 'bold 30px "Arial", sans-serif'; 
-        ctx.fillText(khmerDate, width / 2, 1280);
-
-        // 6. Footer (ទទួលបានពី)
-        ctx.font = 'bold 28px "Courier New", sans-serif';
-        ctx.fillStyle = '#38bdf8'; // ពណ៌ផ្ទៃមេឃភ្លឺ
-        
-        // បន្ទាត់តុបតែង
-        ctx.beginPath();
-        ctx.moveTo(width / 2 - 150, 1315);
-        ctx.lineTo(width / 2 + 150, 1315);
-        ctx.strokeStyle = '#64748b'; 
+        // ==========================================
+        // ✍️ FOOTER & SIGNATURES
+        // ==========================================
+        const footerY = 1250;
+        ctx.strokeStyle = '#0f172a'; // Line color
         ctx.lineWidth = 3;
+
+        // --- LEFT: ADMIN (CHHEANG SINHSINH) ---
+        const leftX = 500;
+        // Draw Line
+        ctx.beginPath();
+        ctx.moveTo(leftX - 200, footerY);
+        ctx.lineTo(leftX + 200, footerY);
         ctx.stroke();
 
-        ctx.fillText("ទទួលបានពី: www.braintest.fun", width / 2, 1360);
+        ctx.font = 'bold 30px "Arial", sans-serif';
+        ctx.fillStyle = '#0f172a';
+        ctx.fillText("CHHEANG SINHSINH", leftX, footerY + 45); // Name
+
+        ctx.font = 'italic 25px "Times New Roman", serif';
+        ctx.fillStyle = '#64748b';
+        ctx.fillText("Founder & Administrator", leftX, footerY + 80); // Title
+
+        // --- CENTER: DATE ---
+        ctx.font = 'bold 28px "Arial", sans-serif';
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText(dateStr, width / 2, footerY + 45); 
+
+        // --- RIGHT: WEBSITE (www.braintest.fun) ---
+        const rightX = 1500;
+        // Draw Line
+        ctx.beginPath();
+        ctx.moveTo(rightX - 200, footerY);
+        ctx.lineTo(rightX + 200, footerY);
+        ctx.stroke();
+
+        ctx.font = 'bold 30px "Arial", sans-serif';
+        ctx.fillStyle = '#0f172a';
+        ctx.fillText("www.braintest.fun", rightX, footerY + 45); // URL
+
+        ctx.font = 'italic 25px "Times New Roman", serif';
+        ctx.fillStyle = '#64748b';
+        ctx.fillText("Official Platform", rightX, footerY + 80); // Title
 
         // Output
         const buffer = canvas.toBuffer('image/png');
