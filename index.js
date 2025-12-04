@@ -5,10 +5,11 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg'); 
-// កែប្រែ ១: លុប registerFont ចេញ
-const { createCanvas, loadImage } = require('canvas');
+// ✅ នាំយក Canvas មកប្រើ (ដាក់ registerFont ត្រឡប់មកវិញដើម្បីជួសជុល Exited with status 1)
+const { registerFont, createCanvas, loadImage } = require('canvas');
 
 const app = express();
+// កំណត់ Port 3000 ជាគោល (ឬតាម Environment)
 const port = process.env.PORT || 3000;
 
 // ==========================================
@@ -18,7 +19,8 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// កែប្រែ ១ (ត): លុបប្លុកកូដចុះឈ្មោះ Font Moul ចោលទាំងស្រុង
+// 🚫 លុបកូដចុះឈ្មោះ Font Moul ចេញពី Function ដើម្បីការពារបញ្ហា Rendering
+// (យើងទុកតែ registerFont ក្នុង require តែមិនហៅ function ទេ)
 
 const MODEL_NAME = "gemini-2.5-flash"; 
 
@@ -28,7 +30,6 @@ const uniqueVisitors = new Set();
 
 // Middleware: Log Request
 app.use((req, res, next) => {
-    // Log ជាភាសាអង់គ្លេសដើម្បីឱ្យស៊ីគ្នា
     console.log(`[${new Date().toLocaleTimeString('en-US')}] 📡 ${req.method} ${req.path}`);
     next();
 });
@@ -160,11 +161,9 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // 6. CERTIFICATE REQUEST API
 // ==========================================
 
-// ✅ API Receive Request (Score 0 allowed)
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
     
-    // FIX: Score អាចស្មើ 0 បាន
     if (!username || score === undefined || score === null) {
         return res.status(400).json({ success: false, message: "Missing username or score" });
     }
@@ -218,7 +217,7 @@ app.get('/admin/requests', async (req, res) => {
                         <th>#ID</th>
                         <th>Username</th>
                         <th>Score</th>
-                        <th>Date</th>
+                        <th>Request Date</th>
                         <th>Action</th>
                     </tr>
                 </thead>
@@ -264,7 +263,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         const { username, score, request_date } = result.rows[0];
 
-        // --- កាលបរិច្ឆេទជាភាសាអង់គ្លេស ---
+        // --- English Date Format ---
         const dateObj = new Date(request_date);
         const englishDate = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
@@ -274,31 +273,31 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
 
-        // កែប្រែ ៣: ប្រើផ្ទៃខាងក្រោយពណ៌ស (White Background) ជំនួស Template Image
+        // ✅ ប្រើផ្ទៃខាងក្រោយពណ៌សសុទ្ធ (ជំនួសរូបភាព Template)
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, width, height);
 
         // ==========================================
-        // 🎨 DESIGN & TEXT RENDERING (ENGLISH)
+        // 🎨 DESIGN & TEXT RENDERING (ENGLISH - Arial)
         // ==========================================
         
         ctx.textAlign = 'center';
 
-        // 1. Opening Phrase (Dark Color for White BG)
+        // 1. Opening Phrase 
         ctx.font = '45px Arial, sans-serif'; 
         ctx.fillStyle = '#334155'; // Dark Slate Gray
         ctx.fillText("This Certificate of Achievement is Proudly Presented to", width / 2, 450); 
 
         // 2. Recipient Name (GOLD EFFECT) ✨
         const gradient = ctx.createLinearGradient(width/2 - 250, 0, width/2 + 250, 0);
-        gradient.addColorStop(0, "#854d0e");   // Dark Gold
-        gradient.addColorStop(0.5, "#fde047"); // Bright Gold
-        gradient.addColorStop(1, "#854d0e");   // Dark Gold
+        gradient.addColorStop(0, "#854d0e");   
+        gradient.addColorStop(0.5, "#fde047"); 
+        gradient.addColorStop(1, "#854d0e");   
 
         ctx.shadowColor = "rgba(180, 83, 9, 0.6)"; 
         ctx.shadowBlur = 10;
         
-        ctx.font = 'bold 150px Arial, sans-serif'; 
+        ctx.font = 'bold 150px Arial, sans-serif'; // Font Arial
         ctx.fillStyle = gradient;
         ctx.fillText(username.toUpperCase(), width / 2, 650);
 
@@ -349,7 +348,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.lineWidth = 3;
         ctx.stroke();
 
-        ctx.fillText("Website: braintest.fun", width / 2, 1360);
+        ctx.fillText("Website: braintest.fun", width / 2, 1360); 
 
         // Output
         const buffer = canvas.toBuffer('image/png');
