@@ -1,0 +1,17 @@
+services:
+  # ឈ្មោះ Service របស់អ្នកគឺ Integral-Calculator
+  - type: web
+    name: Integral-Calculator
+    runtime: node
+    # កំណត់ថាត្រូវដំឡើង apt buildpack
+    buildpacks:
+      - url: https://github.com/heroku/heroku-buildpack-apt
+    # កំណត់ថាត្រូវដំឡើង Cairo, Pango, etc.
+    apt:
+      packages:
+        - libcairo2-dev
+        - libpango1.0-dev
+        - libjpeg-turbo8-dev
+        - libgif-dev
+    buildCommand: npm install
+    startCommand: node index.js
