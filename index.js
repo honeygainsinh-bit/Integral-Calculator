@@ -5,13 +5,11 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg'); 
-// Import Canvas modules. registerFont has been removed for Render compatibility.
+// កែប្រែ ១: លុប registerFont ចេញ
 const { createCanvas, loadImage } = require('canvas');
 
-// ✅ KOR-RECTION: Set port to 3000 as fallback (as requested)
-const port = process.env.PORT || 3000;
-
 const app = express();
+const port = process.env.PORT || 3000;
 
 // ==========================================
 // 1. SETUP & CONFIGURATION
@@ -20,7 +18,7 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// 🚫 Font Registration for Moul.ttf has been removed to prevent deployment timeout/failure on Render.
+// កែប្រែ ១ (ត): លុបប្លុកកូដចុះឈ្មោះ Font Moul ចោលទាំងស្រុង
 
 const MODEL_NAME = "gemini-2.5-flash"; 
 
@@ -30,7 +28,7 @@ const uniqueVisitors = new Set();
 
 // Middleware: Log Request
 app.use((req, res, next) => {
-    // Using English locale for consistency with content
+    // Log ជាភាសាអង់គ្លេសដើម្បីឱ្យស៊ីគ្នា
     console.log(`[${new Date().toLocaleTimeString('en-US')}] 📡 ${req.method} ${req.path}`);
     next();
 });
@@ -40,8 +38,7 @@ app.use((req, res, next) => {
 // ==========================================
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    // Note: SSL is kept for production compatibility, remove if you use a local non-SSL DB.
-    ssl: { rejectUnauthorized: false } 
+    ssl: { rejectUnauthorized: false }
 });
 
 async function initializeDatabase() {
@@ -73,8 +70,7 @@ async function initializeDatabase() {
         console.log("✅ Database initialized: Tables ready.");
         client.release();
     } catch (err) {
-        // Log the error but do NOT crash the server if initialization fails after start
-        console.error("❌ Database initialization error (Running in background):", err.message);
+        console.error("❌ Database initialization error:", err.message);
     }
 }
 
@@ -168,7 +164,7 @@ app.get('/api/leaderboard/top', async (req, res) => {
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
     
-    // FIX: Score can be 0
+    // FIX: Score អាចស្មើ 0 បាន
     if (!username || score === undefined || score === null) {
         return res.status(400).json({ success: false, message: "Missing username or score" });
     }
@@ -185,7 +181,7 @@ app.post('/api/submit-request', async (req, res) => {
     }
 });
 
-// ✅ Admin HTML View (English)
+// ✅ Admin HTML View (English Interface)
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -222,7 +218,7 @@ app.get('/admin/requests', async (req, res) => {
                         <th>#ID</th>
                         <th>Username</th>
                         <th>Score</th>
-                        <th>Request Date</th>
+                        <th>Date</th>
                         <th>Action</th>
                     </tr>
                 </thead>
@@ -255,7 +251,7 @@ app.get('/admin/requests', async (req, res) => {
 });
 
 // ==========================================
-// 7. GENERATE CERTIFICATE LOGIC (English Standard) 🎨
+// 7. GENERATE CERTIFICATE LOGIC (English & White BG)
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -268,7 +264,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         const { username, score, request_date } = result.rows[0];
 
-        // --- English Date Format ---
+        // --- កាលបរិច្ឆេទជាភាសាអង់គ្លេស ---
         const dateObj = new Date(request_date);
         const englishDate = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
@@ -278,32 +274,31 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
 
-        // ✅ RENDER SOLID WHITE BACKGROUND (Standard Base)
+        // កែប្រែ ៣: ប្រើផ្ទៃខាងក្រោយពណ៌ស (White Background) ជំនួស Template Image
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, width, height);
 
         // ==========================================
-        // 🎨 DESIGN & TEXT RENDERING (English Content - Standard Font)
+        // 🎨 DESIGN & TEXT RENDERING (ENGLISH)
         // ==========================================
         
         ctx.textAlign = 'center';
 
-        // 1. Opening Phrase
+        // 1. Opening Phrase (Dark Color for White BG)
         ctx.font = '45px Arial, sans-serif'; 
-        ctx.fillStyle = '#334155'; // Darker color for white background
+        ctx.fillStyle = '#334155'; // Dark Slate Gray
         ctx.fillText("This Certificate of Achievement is Proudly Presented to", width / 2, 450); 
-        
+
         // 2. Recipient Name (GOLD EFFECT) ✨
         const gradient = ctx.createLinearGradient(width/2 - 250, 0, width/2 + 250, 0);
-        gradient.addColorStop(0, "#854d0e");   
-        gradient.addColorStop(0.5, "#fde047"); 
-        gradient.addColorStop(1, "#854d0e");   
+        gradient.addColorStop(0, "#854d0e");   // Dark Gold
+        gradient.addColorStop(0.5, "#fde047"); // Bright Gold
+        gradient.addColorStop(1, "#854d0e");   // Dark Gold
 
-        // Shadow for Gold Effect
         ctx.shadowColor = "rgba(180, 83, 9, 0.6)"; 
         ctx.shadowBlur = 10;
         
-        ctx.font = 'bold 150px Arial, sans-serif'; // Larger Font for Name
+        ctx.font = 'bold 150px Arial, sans-serif'; 
         ctx.fillStyle = gradient;
         ctx.fillText(username.toUpperCase(), width / 2, 650);
 
@@ -313,17 +308,16 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         // 3. Content Title
         ctx.font = '40px Arial, sans-serif';
-        ctx.fillStyle = '#1e293b'; 
+        ctx.fillStyle = '#1e293b'; // Dark color
         ctx.fillText(`For outstanding achievement in the Math Quiz Pro challenge.`, width / 2, 780);
 
-        // 4. Score Display
+        // 4. Score
         ctx.font = 'bold 50px Arial, sans-serif';
-        ctx.fillStyle = '#b91c1c'; // Dark Red
+        ctx.fillStyle = '#b91c1c'; // Red
         ctx.fillText(`Final Score: ${score}`, width / 2, 870);
 
-
-        // 5. Detailed Content Paragraphs
-        ctx.fillStyle = '#1e293b'; 
+        // 5. Content Body (English)
+        ctx.fillStyle = '#1e293b'; // Dark color
         ctx.font = '35px Arial, sans-serif'; 
         const lineHeight = 65; 
         let startY = 1000;
@@ -335,7 +329,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.fillText("perseverance, and solid fundamental knowledge acquired through rigorous practice.", width / 2, startY + lineHeight);
         
         // Line 3: Wishing
-        ctx.fillStyle = '#15803d'; // Dark Green
+        ctx.fillStyle = '#15803d'; // Green
         ctx.fillText("We wish you continued success in your academic journey and future endeavors.", width / 2, startY + (lineHeight * 2) + 15);
 
         // 6. Date
@@ -343,9 +337,9 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.font = 'bold 30px Arial, sans-serif'; 
         ctx.fillText(`Issued on: ${englishDate}`, width / 2, 1280);
 
-        // 7. Footer (Source)
+        // 7. Footer
         ctx.font = 'bold 30px "Courier New", monospace';
-        ctx.fillStyle = '#0369a1'; 
+        ctx.fillStyle = '#0369a1'; // Blue
         
         // Decorative Line
         ctx.beginPath();
@@ -355,7 +349,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.lineWidth = 3;
         ctx.stroke();
 
-        ctx.fillText("Website: braintest.fun", width / 2, 1360); 
+        ctx.fillText("Website: braintest.fun", width / 2, 1360);
 
         // Output
         const buffer = canvas.toBuffer('image/png');
@@ -369,25 +363,18 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 });
 
 // ==========================================
-// 8. START SERVER (FIXED FOR RENDER TIMEOUT)
+// 8. START SERVER
 // ==========================================
 async function startServer() {
-    
-    // 1. START LISTENING TO PORT IMMEDIATELY
+    if (!process.env.DATABASE_URL) {
+        console.error("🛑 CRITICAL: DATABASE_URL is missing.");
+        return;
+    }
+    await initializeDatabase();
     app.listen(port, () => {
         console.log(`🚀 Server running on port ${port}`);
         console.log(`🔗 Admin: http://localhost:${port}/admin/requests`);
-        
-        // 2. RUN DATABASE INITIALIZATION IN THE BACKGROUND
-        if (!process.env.DATABASE_URL) {
-            console.error("🛑 CRITICAL: DATABASE_URL is missing. DB functions will likely fail.");
-        } else {
-            initializeDatabase().catch(err => {
-                 console.error("⚠️ Failed to initialize Database after server start.");
-            });
-        }
     });
-
 }
 
 startServer();
