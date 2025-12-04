@@ -5,7 +5,6 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg'); 
-// នាំយក Canvas មកប្រើ
 const { registerFont, createCanvas, loadImage } = require('canvas');
 
 const app = express();
@@ -18,24 +17,22 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// ចុះឈ្មោះ Font ខ្មែរ (Moul)
+// Load Khmer Font (Optional backup)
 try {
     const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
     registerFont(fontPath, { family: 'Moul' });
-    console.log("✅ Font 'Moul' loaded successfully.");
 } catch (e) {
-    console.warn("⚠️ Warning: រកមិនឃើញ Font 'Moul.ttf' ក្នុង folder public។");
+    console.warn("⚠️ Warning: Font 'Moul' not found (Not needed for English Cert).");
 }
 
 const MODEL_NAME = "gemini-2.5-flash"; 
 
-// Tracking Variables
+// Tracking
 let totalPlays = 0;           
 const uniqueVisitors = new Set();
 
-// Middleware: Log Request
 app.use((req, res, next) => {
-    console.log(`[${new Date().toLocaleTimeString('km-KH')}] 📡 ${req.method} ${req.path}`);
+    console.log(`[${new Date().toLocaleTimeString()}] 📡 ${req.method} ${req.path}`);
     next();
 });
 
@@ -51,7 +48,6 @@ async function initializeDatabase() {
     try {
         const client = await pool.connect();
         
-        // Table Leaderboard
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -62,7 +58,6 @@ async function initializeDatabase() {
             );
         `);
 
-        // Table Certificate Requests
         await client.query(`
             CREATE TABLE IF NOT EXISTS certificate_requests (
                 id SERIAL PRIMARY KEY,
@@ -73,10 +68,10 @@ async function initializeDatabase() {
             );
         `);
 
-        console.log("✅ Database initialized: Tables ready.");
+        console.log("✅ Database initialized.");
         client.release();
     } catch (err) {
-        console.error("❌ Database initialization error:", err.message);
+        console.error("❌ Database error:", err.message);
     }
 }
 
@@ -86,7 +81,7 @@ async function initializeDatabase() {
 const limiter = rateLimit({
     windowMs: 8 * 60 * 60 * 1000, 
     max: 10, 
-    message: { error: "Rate limit exceeded", message: "⚠️ អស់ចំនួនកំណត់ហើយ (10ដង/ថ្ងៃ)!" },
+    message: { error: "Rate limit exceeded" },
     keyGenerator: (req) => req.ip,
     skip: (req) => req.ip === process.env.OWNER_IP
 });
@@ -99,93 +94,74 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => {
     res.status(200).send(`
         <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
-            <h1 style="color: #22c55e;">Server is Online 🟢</h1>
-            <p>Math Quiz Pro Backend</p>
+            <h1 style="color: #2563eb;">Backend is Running 🚀</h1>
+            <p>Math Quiz Pro - English Certificate Edition</p>
             <div style="margin-top: 20px; padding: 10px; background: #f0f9ff; display: inline-block; border-radius: 8px;">
-                <a href="/admin/requests" style="text-decoration: none; color: #0284c7; font-weight: bold;">👮‍♂️ ចូលមើលសំណើសុំលិខិតសរសើរ (Admin)</a>
+                <a href="/admin/requests" style="text-decoration: none; color: #0284c7; font-weight: bold;">👮‍♂️ Admin Panel</a>
             </div>
         </div>
     `);
 });
 
 // ==========================================
-// 5. API ROUTES (General & Leaderboard)
+// 5. API ROUTES
 // ==========================================
 
-app.get('/stats', (req, res) => {
-    res.json({ total_plays: totalPlays, unique_players: uniqueVisitors.size });
-});
+app.get('/stats', (req, res) => res.json({ total_plays: totalPlays, unique_players: uniqueVisitors.size }));
 
 app.post('/api/generate-problem', limiter, async (req, res) => {
     try {
         const { prompt } = req.body;
         if (!prompt) return res.status(400).json({ error: "Prompt required" });
-
         totalPlays++;
         uniqueVisitors.add(req.ip);
-
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
         const result = await model.generateContent(prompt);
         res.json({ text: result.response.text() });
-
     } catch (error) {
-        console.error("Gemini Error:", error.message);
         res.status(500).json({ error: "AI Generation Failed" });
     }
 });
 
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
-    if (!username || typeof score !== 'number' || score <= 0 || username.trim().length < 3) {
-        return res.status(400).json({ success: false, message: "Invalid data." });
-    }
+    if (!username || typeof score !== 'number') return res.status(400).json({ success: false });
     try {
         const client = await pool.connect();
-        await client.query('INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
-            [username.trim().substring(0, 25), score, difficulty]);
+        await client.query('INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', [username, score, difficulty]);
         client.release();
-        res.status(201).json({ success: true, message: "Score saved." });
+        res.status(201).json({ success: true });
     } catch (err) {
-        res.status(500).json({ success: false, message: "DB Error" });
+        res.status(500).json({ success: false });
     }
 });
 
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
-        const result = await client.query('SELECT username, score, difficulty FROM leaderboard ORDER BY score DESC LIMIT 1000');
+        const result = await client.query('SELECT username, score, difficulty FROM leaderboard ORDER BY score DESC LIMIT 100');
         client.release();
         res.json(result.rows);
     } catch (err) {
-        res.status(500).json({ success: false, message: "DB Error" });
+        res.status(500).json({ success: false });
     }
 });
 
-// ==========================================
-// 6. CERTIFICATE REQUEST API
-// ==========================================
-
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
-    
-    if (!username || score === undefined || score === null) {
-        return res.status(400).json({ success: false, message: "Missing username or score" });
-    }
-
+    if (!username || score === undefined) return res.status(400).json({ success: false });
     try {
         const client = await pool.connect();
         await client.query('INSERT INTO certificate_requests (username, score, request_date) VALUES ($1, $2, NOW())', [username, score]);
         client.release();
-        console.log(`📩 Certificate Request: ${username} (Score: ${score})`);
         res.json({ success: true });
     } catch (err) {
-        console.error("Submit Request Error:", err.message);
-        res.status(500).json({ success: false, message: "Server Error" });
+        res.status(500).json({ success: false });
     }
 });
 
-// ✅ Admin HTML View
+// ✅ Admin Panel
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -194,66 +170,46 @@ app.get('/admin/requests', async (req, res) => {
 
         let html = `
         <!DOCTYPE html>
-        <html lang="km">
+        <html>
         <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Admin - សំណើសុំលិខិតសរសើរ</title>
+            <title>Admin - Certificate Requests</title>
             <style>
-                body { font-family: sans-serif; padding: 20px; background: #f1f5f9; }
-                h1 { color: #1e3a8a; }
+                body { font-family: sans-serif; padding: 20px; background: #f8fafc; }
+                h1 { color: #1e40af; }
                 table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
                 th, td { padding: 15px; border-bottom: 1px solid #e2e8f0; text-align: left; }
-                th { background: #3b82f6; color: white; }
-                tr:hover { background: #f8fafc; }
+                th { background: #2563eb; color: white; }
+                tr:hover { background: #eff6ff; }
                 .btn-gen { 
-                    background: #2563eb; color: white; text-decoration: none; 
-                    padding: 8px 12px; border-radius: 6px; font-weight: bold; font-size: 0.9rem;
-                    display: inline-flex; align-items: center; gap: 5px;
+                    background: #16a34a; color: white; padding: 8px 12px; 
+                    border-radius: 6px; text-decoration: none; font-weight: bold;
                 }
-                .btn-gen:hover { background: #1d4ed8; }
             </style>
         </head>
         <body>
-            <h1>👮‍♂️ Admin Panel - សំណើសុំលិខិតសរសើរ</h1>
+            <h1>👮‍♂️ Certificate Management</h1>
             <table>
-                <thead>
-                    <tr>
-                        <th>#ID</th>
-                        <th>ឈ្មោះ (Username)</th>
-                        <th>ពិន្ទុ (Score)</th>
-                        <th>កាលបរិច្ឆេទ</th>
-                        <th>សកម្មភាព (Action)</th>
-                    </tr>
-                </thead>
+                <thead><tr><th>ID</th><th>Username</th><th>Score</th><th>Date</th><th>Action</th></tr></thead>
                 <tbody>`;
+        
+        if(result.rows.length === 0) html += `<tr><td colspan="5" style="text-align:center; padding:20px;">No requests found.</td></tr>`;
 
-        if (result.rows.length === 0) {
-            html += `<tr><td colspan="5" style="text-align:center; padding: 20px; color: gray;">មិនទាន់មានសំណើថ្មីៗទេ។</td></tr>`;
-        } else {
-            result.rows.forEach(row => {
-                const isHighScore = row.score >= 500;
-                html += `
-                    <tr>
-                        <td>${row.id}</td>
-                        <td style="font-weight:bold; color: #334155;">${row.username}</td>
-                        <td style="color:${isHighScore ? '#16a34a' : '#dc2626'}; font-weight:bold;">${row.score}</td>
-                        <td>${new Date(row.request_date).toLocaleDateString('km-KH')}</td>
-                        <td>
-                            <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-gen">🖨️ បង្កើតលិខិត (Standard)</a>
-                        </td>
-                    </tr>`;
-            });
-        }
+        result.rows.forEach(row => {
+            html += `<tr>
+                <td>${row.id}</td>
+                <td><b>${row.username}</b></td>
+                <td>${row.score}</td>
+                <td>${new Date(row.request_date).toLocaleDateString()}</td>
+                <td><a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-gen">🖨️ Create Certificate</a></td>
+            </tr>`;
+        });
         html += `</tbody></table></body></html>`;
         res.send(html);
-    } catch (err) {
-        res.status(500).send("Error loading admin panel.");
-    }
+    } catch (err) { res.status(500).send("Error loading admin."); }
 });
 
 // ==========================================
-// 7. GENERATE STANDARD CERTIFICATE (PROFESSIONAL DESIGN) 🏆
+// 7. GENERATE CERTIFICATE (PREMIUM ENGLISH DESIGN) 🏆
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -266,115 +222,154 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         const { username, score, request_date } = result.rows[0];
 
-        // --- កាលបរិច្ឆេទខ្មែរ ---
+        // --- Date Format: December 4, 2024 ---
         const dateObj = new Date(request_date);
-        const day = dateObj.getDate().toString().padStart(2, '0');
-        const months = ["មករា", "កុម្ភៈ", "មីនា", "មេសា", "ឧសភា", "មិថុនា", "កក្កដា", "សីហា", "កញ្ញា", "តុលា", "វិច្ឆិកា", "ធ្នូ"];
-        const month = months[dateObj.getMonth()];
-        const year = dateObj.getFullYear();
-        const khmerDate = `រាជធានីភ្នំពេញ, ថ្ងៃទី ${day} ខែ ${month} ឆ្នាំ ${year}`;
+        const englishDate = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
-        // --- Setup Canvas (2000x1414) ---
+        // --- Setup Canvas ---
         const width = 2000; 
         const height = 1414;
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
 
-        // --- Load Template ---
         const templatePath = path.join(__dirname, 'public', 'certificate-template.png');
         try {
             const image = await loadImage(templatePath);
             ctx.drawImage(image, 0, 0, width, height);
         } catch (e) {
-            return res.status(500).send("Error: រកមិនឃើញ file 'certificate-template.png'");
+            return res.status(500).send("Error: 'certificate-template.png' not found in public folder.");
         }
 
         // ==========================================
-        // 🎨 STANDARD PROFESSIONAL DESIGN (LIGHT THEME)
+        // 🎨 DESIGN EXECUTION
         // ==========================================
-        
         ctx.textAlign = 'center';
 
-        // 1. HEADLINE (ចំណងជើង)
-        ctx.font = 'bold 90px "Moul"'; 
-        ctx.fillStyle = '#1e3a8a'; // Navy Blue (ផ្លូវការ)
-        ctx.fillText("លិខិតសរសើរ", width / 2, 400); 
-
-        // 2. INTRO (ប្រគល់ជូន)
-        ctx.font = '35px "Moul"'; 
-        ctx.fillStyle = '#4b5563'; // Gray
-        ctx.fillText("សូមប្រគល់ជូនដោយសេចក្តីគោរពចំពោះ", width / 2, 480);
-
-        // 3. NAME (ឈ្មោះអ្នកទទួល - LUXURY GOLD) ✨
-        // Gradient មាសសុទ្ធ
-        const gradient = ctx.createLinearGradient(width/2 - 300, 0, width/2 + 300, 0);
-        gradient.addColorStop(0, "#b45309");   // Bronze
-        gradient.addColorStop(0.2, "#d97706"); // Gold Dark
-        gradient.addColorStop(0.5, "#f59e0b"); // Gold Light
-        gradient.addColorStop(0.8, "#d97706"); // Gold Dark
-        gradient.addColorStop(1, "#b45309");   // Bronze
-
-        // Shadow ឱ្យឈ្មោះលេចធ្លោខ្លាំង
-        ctx.shadowColor = "rgba(0,0,0,0.3)";
-        ctx.shadowBlur = 10;
-        ctx.shadowOffsetX = 4;
-        ctx.shadowOffsetY = 4;
+        // 1. HEADER (TITLE)
+        ctx.font = 'bold 110px "Arial", sans-serif'; 
+        ctx.fillStyle = '#1e3a8a'; // Deep Navy Blue
+        ctx.fillText("CERTIFICATE", width / 2, 380); 
         
-        ctx.font = '160px "Moul"'; 
-        ctx.fillStyle = gradient;
-        ctx.fillText(username, width / 2, 650);
+        ctx.font = 'bold 50px "Arial", sans-serif';
+        ctx.fillStyle = '#b45309'; // Bronze/Gold
+        ctx.letterSpacing = "10px"; // Wide spacing for elegance
+        ctx.fillText("OF APPRECIATION", width / 2, 460);
 
-        // Reset Shadow
+        // 2. INTRODUCTION TEXT
+        ctx.font = 'italic 35px "Times New Roman", serif'; 
+        ctx.fillStyle = '#4b5563'; // Slate Gray
+        ctx.fillText("This certificate is proudly presented to", width / 2, 560);
+
+        // 3. RECIPIENT NAME (THE HIGHLIGHT) ✨
+        // Create a Luxury Gold Gradient
+        const gradient = ctx.createLinearGradient(width/2 - 400, 0, width/2 + 400, 0);
+        gradient.addColorStop(0, "#854d0e");   // Dark Gold
+        gradient.addColorStop(0.2, "#fde047"); // Bright Yellow Gold
+        gradient.addColorStop(0.5, "#ca8a04"); // Pure Gold
+        gradient.addColorStop(0.8, "#fde047"); // Bright Yellow Gold
+        gradient.addColorStop(1, "#854d0e");   // Dark Gold
+
+        // Add Deep Shadow for 3D Effect
+        ctx.shadowColor = "rgba(0,0,0,0.25)";
+        ctx.shadowBlur = 15;
+        ctx.shadowOffsetX = 8;
+        ctx.shadowOffsetY = 8;
+        
+        // Font: Large, Italic, Serif (Times New Roman or similar)
+        ctx.font = 'bold italic 150px "Times New Roman", serif'; 
+        ctx.fillStyle = gradient;
+        ctx.fillText(username, width / 2, 730);
+
+        // Reset Shadow for other text
         ctx.shadowColor = "transparent";
         ctx.shadowBlur = 0;
         ctx.shadowOffsetX = 0;
         ctx.shadowOffsetY = 0;
 
-        // បន្ទាត់សង្កត់ពីក្រោមឈ្មោះ
+        // Decorative Underline
         ctx.beginPath();
-        ctx.moveTo(width / 2 - 250, 680);
-        ctx.lineTo(width / 2 + 250, 680);
-        ctx.strokeStyle = '#1e3a8a'; // Navy Blue line
-        ctx.lineWidth = 3;
+        ctx.moveTo(width / 2 - 250, 765);
+        ctx.lineTo(width / 2 + 250, 765);
+        ctx.strokeStyle = '#ca8a04'; 
+        ctx.lineWidth = 4;
         ctx.stroke();
 
-        // 4. SCORE BADGE (ពិន្ទុ)
+        // 4. SCORE DISPLAY
         ctx.font = 'bold 45px "Arial", sans-serif';
-        ctx.fillStyle = '#b91c1c'; // Red Dark
-        ctx.fillText(`✨ ពិន្ទុសរុប: ${score} ✨`, width / 2, 760);
+        ctx.fillStyle = '#b91c1c'; // Red Color
+        ctx.fillText(`TOTAL SCORE: ${score}`, width / 2, 850);
 
-        // 5. BODY TEXT (ខ្លឹមសារផ្លូវការ)
-        ctx.fillStyle = '#0f172a'; // Black/Dark Navy
-        ctx.font = '40px "Moul"'; 
-        const lineHeight = 75; 
-        let startY = 880;
+        // 5. BODY PARAGRAPH
+        ctx.fillStyle = '#1e293b'; // Dark Blue-Grey
+        ctx.font = '40px "Times New Roman", serif'; 
+        const lineHeight = 65; 
+        let startY = 960;
 
-        // បែងចែកអត្ថបទជាបន្ទាត់ៗដើម្បីឱ្យស្អាត (Centered)
-        ctx.fillText("ដោយប្អូនបានបញ្ចេញសមត្ថភាព និងការខិតខំប្រឹងប្រែងយ៉ាងល្អប្រសើរ", width / 2, startY);
-        ctx.fillText("ក្នុងការដោះស្រាយលំហាត់គណិតវិទ្យានៅលើប្រព័ន្ធ BRAINTEST.FUN", width / 2, startY + lineHeight);
-        ctx.fillText("ប្រកបដោយភាពវៃឆ្លាត ត្រឹមត្រូវ និងទទួលបានលទ្ធផលជាទីមោទកៈ។", width / 2, startY + (lineHeight * 2));
+        ctx.fillText("For demonstrating outstanding dedication and intellectual excellence", width / 2, startY);
+        ctx.fillText("in solving advanced mathematical challenges on our platform.", width / 2, startY + lineHeight);
+        ctx.fillText("Your commitment to self-improvement is truly commendable.", width / 2, startY + (lineHeight * 2));
+
+        // ==========================================
+        // ⚖️ FOOTER SECTION (Left, Center, Right)
+        // ==========================================
         
-        ctx.fillStyle = '#047857'; // Green for wish
-        ctx.fillText("សូមជូនពរឱ្យប្អូនទទួលបានជោគជ័យក្នុងការសិក្សា និងគ្រប់ភារកិច្ច។", width / 2, startY + (lineHeight * 3) + 20);
-
-        // 6. DATE (កាលបរិច្ឆេទ - ខាងឆ្វេង ឬ កណ្តាល)
-        ctx.fillStyle = '#334155'; 
-        ctx.font = 'bold 30px "Moul"'; 
-        ctx.fillText(khmerDate, width / 2, 1250);
-
-        // 7. FOOTER / SIGNATURE (ហត្ថលេខា Digital)
-        const footerY = 1340;
+        const bottomLineY = 1280;
         
-        // Website Badge
-        ctx.font = 'bold 40px "Courier New", sans-serif';
-        ctx.fillStyle = '#2563eb'; // Royal Blue
-        ctx.fillText("WWW.BRAINTEST.FUN", width / 2, footerY);
+        // --- LEFT: DATE ---
+        const leftX = 500;
+        ctx.beginPath();
+        ctx.moveTo(leftX - 150, bottomLineY);
+        ctx.lineTo(leftX + 150, bottomLineY);
+        ctx.strokeStyle = '#64748b'; // Gray Line
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.font = 'bold 32px "Arial", sans-serif';
+        ctx.fillStyle = '#334155';
+        ctx.fillText(englishDate, leftX, bottomLineY - 15); // The Date Text
         
-        ctx.font = '20px "Arial", sans-serif';
+        ctx.font = 'italic 25px "Times New Roman", serif';
         ctx.fillStyle = '#94a3b8';
-        ctx.fillText("Official Digital Certificate", width / 2, footerY + 30);
+        ctx.fillText("Date", leftX, bottomLineY + 35); // "Date" Label
 
-        // Output Image
+        // --- RIGHT: ADMIN SIGNATURE (CHHEANG SINHSINH) ---
+        const rightX = 1500;
+        
+        // Simulated Handwriting "Signature"
+        ctx.font = 'italic bold 55px "Times New Roman", serif'; 
+        ctx.fillStyle = '#1e40af'; // Blue Ink Color
+        ctx.fillText("SinhSinh", rightX, bottomLineY - 25); 
+
+        // The Line
+        ctx.beginPath();
+        ctx.moveTo(rightX - 220, bottomLineY);
+        ctx.lineTo(rightX + 220, bottomLineY);
+        ctx.strokeStyle = '#64748b';
+        ctx.stroke();
+
+        // Printed Name
+        ctx.font = 'bold 32px "Arial", sans-serif';
+        ctx.fillStyle = '#0f172a'; // Black
+        ctx.fillText("CHHEANG SINHSINH", rightX, bottomLineY + 40); 
+        
+        // Title
+        ctx.font = '22px "Arial", sans-serif';
+        ctx.fillStyle = '#64748b';
+        ctx.fillText("Founder & Admin", rightX, bottomLineY + 70); 
+
+        // --- CENTER: WEBSITE (POP OUT) ---
+        const footerY = 1360;
+        
+        // Background Pill for Website
+        ctx.fillStyle = "#e0f2fe"; // Very Light Blue Background
+        // Draw Rounded Rectangle (Simple Rect here)
+        ctx.fillRect(width/2 - 280, footerY - 45, 560, 65);
+
+        ctx.font = 'bold 45px "Courier New", monospace'; // Monospace for Tech feel
+        ctx.fillStyle = '#0284c7'; // Sky Blue Dark
+        ctx.fillText("WWW.BRAINTEST.FUN", width / 2, footerY);
+
+        // Output
         const buffer = canvas.toBuffer('image/png');
         res.set('Content-Type', 'image/png');
         res.send(buffer);
