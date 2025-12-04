@@ -4,7 +4,8 @@ const cors = require('cors');
 const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
-const { Pool } = require('pg'); 
+// ⚠️ លុបចោល Module PG ជាបណ្ដោះអាសន្នដើម្បីតេស្ត
+// const { Pool } = require('pg'); 
 // នាំយក Canvas មកប្រើ
 const { registerFont, createCanvas, loadImage } = require('canvas');
 
@@ -42,8 +43,9 @@ app.use((req, res, next) => {
 });
 
 // ==========================================
-// 2. DATABASE CONFIGURATION
+// 2. DATABASE CONFIGURATION (⚠️ ដាក់ Comment Out សម្រាប់ការតេស្ត)
 // ==========================================
+/*
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
@@ -53,7 +55,7 @@ async function initializeDatabase() {
     try {
         const client = await pool.connect();
         
-        // Table Leaderboard
+        // Table Leaderboard ...
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -64,7 +66,7 @@ async function initializeDatabase() {
             );
         `);
 
-        // Table Certificate Requests
+        // Table Certificate Requests ...
         await client.query(`
             CREATE TABLE IF NOT EXISTS certificate_requests (
                 id SERIAL PRIMARY KEY,
@@ -81,6 +83,7 @@ async function initializeDatabase() {
         console.error("❌ Database initialization error:", err.message);
     }
 }
+*/
 
 // ==========================================
 // 3. RATE LIMITER
@@ -101,7 +104,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => {
     res.status(200).send(`
         <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
-            <h1 style="color: #22c55e;">Server is Online 🟢</h1>
+            <h1 style="color: #22c55e;">Server is Online (DB Disabled) 🟢</h1>
             <p>Math Quiz Pro Backend</p>
             <div style="margin-top: 20px; padding: 10px; background: #f0f9ff; display: inline-block; border-radius: 8px;">
                 <a href="/admin/requests" style="text-decoration: none; color: #0284c7; font-weight: bold;">👮‍♂️ ចូលមើលសំណើសុំលិខិតសរសើរ (Admin)</a>
@@ -112,6 +115,7 @@ app.get('/', (req, res) => {
 
 // ==========================================
 // 5. API ROUTES (General & Leaderboard)
+// ⚠️ មុខងារ DB ខាងក្រោមនេះនឹងបរាជ័យព្រោះយើងបានបិទ DB ហើយ
 // ==========================================
 
 app.get('/stats', (req, res) => {
@@ -138,30 +142,13 @@ app.post('/api/generate-problem', limiter, async (req, res) => {
 });
 
 app.post('/api/leaderboard/submit', async (req, res) => {
-    const { username, score, difficulty } = req.body;
-    if (!username || typeof score !== 'number' || score <= 0 || username.trim().length < 3) {
-        return res.status(400).json({ success: false, message: "Invalid data." });
-    }
-    try {
-        const client = await pool.connect();
-        await client.query('INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
-            [username.trim().substring(0, 25), score, difficulty]);
-        client.release();
-        res.status(201).json({ success: true, message: "Score saved." });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "DB Error" });
-    }
+    // ⚠️ DB DISABLED: This will fail
+    return res.status(503).json({ success: false, message: "DB Service Unavailable" });
 });
 
 app.get('/api/leaderboard/top', async (req, res) => {
-    try {
-        const client = await pool.connect();
-        const result = await client.query('SELECT username, score, difficulty FROM leaderboard ORDER BY score DESC LIMIT 1000');
-        client.release();
-        res.json(result.rows);
-    } catch (err) {
-        res.status(500).json({ success: false, message: "DB Error" });
-    }
+    // ⚠️ DB DISABLED: This will fail
+    return res.status(503).json({ success: false, message: "DB Service Unavailable" });
 });
 
 // ==========================================
@@ -169,104 +156,29 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // ==========================================
 
 app.post('/api/submit-request', async (req, res) => {
-    const { username, score } = req.body;
-    
-    if (!username || score === undefined || score === null) {
-        return res.status(400).json({ success: false, message: "Missing username or score" });
-    }
-
-    try {
-        const client = await pool.connect();
-        await client.query('INSERT INTO certificate_requests (username, score, request_date) VALUES ($1, $2, NOW())', [username, score]);
-        client.release();
-        console.log(`📩 Certificate Request: ${username} (Score: ${score})`);
-        res.json({ success: true });
-    } catch (err) {
-        console.error("Submit Request Error:", err.message);
-        res.status(500).json({ success: false, message: "Server Error" });
-    }
+    // ⚠️ DB DISABLED: This will fail
+    return res.status(503).json({ success: false, message: "DB Service Unavailable" });
 });
 
-// ✅ Admin HTML View
+// ✅ Admin HTML View (Will work without DB, but links will fail)
 app.get('/admin/requests', async (req, res) => {
-    try {
-        const client = await pool.connect();
-        const result = await client.query('SELECT * FROM certificate_requests ORDER BY request_date DESC LIMIT 50');
-        client.release();
-
-        let html = `
-        <!DOCTYPE html>
-        <html lang="km">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Admin - សំណើសុំលិខិតសរសើរ</title>
-            <style>
-                body { font-family: sans-serif; padding: 20px; background: #f1f5f9; }
-                h1 { color: #1e3a8a; }
-                table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
-                th, td { padding: 15px; border-bottom: 1px solid #e2e8f0; text-align: left; }
-                th { background: #3b82f6; color: white; }
-                tr:hover { background: #f8fafc; }
-                .btn-gen { 
-                    background: #2563eb; color: white; text-decoration: none; 
-                    padding: 8px 12px; border-radius: 6px; font-weight: bold; font-size: 0.9rem;
-                    display: inline-flex; align-items: center; gap: 5px;
-                }
-                .btn-gen:hover { background: #1d4ed8; }
-            </style>
-        </head>
-        <body>
-            <h1>👮‍♂️ Admin Panel - សំណើសុំលិខិតសរសើរ</h1>
-            <table>
-                <thead>
-                    <tr>
-                        <th>#ID</th>
-                        <th>ឈ្មោះ (Username)</th>
-                        <th>ពិន្ទុ (Score)</th>
-                        <th>កាលបរិច្ឆេទ</th>
-                        <th>សកម្មភាព (Action)</th>
-                    </tr>
-                </thead>
-                <tbody>`;
-
-        if (result.rows.length === 0) {
-            html += `<tr><td colspan="5" style="text-align:center; padding: 20px; color: gray;">មិនទាន់មានសំណើថ្មីៗទេ។</td></tr>`;
-        } else {
-            result.rows.forEach(row => {
-                const isHighScore = row.score >= 500;
-                html += `
-                    <tr>
-                        <td>${row.id}</td>
-                        <td style="font-weight:bold; color: #334155;">${row.username}</td>
-                        <td style="color:${isHighScore ? '#16a34a' : '#dc2626'}; font-weight:bold;">${row.score}</td>
-                        <td>${new Date(row.request_date).toLocaleDateString('km-KH')}</td>
-                        <td>
-                            <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-gen">🖨️ បង្កើតលិខិត</a>
-                        </td>
-                    </tr>`;
-            });
-        }
-        html += `</tbody></table></body></html>`;
-        res.send(html);
-    } catch (err) {
-        res.status(500).send("Error loading admin panel.");
-    }
+    // ⚠️ DB DISABLED: This will fail, returning only an error page
+    res.status(503).send("<h1>Service Unavailable: Database Disabled for Testing</h1>");
 });
 
 // ==========================================
 // 7. GENERATE CERTIFICATE LOGIC (FINAL STABILITY VERSION) 🎨
+// ⚠️ This function is designed to work fully without any DB connection
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
         const id = req.params.id;
-        const client = await pool.connect();
-        const result = await client.query('SELECT * FROM certificate_requests WHERE id = $1', [id]);
-        client.release();
-
-        if (result.rows.length === 0) return res.status(404).send("Not Found");
-
-        const { username, score, request_date } = result.rows[0];
+        // ⚠️ Skip DB fetch
+        
+        // Use placeholder data since DB is off
+        const username = 'DIAGNOSTIC TEST PLAYER';
+        const score = 999;
+        const request_date = new Date().toISOString(); 
 
         // --- English Date Formatting ---
         const dateObj = new Date(request_date);
@@ -282,7 +194,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         // 🎨 STEP 1: DRAW BACKGROUND & BORDER (Programmatic)
         // ==========================================
         
-        ctx.fillStyle = '#0f172a'; // Deep Navy Blue
+        ctx.fillStyle = '#0f172a'; 
         ctx.fillRect(0, 0, width, height);
 
         const goldColor = '#fcd34d'; 
@@ -314,7 +226,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         // 2.3 Recipient Name (Arial Bold, Solid White)
         ctx.font = 'bold 160px "Arial", sans-serif'; 
-        ctx.fillStyle = '#FFFFFF'; // PURE WHITE FOR MAXIMUM CONTRAST
+        ctx.fillStyle = '#FFFFFF'; 
         ctx.fillText(username.toUpperCase(), width / 2, 650);
         
         // 2.4 ELABORATED Achievement Body Text (White)
@@ -336,7 +248,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.fillText(`TOTAL FINAL SCORE: ${score}`, width / 2, startY + (lineHeight * 3) + 80); 
 
         // ==========================================
-        // 🎨 STEP 3: FOOTER (Signature Placeholders)
+        // 🎨 STEP 3: FOOTER
         // ==========================================
 
         const signatureLineY = 1170; 
@@ -395,7 +307,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         res.send(buffer);
 
     } catch (err) {
-        console.error("Gen Cert Error:", err);
+        console.error("Gen Cert Error (Canvas):", err);
         res.status(500).send("Failed to generate certificate.");
     }
 });
@@ -405,13 +317,9 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 // 8. START SERVER
 // ==========================================
 async function startServer() {
-    if (!process.env.DATABASE_URL) {
-        console.error("🛑 CRITICAL: DATABASE_URL is missing.");
-        return;
-    }
-    await initializeDatabase();
+    // ⚠️ Server will start even without DB connected
     app.listen(port, () => {
-        console.log(`🚀 Server running on port ${port}`);
+        console.log(`🚀 Server running on port ${port} (DB DISABLED)`);
         console.log(`🔗 Admin: http://localhost:${port}/admin/requests`);
     });
 }
