@@ -5,7 +5,7 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg'); 
-// ✅ រក្សា registerFont នៅក្នុង require
+// នាំយក Canvas មកប្រើ
 const { registerFont, createCanvas, loadImage } = require('canvas');
 
 const app = express();
@@ -18,7 +18,7 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// ✅ រក្សាប្លុកកូដដើម (try/catch) របស់ Font Moul ទុកចោល (ដើម្បីកុំឲ្យ Server Crash)
+// ✅ រក្សាប្លុកកូដចុះឈ្មោះ Font Moul ដើម (ដើម្បីឱ្យ Server អាចចាប់ផ្តើមបាន)
 try {
     const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
     registerFont(fontPath, { family: 'Moul' });
@@ -167,6 +167,9 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // ==========================================
 
 app.post('/api/submit-request', async (req, res) => {
+    
+    // ... (Code for API submit request is kept the same)
+
     const { username, score } = req.body;
     
     if (!username || score === undefined || score === null) {
