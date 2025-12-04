@@ -254,8 +254,9 @@ app.get('/admin/requests', async (req, res) => {
     }
 });
 
+
  // ==========================================
-// 7. GENERATE CERTIFICATE LOGIC (ENGLISH - FINAL PRO VERSION)
+// 7. GENERATE CERTIFICATE LOGIC (FINAL STABILITY VERSION)
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -279,7 +280,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const ctx = canvas.getContext('2d');
 
         // ==========================================
-        // 🎨 STEP 1: DRAW BACKGROUND & BORDER (Programmatic)
+        // 🎨 STEP 1: DRAW BACKGROUND & BORDER
         // ==========================================
         
         ctx.fillStyle = '#0f172a'; // Deep Navy Blue
@@ -297,37 +298,26 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.strokeRect(80, 80, width - 160, height - 160);
 
         // ==========================================
-        // 🎨 STEP 2: TEXT RENDERING
+        // 🎨 STEP 2: TEXT RENDERING (STABILITY FOCUS)
         // ==========================================
         
         ctx.textAlign = 'center';
 
-        // 2.1 Main Title
+        // 2.1 Main Title (No Shadow)
         ctx.font = '100px "Moul"';
         ctx.fillStyle = goldColor; 
-        ctx.shadowColor = "rgba(255, 255, 255, 0.5)";
-        ctx.shadowBlur = 10;
         ctx.fillText("CERTIFICATE OF ACHIEVEMENT", width / 2, 300);
-        ctx.shadowBlur = 0;
 
         // 2.2 Introductory Line
         ctx.font = '40px "Arial", sans-serif'; 
         ctx.fillStyle = '#cbd5e1'; 
         ctx.fillText("IS GRANTED IN RECOGNITION OF EXEMPLARY DEDICATION TO", width / 2, 450); 
 
-        // 2.3 Recipient Name (Large, Glowing Gold Gradient)
-        const nameGradient = ctx.createLinearGradient(width/2 - 400, 0, width/2 + 400, 0);
-        nameGradient.addColorStop(0, "#fcd34d");   
-        nameGradient.addColorStop(0.5, "#ffffff"); 
-        nameGradient.addColorStop(1, "#fcd34d");   
-
-        ctx.font = '150px "Moul"'; 
-        ctx.fillStyle = nameGradient;
-        ctx.shadowColor = "rgba(255, 215, 0, 0.8)"; 
-        ctx.shadowBlur = 40;
+        // 2.3 Recipient Name (Solid White for Maximum Visibility)
+        ctx.font = 'bold 160px "Arial", sans-serif'; // Use reliable Arial/Sans-serif and BOLD
+        ctx.fillStyle = '#FFFFFF'; // FORCED PURE WHITE COLOR
         ctx.fillText(username.toUpperCase(), width / 2, 650);
-        ctx.shadowBlur = 0; 
-
+        
         // 2.4 ELABORATED Achievement Body Text (White)
         ctx.fillStyle = '#ffffff'; 
         ctx.font = '45px "Arial", sans-serif'; 
@@ -347,18 +337,17 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.fillText(`TOTAL FINAL SCORE: ${score}`, width / 2, startY + (lineHeight * 3) + 80); 
 
         // ==========================================
-        // 🎨 STEP 3: FOOTER (Enhanced Signature Look)
+        // 🎨 STEP 3: FOOTER (No Change to Footer Layout)
         // ==========================================
 
-        const signatureLineY = 1170; // Position for the lines
-        ctx.strokeStyle = '#94a3b8'; // Light Gray Line
+        const signatureLineY = 1170; 
+        ctx.strokeStyle = '#94a3b8'; 
         ctx.lineWidth = 2;
 
         // 3.1 Date/Signature Placeholder (Left)
         ctx.textAlign = 'left';
         ctx.fillStyle = '#cbd5e1'; 
         
-        // Draw Signature Line
         ctx.beginPath();
         ctx.moveTo(150, signatureLineY); 
         ctx.lineTo(550, signatureLineY); 
@@ -368,13 +357,12 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.fillText(`Awarded on: ${issuedDate}`, 150, 1200); 
         
         ctx.font = '28px "Arial", sans-serif'; 
-        ctx.fillText(`Signature / Stamp Placeholder`, 150, 1240); // Placeholder Text
+        ctx.fillText(`Signature / Stamp Placeholder`, 150, 1240); 
 
         // 3.2 Status/Verification Placeholder (Right)
         ctx.textAlign = 'right';
-        ctx.fillStyle = '#22c55e'; // Bright Green for Status
+        ctx.fillStyle = '#22c55e'; 
         
-        // Draw Verification Line
         ctx.beginPath();
         ctx.moveTo(width - 550, signatureLineY); 
         ctx.lineTo(width - 150, signatureLineY); 
@@ -383,9 +371,9 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.font = 'bold 40px "Arial"';
         ctx.fillText("STATUS: VERIFIED", width - 150, 1200);
         
-        ctx.fillStyle = '#cbd5e1'; // Light Gray for placeholder
+        ctx.fillStyle = '#cbd5e1'; 
         ctx.font = '28px "Arial", sans-serif'; 
-        ctx.fillText(`Verification Key / Seal Area`, width - 150, 1240); // Placeholder Text
+        ctx.fillText(`Verification Key / Seal Area`, width - 150, 1240); 
 
 
         // 3.3 Website (Bottom Center)
@@ -412,7 +400,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         res.status(500).send("Failed to generate certificate.");
     }
 });
-    
+       
 
 // ==========================================
 // 8. START SERVER
