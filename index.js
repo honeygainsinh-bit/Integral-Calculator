@@ -254,11 +254,8 @@ app.get('/admin/requests', async (req, res) => {
     }
 });
 
-
-
-     
-     // ==========================================
-// 7. GENERATE CERTIFICATE (AUTO BACKGROUND & BORDER)
+ // ==========================================
+// 7. GENERATE CERTIFICATE LOGIC (ENGLISH - FINAL PRO VERSION)
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -271,13 +268,9 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         const { username, score, request_date } = result.rows[0];
 
-        // --- កាលបរិច្ឆេទខ្មែរ ---
+        // --- English Date Formatting ---
         const dateObj = new Date(request_date);
-        const day = dateObj.getDate().toString().padStart(2, '0');
-        const months = ["មករា", "កុម្ភៈ", "មីនា", "មេសា", "ឧសភា", "មិថុនា", "កក្កដា", "សីហា", "កញ្ញា", "តុលា", "វិច្ឆិកា", "ធ្នូ"];
-        const month = months[dateObj.getMonth()];
-        const year = dateObj.getFullYear();
-        const khmerDate = `ថ្ងៃទី ${day} ខែ ${month} ឆ្នាំ ${year}`;
+        const issuedDate = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
         // --- Setup Canvas (2000x1414) ---
         const width = 2000; 
@@ -286,97 +279,130 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const ctx = canvas.getContext('2d');
 
         // ==========================================
-        // 🎨 ជំហានទី ១: គូរ BACKGROUND & ស៊ុម (មិនប្រើរូបភាពក្រៅ)
+        // 🎨 STEP 1: DRAW BACKGROUND & BORDER (Programmatic)
         // ==========================================
         
-        // 1.1 ដាក់ផ្ទៃពណ៌ Dark Navy (ខៀវចាស់ខ្លាំង) - ធានាថាអក្សរពណ៌ស លេចធ្លោ
-        ctx.fillStyle = '#0f172a'; // Dark Slate Blue
+        ctx.fillStyle = '#0f172a'; // Deep Navy Blue
         ctx.fillRect(0, 0, width, height);
 
-        // 1.2 គូរស៊ុមពណ៌មាស (Gold Border)
-        // ស៊ុមក្រៅ
-        ctx.strokeStyle = '#fbbf24'; // Amber-400
+        const goldColor = '#fcd34d'; 
+        const darkGold = '#b45309'; 
+
+        ctx.strokeStyle = goldColor;
         ctx.lineWidth = 20;
         ctx.strokeRect(50, 50, width - 100, height - 100);
 
-        // ស៊ុមក្នុងតូច
-        ctx.strokeStyle = '#f59e0b'; // Amber-600
+        ctx.strokeStyle = darkGold;
         ctx.lineWidth = 5;
         ctx.strokeRect(80, 80, width - 160, height - 160);
 
         // ==========================================
-        // 🎨 ជំហានទី ២: សរសេរអក្សរ
+        // 🎨 STEP 2: TEXT RENDERING
         // ==========================================
         
         ctx.textAlign = 'center';
 
-        // 2.1 ចំណងជើងធំ "បណ្ណសរសើរ"
-        ctx.font = '120px "Moul"';
-        ctx.fillStyle = '#fbbf24'; // ពណ៌មាស
-        ctx.shadowColor = "rgba(0,0,0,0.5)";
+        // 2.1 Main Title
+        ctx.font = '100px "Moul"';
+        ctx.fillStyle = goldColor; 
+        ctx.shadowColor = "rgba(255, 255, 255, 0.5)";
         ctx.shadowBlur = 10;
-        ctx.fillText("បណ្ណសរសើរ", width / 2, 300);
-        
-        ctx.shadowBlur = 0; // Reset Shadow
+        ctx.fillText("CERTIFICATE OF ACHIEVEMENT", width / 2, 300);
+        ctx.shadowBlur = 0;
 
-        // 2.2 ឃ្លាផ្តើម
-        ctx.font = '40px "Moul"'; 
-        ctx.fillStyle = '#cbd5e1'; // ពណ៌ប្រផេះស្រាល
-        ctx.fillText("សូមប្រគល់ជូនដោយក្ដីគោរពចំពោះ", width / 2, 450); 
+        // 2.2 Introductory Line
+        ctx.font = '40px "Arial", sans-serif'; 
+        ctx.fillStyle = '#cbd5e1'; 
+        ctx.fillText("IS GRANTED IN RECOGNITION OF EXEMPLARY DEDICATION TO", width / 2, 450); 
 
-        // 2.3 ឈ្មោះអ្នកទទួល (Username) - ធំ ពណ៌មាស Gradient
-        const gradient = ctx.createLinearGradient(width/2 - 300, 0, width/2 + 300, 0);
-        gradient.addColorStop(0, "#fcd34d");   // មាសស្រាល
-        gradient.addColorStop(0.5, "#ffffff"); // ស
-        gradient.addColorStop(1, "#fcd34d");   // មាសស្រាល
+        // 2.3 Recipient Name (Large, Glowing Gold Gradient)
+        const nameGradient = ctx.createLinearGradient(width/2 - 400, 0, width/2 + 400, 0);
+        nameGradient.addColorStop(0, "#fcd34d");   
+        nameGradient.addColorStop(0.5, "#ffffff"); 
+        nameGradient.addColorStop(1, "#fcd34d");   
 
         ctx.font = '150px "Moul"'; 
-        ctx.fillStyle = gradient;
-        // ដាក់ Shadow អោយឈ្មោះផុស
-        ctx.shadowColor = "rgba(251, 191, 36, 0.5)"; 
+        ctx.fillStyle = nameGradient;
+        ctx.shadowColor = "rgba(255, 215, 0, 0.8)"; 
         ctx.shadowBlur = 40;
-        ctx.fillText(username, width / 2, 650);
-        
-        ctx.shadowBlur = 0; // Reset
+        ctx.fillText(username.toUpperCase(), width / 2, 650);
+        ctx.shadowBlur = 0; 
 
-        // 2.4 ពិន្ទុ (Score)
-        ctx.font = 'bold 50px "Arial", sans-serif';
-        ctx.fillStyle = '#38bdf8'; // ពណ៌ផ្ទៃមេឃភ្លឺ
-        ctx.fillText(`ពិន្ទុសរុប: ${score}`, width / 2, 780);
-
-        // 2.5 ខ្លឹមសារ (Body Text) - ពណ៌ស
+        // 2.4 ELABORATED Achievement Body Text (White)
         ctx.fillStyle = '#ffffff'; 
-        ctx.font = '36px "Moul"'; 
-        const lineHeight = 80; 
-        let startY = 920;
+        ctx.font = '45px "Arial", sans-serif'; 
+        const lineHeight = 75; 
+        let startY = 850; 
 
-        ctx.fillText("ប្អូនបានបញ្ចេញសមត្ថភាព និងចូលរួមយ៉ាងសកម្មក្នុងការដោះស្រាយលំហាត់គណិតវិទ្យាថ្នាក់ទី ១២", width / 2, startY);
-        ctx.fillText("នៅលើគេហទំព័រ braintest.fun ប្រកបដោយភាពត្រឹមត្រូវ និងទទួលបានលទ្ធផលល្អប្រសើរ។", width / 2, startY + lineHeight);
-        ctx.fillText("យើងសូមជូនពរឱ្យប្អូនទទួលបានជោគជ័យក្នុងការសិក្សា និងគ្រប់ភារកិច្ច។", width / 2, startY + (lineHeight * 2));
+        ctx.fillText("FOR EXHIBITING OUTSTANDING MASTERY AND UNWAVERING COMMITMENT", width / 2, startY);
+        ctx.fillText("ACHIEVED THROUGH RIGOROUS EFFORT IN THE MATRICULATION LEVEL MATHEMATICS QUIZ.", width / 2, startY + lineHeight);
+        
+        ctx.font = 'italic 45px "Arial", sans-serif'; 
+        ctx.fillStyle = '#00BFFF'; 
+        ctx.fillText("THIS CERTIFICATE SERVES AS A TESTAMENT TO YOUR INTELLECTUAL PROWESS AND TRIUMPH.", width / 2, startY + (lineHeight * 2));
+        
+        // 2.5 Score Display
+        ctx.font = 'bold 55px "Arial", sans-serif'; 
+        ctx.fillStyle = '#FF4500'; 
+        ctx.fillText(`TOTAL FINAL SCORE: ${score}`, width / 2, startY + (lineHeight * 3) + 80); 
 
         // ==========================================
-        // 🎨 ជំហានទី ៣: ផ្នែកខាងក្រោម (Footer)
+        // 🎨 STEP 3: FOOTER (Enhanced Signature Look)
         // ==========================================
 
-        // 3.1 កាលបរិច្ឆេទ (ខាងឆ្វេង)
+        const signatureLineY = 1170; // Position for the lines
+        ctx.strokeStyle = '#94a3b8'; // Light Gray Line
+        ctx.lineWidth = 2;
+
+        // 3.1 Date/Signature Placeholder (Left)
         ctx.textAlign = 'left';
-        ctx.fillStyle = '#94a3b8'; // Slate-400
-        ctx.font = '30px "Moul"'; 
-        ctx.fillText("រាជធានីភ្នំពេញ, " + khmerDate, 150, 1250);
+        ctx.fillStyle = '#cbd5e1'; 
+        
+        // Draw Signature Line
+        ctx.beginPath();
+        ctx.moveTo(150, signatureLineY); 
+        ctx.lineTo(550, signatureLineY); 
+        ctx.stroke();
 
-        // 3.2 ឈ្មោះគេហទំព័រ (កណ្តាល)
+        ctx.font = '30px "Arial", sans-serif'; 
+        ctx.fillText(`Awarded on: ${issuedDate}`, 150, 1200); 
+        
+        ctx.font = '28px "Arial", sans-serif'; 
+        ctx.fillText(`Signature / Stamp Placeholder`, 150, 1240); // Placeholder Text
+
+        // 3.2 Status/Verification Placeholder (Right)
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#22c55e'; // Bright Green for Status
+        
+        // Draw Verification Line
+        ctx.beginPath();
+        ctx.moveTo(width - 550, signatureLineY); 
+        ctx.lineTo(width - 150, signatureLineY); 
+        ctx.stroke();
+
+        ctx.font = 'bold 40px "Arial"';
+        ctx.fillText("STATUS: VERIFIED", width - 150, 1200);
+        
+        ctx.fillStyle = '#cbd5e1'; // Light Gray for placeholder
+        ctx.font = '28px "Arial", sans-serif'; 
+        ctx.fillText(`Verification Key / Seal Area`, width - 150, 1240); // Placeholder Text
+
+
+        // 3.3 Website (Bottom Center)
         ctx.textAlign = 'center';
         ctx.font = 'bold 35px "Courier New", sans-serif';
-        ctx.fillStyle = '#fbbf24'; // ពណ៌មាស
-        ctx.fillText("braintest.fun", width / 2, 1250);
+        ctx.fillStyle = goldColor; 
+        
+        ctx.beginPath();
+        ctx.moveTo(width / 2 - 120, 1370); 
+        ctx.lineTo(width / 2 + 120, 1370); 
+        ctx.strokeStyle = goldColor; 
+        ctx.lineWidth = 3;
+        ctx.stroke();
 
-        // 3.3 QR Code Placeholder (បើចង់ដាក់ តែកន្លែងនេះដាក់ Logo ឬ Text "Approved")
-        ctx.textAlign = 'right';
-        ctx.fillStyle = '#22c55e'; // ពណ៌បៃតង
-        ctx.font = 'bold 40px "Arial"';
-        ctx.fillText("✔ APPROVED", width - 150, 1250);
+        ctx.fillText("braintest.fun", width / 2, 1350); 
 
-        // Output Image
+        // Output Image (PNG)
         const buffer = canvas.toBuffer('image/png');
         res.set('Content-Type', 'image/png');
         res.send(buffer);
@@ -386,8 +412,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         res.status(500).send("Failed to generate certificate.");
     }
 });
-   
-  
+    
 
 // ==========================================
 // 8. START SERVER
