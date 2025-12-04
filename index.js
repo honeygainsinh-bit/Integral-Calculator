@@ -1,4 +1,4 @@
-  require('dotenv').config();
+Require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -18,7 +18,7 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// ចុះឈ្មោះ Font ខ្មែរ (Moul)
+// ចុះឈ្មោះ Font ខ្មែរ (Moul) - រក្សាទុកក្នុងកូដដើម ប៉ុន្តែ Certificate ប្រើ Arial ដើម្បីស្ថេរភាព
 try {
     const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
     registerFont(fontPath, { family: 'Moul' });
@@ -166,11 +166,9 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // 6. CERTIFICATE REQUEST API
 // ==========================================
 
-// ✅ API ទទួលសំណើ (អនុញ្ញាតឱ្យ Score 0)
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
     
-    // FIX: Score អាចស្មើ 0 បាន
     if (!username || score === undefined || score === null) {
         return res.status(400).json({ success: false, message: "Missing username or score" });
     }
@@ -254,9 +252,8 @@ app.get('/admin/requests', async (req, res) => {
     }
 });
 
-
- // ==========================================
-// 7. GENERATE CERTIFICATE LOGIC (FINAL STABILITY VERSION)
+// ==========================================
+// 7. GENERATE CERTIFICATE LOGIC (FINAL STABILITY VERSION - ARIA L ONLY) 🎨
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -280,7 +277,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const ctx = canvas.getContext('2d');
 
         // ==========================================
-        // 🎨 STEP 1: DRAW BACKGROUND & BORDER
+        // 🎨 STEP 1: DRAW BACKGROUND & BORDER (Programmatic)
         // ==========================================
         
         ctx.fillStyle = '#0f172a'; // Deep Navy Blue
@@ -298,13 +295,13 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.strokeRect(80, 80, width - 160, height - 160);
 
         // ==========================================
-        // 🎨 STEP 2: TEXT RENDERING (STABILITY FOCUS)
+        // 🎨 STEP 2: TEXT RENDERING (Arial Only for Stability)
         // ==========================================
         
         ctx.textAlign = 'center';
 
-        // 2.1 Main Title (No Shadow)
-        ctx.font = '100px "Moul"';
+        // 2.1 Main Title (Arial)
+        ctx.font = 'bold 100px "Arial", sans-serif';
         ctx.fillStyle = goldColor; 
         ctx.fillText("CERTIFICATE OF ACHIEVEMENT", width / 2, 300);
 
@@ -313,9 +310,9 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.fillStyle = '#cbd5e1'; 
         ctx.fillText("IS GRANTED IN RECOGNITION OF EXEMPLARY DEDICATION TO", width / 2, 450); 
 
-        // 2.3 Recipient Name (Solid White for Maximum Visibility)
-        ctx.font = 'bold 160px "Arial", sans-serif'; // Use reliable Arial/Sans-serif and BOLD
-        ctx.fillStyle = '#FFFFFF'; // FORCED PURE WHITE COLOR
+        // 2.3 Recipient Name (Arial Bold, Solid White)
+        ctx.font = 'bold 160px "Arial", sans-serif'; 
+        ctx.fillStyle = '#FFFFFF'; // PURE WHITE FOR MAXIMUM CONTRAST
         ctx.fillText(username.toUpperCase(), width / 2, 650);
         
         // 2.4 ELABORATED Achievement Body Text (White)
@@ -337,7 +334,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.fillText(`TOTAL FINAL SCORE: ${score}`, width / 2, startY + (lineHeight * 3) + 80); 
 
         // ==========================================
-        // 🎨 STEP 3: FOOTER (No Change to Footer Layout)
+        // 🎨 STEP 3: FOOTER (Signature Placeholders)
         // ==========================================
 
         const signatureLineY = 1170; 
@@ -378,7 +375,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         // 3.3 Website (Bottom Center)
         ctx.textAlign = 'center';
-        ctx.font = 'bold 35px "Courier New", sans-serif';
+        ctx.font = 'bold 35px "Courier New", sans-serif'; 
         ctx.fillStyle = goldColor; 
         
         ctx.beginPath();
@@ -400,7 +397,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         res.status(500).send("Failed to generate certificate.");
     }
 });
-       
+
 
 // ==========================================
 // 8. START SERVER
