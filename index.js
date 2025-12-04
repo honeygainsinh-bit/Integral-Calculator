@@ -256,8 +256,9 @@ app.get('/admin/requests', async (req, res) => {
 
 
 
+     
      // ==========================================
-// 7. GENERATE CERTIFICATE LOGIC (UPDATED: BRIGHT TEXT & NO ADMIN)
+// 7. GENERATE CERTIFICATE (AUTO BACKGROUND & BORDER)
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -284,90 +285,98 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
 
-        // --- Load Template ---
-        const templatePath = path.join(__dirname, 'public', 'certificate-template.png');
-        try {
-            const image = await loadImage(templatePath);
-            ctx.drawImage(image, 0, 0, width, height);
-        } catch (e) {
-            return res.status(500).send("Error: រកមិនឃើញ file 'certificate-template.png'");
-        }
+        // ==========================================
+        // 🎨 ជំហានទី ១: គូរ BACKGROUND & ស៊ុម (មិនប្រើរូបភាពក្រៅ)
+        // ==========================================
+        
+        // 1.1 ដាក់ផ្ទៃពណ៌ Dark Navy (ខៀវចាស់ខ្លាំង) - ធានាថាអក្សរពណ៌ស លេចធ្លោ
+        ctx.fillStyle = '#0f172a'; // Dark Slate Blue
+        ctx.fillRect(0, 0, width, height);
+
+        // 1.2 គូរស៊ុមពណ៌មាស (Gold Border)
+        // ស៊ុមក្រៅ
+        ctx.strokeStyle = '#fbbf24'; // Amber-400
+        ctx.lineWidth = 20;
+        ctx.strokeRect(50, 50, width - 100, height - 100);
+
+        // ស៊ុមក្នុងតូច
+        ctx.strokeStyle = '#f59e0b'; // Amber-600
+        ctx.lineWidth = 5;
+        ctx.strokeRect(80, 80, width - 160, height - 160);
 
         // ==========================================
-        // 🎨 DESIGN ADJUSTMENTS (HIGH CONTRAST)
+        // 🎨 ជំហានទី ២: សរសេរអក្សរ
         // ==========================================
         
         ctx.textAlign = 'center';
 
-        // 1. ឃ្លាផ្តើម (ពណ៌ស)
-        ctx.font = '40px "Moul"'; 
-        ctx.fillStyle = '#FFFFFF'; // ពណ៌សសុទ្ធ (ដាច់ខាតត្រូវតែស)
-        ctx.fillText("លិខិតសរសើរនេះប្រគល់ជូនដោយសេចក្តីគោរពចំពោះ", width / 2, 480); 
-
-        // 2. ឈ្មោះអ្នកទទួល (Username) - ពណ៌មាសភ្លឺ
-        // បង្កើត Gradient មាសអោយភ្លឺខ្លាំង
-        const gradient = ctx.createLinearGradient(width/2 - 300, 0, width/2 + 300, 0);
-        gradient.addColorStop(0, "#FFD700");   // Gold
-        gradient.addColorStop(0.5, "#FFFFE0"); // Light Yellow (ភ្លឺ)
-        gradient.addColorStop(1, "#FFD700");   // Gold
-
-        // ដាក់ស្រមោលអោយអក្សរផុស
-        ctx.shadowColor = "rgba(255, 215, 0, 0.8)"; 
-        ctx.shadowBlur = 30;
+        // 2.1 ចំណងជើងធំ "បណ្ណសរសើរ"
+        ctx.font = '120px "Moul"';
+        ctx.fillStyle = '#fbbf24'; // ពណ៌មាស
+        ctx.shadowColor = "rgba(0,0,0,0.5)";
+        ctx.shadowBlur = 10;
+        ctx.fillText("បណ្ណសរសើរ", width / 2, 300);
         
-        ctx.font = '160px "Moul"'; 
+        ctx.shadowBlur = 0; // Reset Shadow
+
+        // 2.2 ឃ្លាផ្តើម
+        ctx.font = '40px "Moul"'; 
+        ctx.fillStyle = '#cbd5e1'; // ពណ៌ប្រផេះស្រាល
+        ctx.fillText("សូមប្រគល់ជូនដោយក្ដីគោរពចំពោះ", width / 2, 450); 
+
+        // 2.3 ឈ្មោះអ្នកទទួល (Username) - ធំ ពណ៌មាស Gradient
+        const gradient = ctx.createLinearGradient(width/2 - 300, 0, width/2 + 300, 0);
+        gradient.addColorStop(0, "#fcd34d");   // មាសស្រាល
+        gradient.addColorStop(0.5, "#ffffff"); // ស
+        gradient.addColorStop(1, "#fcd34d");   // មាសស្រាល
+
+        ctx.font = '150px "Moul"'; 
         ctx.fillStyle = gradient;
-        ctx.fillText(username, width / 2, 660);
+        // ដាក់ Shadow អោយឈ្មោះផុស
+        ctx.shadowColor = "rgba(251, 191, 36, 0.5)"; 
+        ctx.shadowBlur = 40;
+        ctx.fillText(username, width / 2, 650);
+        
+        ctx.shadowBlur = 0; // Reset
 
-        // Reset Shadow
-        ctx.shadowColor = "transparent";
-        ctx.shadowBlur = 0;
-
-        // 3. ពិន្ទុ (Score) - ពណ៌ក្រហមភ្លឺ ឬ ទឹកក្រូច
-        ctx.font = 'bold 60px "Arial", sans-serif';
-        ctx.fillStyle = '#FF4500'; // OrangeRed (ភ្លឺច្បាស់លើផ្ទៃខ្មៅ)
+        // 2.4 ពិន្ទុ (Score)
+        ctx.font = 'bold 50px "Arial", sans-serif';
+        ctx.fillStyle = '#38bdf8'; // ពណ៌ផ្ទៃមេឃភ្លឺ
         ctx.fillText(`ពិន្ទុសរុប: ${score}`, width / 2, 780);
 
-        // 4. ខ្លឹមសារ (Body Text) - ពណ៌សសុទ្ធ
-        ctx.fillStyle = '#FFFFFF'; // ពណ៌សសុទ្ធ
-        ctx.font = '40px "Moul"'; 
+        // 2.5 ខ្លឹមសារ (Body Text) - ពណ៌ស
+        ctx.fillStyle = '#ffffff'; 
+        ctx.font = '36px "Moul"'; 
         const lineHeight = 80; 
         let startY = 920;
 
         ctx.fillText("ប្អូនបានបញ្ចេញសមត្ថភាព និងចូលរួមយ៉ាងសកម្មក្នុងការដោះស្រាយលំហាត់គណិតវិទ្យាថ្នាក់ទី ១២", width / 2, startY);
-        ctx.fillText("នៅលើគេហទំព័រ braintest.fun ប្រកបដោយភាពត្រឹមត្រូវ និងទទួលបានលទ្ធផលគួរជាទីមោទកៈ។", width / 2, startY + lineHeight);
-        ctx.fillText("លិខិតសរសើរនេះ គឺជាសក្ខីភាពបញ្ជាក់ថា ប្អូនគឺជាសិស្សដែលមានការតស៊ូ និងមានមូលដ្ឋានគ្រឹះរឹងមាំ។", width / 2, startY + (lineHeight * 2));
-        
-        // ឃ្លាជូនពរ - ពណ៌បៃតងភ្លឺ
-        ctx.fillStyle = '#00FF7F'; // SpringGreen (ភ្លឺខ្លាំង)
-        ctx.fillText("យើងសូមជូនពរឱ្យប្អូនបន្តភាពជោគជ័យក្នុងការសិក្សា និងក្លាយជាធនធានមនុស្សដ៏ល្អសម្រាប់សង្គម។", width / 2, startY + (lineHeight * 3) + 20);
+        ctx.fillText("នៅលើគេហទំព័រ braintest.fun ប្រកបដោយភាពត្រឹមត្រូវ និងទទួលបានលទ្ធផលល្អប្រសើរ។", width / 2, startY + lineHeight);
+        ctx.fillText("យើងសូមជូនពរឱ្យប្អូនទទួលបានជោគជ័យក្នុងការសិក្សា និងគ្រប់ភារកិច្ច។", width / 2, startY + (lineHeight * 2));
 
         // ==========================================
-        // 5. ផ្នែកខាងក្រោម (FOOTER - NO ADMIN NAME)
+        // 🎨 ជំហានទី ៣: ផ្នែកខាងក្រោម (Footer)
         // ==========================================
 
-        // --- កាលបរិច្ឆេទ (ដាក់នៅខាងស្តាំដៃ ជំនួសកន្លែងហត្ថលេខា) ---
+        // 3.1 កាលបរិច្ឆេទ (ខាងឆ្វេង)
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#94a3b8'; // Slate-400
+        ctx.font = '30px "Moul"'; 
+        ctx.fillText("រាជធានីភ្នំពេញ, " + khmerDate, 150, 1250);
+
+        // 3.2 ឈ្មោះគេហទំព័រ (កណ្តាល)
         ctx.textAlign = 'center';
-        ctx.fillStyle = '#E0E0E0'; // ពណ៌ប្រផេះស្រាលៗ
-        ctx.font = '35px "Moul"'; 
-        // ដាក់នៅខាងស្តាំក្រោម (កន្លែងដែលគេតែងដាក់ថ្ងៃខែ)
-        ctx.fillText("រាជធានីភ្នំពេញ, " + khmerDate, width - 400, 1250);
-
-        // --- WEBSITE (ដាក់នៅកណ្តាលខាងក្រោមបំផុត) ---
         ctx.font = 'bold 35px "Courier New", sans-serif';
-        ctx.fillStyle = '#00BFFF'; // DeepSkyBlue (ពណ៌ផ្ទៃមេឃភ្លឺ)
-        
-        // បន្ទាត់តុបតែង
-        ctx.beginPath();
-        ctx.moveTo(width / 2 - 120, 1330);
-        ctx.lineTo(width / 2 + 120, 1330);
-        ctx.strokeStyle = '#00BFFF'; 
-        ctx.lineWidth = 3;
-        ctx.stroke();
+        ctx.fillStyle = '#fbbf24'; // ពណ៌មាស
+        ctx.fillText("braintest.fun", width / 2, 1250);
 
-        ctx.fillText("Website: braintest.fun", width / 2, 1380);
+        // 3.3 QR Code Placeholder (បើចង់ដាក់ តែកន្លែងនេះដាក់ Logo ឬ Text "Approved")
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#22c55e'; // ពណ៌បៃតង
+        ctx.font = 'bold 40px "Arial"';
+        ctx.fillText("✔ APPROVED", width - 150, 1250);
 
-        // Output
+        // Output Image
         const buffer = canvas.toBuffer('image/png');
         res.set('Content-Type', 'image/png');
         res.send(buffer);
