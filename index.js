@@ -1,16 +1,11 @@
-// =============================================================
-// MATH QUIZ PRO BACKEND - RESTORED FULL STRUCTURE
-// =============================================================
-
-require('dotenv').config();
+Require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg'); 
-
-// នាំយក Canvas មកប្រើ (រក្សា registerFont ក្នុង require)
+// ✅ នាំយក Canvas មកប្រើ (រក្សា registerFont ដើម្បីកុំឱ្យ Server Crash)
 const { registerFont, createCanvas, loadImage } = require('canvas');
 
 const app = express();
@@ -23,22 +18,23 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// ✅ រក្សាប្លុកកូដចុះឈ្មោះ Font Moul ដើម (ដើម្បីកុំឲ្យ Server Crash)
+// ✅ រក្សាប្លុកកូដចុះឈ្មោះ Font Moul ដើម (ដើម្បីកុំឱ្យ Server Crash "Status 1")
 try {
     const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
     registerFont(fontPath, { family: 'Moul' });
     console.log("✅ Font 'Moul' loaded successfully.");
 } catch (e) {
-    console.warn("⚠️ Warning: Could not find font 'Moul.ttf' in the public folder.");
+    console.warn("⚠️ Warning: Could not find font 'Moul.ttf'. Using standard fonts.");
 }
 
 const MODEL_NAME = "gemini-2.5-flash"; 
+
+// Tracking Variables
 let totalPlays = 0;           
 const uniqueVisitors = new Set();
 
 // Middleware: Log Request
 app.use((req, res, next) => {
-    // រក្សារចនាសម្ព័ន្ធ Log ដើម
     console.log(`[${new Date().toLocaleTimeString('en-US')}] 📡 ${req.method} ${req.path}`);
     next();
 });
@@ -80,7 +76,6 @@ async function initializeDatabase() {
         console.log("✅ Database initialized: Tables ready.");
         client.release();
     } catch (err) {
-        // រក្សារចនាសម្ព័ន្ធ Log ដើម
         console.error("❌ Database initialization error:", err.message);
     }
 }
@@ -102,7 +97,6 @@ const limiter = rateLimit({
 app.use(express.static(path.join(__dirname, 'public'))); 
 
 app.get('/', (req, res) => {
-    // រក្សារចនាសម្ព័ន្ធដើម
     res.status(200).send(`
         <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
             <h1 style="color: #22c55e;">Server is Online 🟢</h1>
@@ -173,7 +167,6 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // ==========================================
 
 app.post('/api/submit-request', async (req, res) => {
-    
     const { username, score } = req.body;
     
     if (!username || score === undefined || score === null) {
@@ -285,19 +278,29 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
 
-        // ✅ ប្រើផ្ទៃខាងក្រោយពណ៌សសុទ្ធ (ជំនួសរូបភាព Template)
+        // ✅ KOR-RECTION: ប្រើផ្ទៃខាងក្រោយពណ៌សសុទ្ធ (ជំនួសរូបភាព Template)
+        // នេះជាដំណោះស្រាយសម្រាប់បញ្ហា "ខ្មៅសុទ្ធ"
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, width, height);
 
+        // 🚫 បិទការ Load រូបភាពដើម (certificate-template.png) ដើម្បីកុំឲ្យបាំងពណ៌ស
+        /*
+        const templatePath = path.join(__dirname, 'public', 'certificate-template.png');
+        try {
+            const image = await loadImage(templatePath);
+            ctx.drawImage(image, 0, 0, width, height);
+        } catch (e) { }
+        */
+
         // ==========================================
-        // 🎨 DESIGN & TEXT RENDERING (ENGLISH - Using Arial for Stability)
+        // 🎨 DESIGN & TEXT RENDERING (ENGLISH - Arial)
         // ==========================================
         
         ctx.textAlign = 'center';
 
         // 1. Opening Phrase 
         ctx.font = '45px Arial, sans-serif'; 
-        ctx.fillStyle = '#334155'; 
+        ctx.fillStyle = '#334155'; // Dark Slate Gray
         ctx.fillText("This Certificate of Achievement is Proudly Presented to", width / 2, 450); 
 
         // 2. Recipient Name (GOLD EFFECT) ✨
@@ -309,7 +312,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.shadowColor = "rgba(180, 83, 9, 0.6)"; 
         ctx.shadowBlur = 10;
         
-        ctx.font = 'bold 150px Arial, sans-serif'; 
+        ctx.font = 'bold 150px Arial, sans-serif'; // Font Arial
         ctx.fillStyle = gradient;
         ctx.fillText(username.toUpperCase(), width / 2, 650);
 
@@ -319,16 +322,16 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         // 3. Content Title
         ctx.font = '40px Arial, sans-serif';
-        ctx.fillStyle = '#1e293b'; 
+        ctx.fillStyle = '#1e293b'; // Dark color
         ctx.fillText(`For outstanding achievement in the Math Quiz Pro challenge.`, width / 2, 780);
 
         // 4. Score
         ctx.font = 'bold 50px Arial, sans-serif';
-        ctx.fillStyle = '#b91c1c'; 
+        ctx.fillStyle = '#b91c1c'; // Red
         ctx.fillText(`Final Score: ${score}`, width / 2, 870);
 
         // 5. Content Body (English)
-        ctx.fillStyle = '#1e293b'; 
+        ctx.fillStyle = '#1e293b'; // Dark color
         ctx.font = '35px Arial, sans-serif'; 
         const lineHeight = 65; 
         let startY = 1000;
@@ -340,17 +343,17 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.fillText("perseverance, and solid fundamental knowledge acquired through rigorous practice.", width / 2, startY + lineHeight);
         
         // Line 3: Wishing
-        ctx.fillStyle = '#15803d'; 
+        ctx.fillStyle = '#15803d'; // Green
         ctx.fillText("We wish you continued success in your academic journey and future endeavors.", width / 2, startY + (lineHeight * 2) + 15);
 
         // 6. Date
-        ctx.fillStyle = '#64748b'; 
+        ctx.fillStyle = '#64748b'; // Gray
         ctx.font = 'bold 30px Arial, sans-serif'; 
         ctx.fillText(`Issued on: ${englishDate}`, width / 2, 1280);
 
         // 7. Footer
         ctx.font = 'bold 30px "Courier New", monospace';
-        ctx.fillStyle = '#0369a1'; 
+        ctx.fillStyle = '#0369a1'; // Blue
         
         // Decorative Line
         ctx.beginPath();
@@ -368,7 +371,6 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         res.send(buffer);
 
     } catch (err) {
-        // រក្សារចនាសម្ព័ន្ធ Log ដើម
         console.error("Gen Cert Error:", err);
         res.status(500).send("Failed to generate certificate.");
     }
