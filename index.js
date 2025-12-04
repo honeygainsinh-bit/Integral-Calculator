@@ -5,11 +5,10 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg'); 
-// ✅ នាំយក Canvas មកប្រើ (ដាក់ registerFont ត្រឡប់មកវិញដើម្បីជួសជុល Exited with status 1)
+// ✅ រក្សា registerFont នៅក្នុង require
 const { registerFont, createCanvas, loadImage } = require('canvas');
 
 const app = express();
-// កំណត់ Port 3000 ជាគោល (ឬតាម Environment)
 const port = process.env.PORT || 3000;
 
 // ==========================================
@@ -19,8 +18,14 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// 🚫 លុបកូដចុះឈ្មោះ Font Moul ចេញពី Function ដើម្បីការពារបញ្ហា Rendering
-// (យើងទុកតែ registerFont ក្នុង require តែមិនហៅ function ទេ)
+// ✅ រក្សាប្លុកកូដដើម (try/catch) របស់ Font Moul ទុកចោល (ដើម្បីកុំឲ្យ Server Crash)
+try {
+    const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
+    registerFont(fontPath, { family: 'Moul' });
+    console.log("✅ Font 'Moul' loaded successfully.");
+} catch (e) {
+    console.warn("⚠️ Warning: Could not find font 'Moul.ttf' in the public folder.");
+}
 
 const MODEL_NAME = "gemini-2.5-flash"; 
 
@@ -278,14 +283,14 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.fillRect(0, 0, width, height);
 
         // ==========================================
-        // 🎨 DESIGN & TEXT RENDERING (ENGLISH - Arial)
+        // 🎨 DESIGN & TEXT RENDERING (ENGLISH - Standard Font)
         // ==========================================
         
         ctx.textAlign = 'center';
 
         // 1. Opening Phrase 
         ctx.font = '45px Arial, sans-serif'; 
-        ctx.fillStyle = '#334155'; // Dark Slate Gray
+        ctx.fillStyle = '#334155'; // Dark Slate Gray (សម្រាប់ផ្ទៃស)
         ctx.fillText("This Certificate of Achievement is Proudly Presented to", width / 2, 450); 
 
         // 2. Recipient Name (GOLD EFFECT) ✨
