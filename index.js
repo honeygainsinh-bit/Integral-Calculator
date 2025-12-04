@@ -1,5 +1,5 @@
 // =============================================================
-// MATH QUIZ PRO BACKEND - FULL VERSION (STABLE & WHITE BG)
+// MATH QUIZ PRO BACKEND - FINAL STABLE FIX (FLAT COLOR)
 // =============================================================
 
 require('dotenv').config();
@@ -9,9 +9,7 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg'); 
-
-// ✅ 1. នាំយក Canvas មកប្រើ (Safe Mode)
-// យើងដាក់វានៅទីនេះដើម្បីកុំឱ្យមានបញ្ហា "Exited with status 1"
+// នាំយក Canvas មកប្រើ (រក្សា registerFont នៅក្នុង require)
 const { registerFont, createCanvas, loadImage } = require('canvas');
 
 const app = express();
@@ -24,14 +22,13 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// ✅ 2. FONT REGISTRATION (NON-BLOCKING)
-// ព្យាយាមចុះឈ្មោះ Font ប៉ុន្តែបើបរាជ័យ Server នៅតែដើរ
+// ✅ FONT REGISTRATION (NON-BLOCKING)
 try {
     const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
     registerFont(fontPath, { family: 'Moul' });
     console.log("✅ Font 'Moul' registered.");
 } catch (e) {
-    console.warn("⚠️ Font registration skipped. Using system fonts.");
+    console.warn("⚠️ Font registration skipped. Server is alive.");
 }
 
 const MODEL_NAME = "gemini-2.5-flash"; 
@@ -57,7 +54,6 @@ async function initializeDatabase() {
         if (!process.env.DATABASE_URL) return;
         const client = await pool.connect();
         
-        // Table Leaderboard
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -68,7 +64,6 @@ async function initializeDatabase() {
             );
         `);
 
-        // Table Certificate Requests
         await client.query(`
             CREATE TABLE IF NOT EXISTS certificate_requests (
                 id SERIAL PRIMARY KEY,
@@ -118,7 +113,7 @@ app.get('/stats', (req, res) => {
 app.post('/api/generate-problem', limiter, async (req, res) => {
     try {
         const { prompt } = req.body;
-        if (!prompt) return res.status(400).json({ error: "Prompt required" });
+        if (!prompt) return res.status(400).json({ error: "Required" });
 
         totalPlays++;
         uniqueVisitors.add(req.ip);
@@ -201,7 +196,7 @@ app.get('/admin/requests', async (req, res) => {
 });
 
 // ==========================================
-// 🎨 GENERATE CERTIFICATE (WHITE BACKGROUND FIXED)
+// 🎨 GENERATE CERTIFICATE (FLAT COLOR FIX)
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -220,36 +215,23 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
 
-        // ✅ 3. BACKGROUND: SOLID WHITE
-        // នេះជាចំណុចសំខាន់ដែលធ្វើឱ្យលែងចេញពណ៌ខ្មៅ
+        // 1. BACKGROUND: SOLID WHITE (FIX FOR BLACK IMAGE)
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, width, height);
 
-        // ==========================================
-        // TEXT RENDERING (ENGLISH & ARIAL)
-        // ==========================================
+        // 2. TEXT RENDERING (ENGLISH & ARIAL)
         ctx.textAlign = 'center';
 
         // Title
         ctx.font = '45px Arial, sans-serif'; 
-        ctx.fillStyle = '#334155'; 
+        ctx.fillStyle = '#334155';
         ctx.fillText("This Certificate of Achievement is Proudly Presented to", width / 2, 450); 
 
-        // Name (GOLD)
-        const gradient = ctx.createLinearGradient(width/2 - 250, 0, width/2 + 250, 0);
-        gradient.addColorStop(0, "#854d0e");   
-        gradient.addColorStop(0.5, "#fde047"); 
-        gradient.addColorStop(1, "#854d0e");   
-        
-        ctx.shadowColor = "rgba(180, 83, 9, 0.6)"; 
-        ctx.shadowBlur = 10;
+        // Name (FLAT GOLD COLOR - Safest for Rendering)
         ctx.font = 'bold 150px Arial, sans-serif'; 
-        ctx.fillStyle = gradient;
+        ctx.fillStyle = '#C49A0A'; // Flat Gold/Bronze Color
         ctx.fillText(username.toUpperCase(), width / 2, 650);
         
-        ctx.shadowColor = "transparent";
-        ctx.shadowBlur = 0;
-
         // Content
         ctx.font = '40px Arial, sans-serif';
         ctx.fillStyle = '#1e293b'; 
@@ -281,7 +263,6 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.font = 'bold 30px "Courier New", monospace';
         ctx.fillStyle = '#0369a1'; 
         
-        // Line
         ctx.beginPath();
         ctx.moveTo(width / 2 - 180, 1315);
         ctx.lineTo(width / 2 + 180, 1315);
@@ -305,7 +286,6 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 // ==========================================
 // START SERVER
 // ==========================================
-// Start immediately, do not wait for DB
 app.listen(port, () => {
     console.log(`🚀 Server running on port ${port}`);
     initializeDatabase();
