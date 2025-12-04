@@ -5,8 +5,8 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg'); 
-// Import Canvas modules
-const { registerFont, createCanvas, loadImage } = require('canvas');
+// នាំយក Canvas មកប្រើ
+const { createCanvas, loadImage } = require('canvas'); // លុប registerFont ចេញ
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -18,14 +18,7 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// Register Khmer Font (Moul)
-try {
-    const fontPath = path.join(__dirname, 'public', 'Moul.ttf');
-    registerFont(fontPath, { family: 'Moul' });
-    console.log("✅ Font 'Moul' loaded successfully.");
-} catch (e) {
-    console.warn("⚠️ Warning: Could not find font 'Moul.ttf' in the public folder.");
-}
+// **🚫 លុបចោលការចុះឈ្មោះ Font Moul.ttf ទាំងស្រុង**
 
 const MODEL_NAME = "gemini-2.5-flash"; 
 
@@ -35,7 +28,7 @@ const uniqueVisitors = new Set();
 
 // Middleware: Log Request
 app.use((req, res, next) => {
-    console.log(`[${new Date().toLocaleTimeString('en-US')}] 📡 ${req.method} ${req.path}`);
+    console.log(`[${new Date().toLocaleTimeString('km-KH')}] 📡 ${req.method} ${req.path}`);
     next();
 });
 
@@ -86,7 +79,7 @@ async function initializeDatabase() {
 const limiter = rateLimit({
     windowMs: 8 * 60 * 60 * 1000, 
     max: 10, 
-    message: { error: "Rate limit exceeded", message: "⚠️ Rate limit exceeded (10 times/day)!" },
+    message: { error: "Rate limit exceeded", message: "⚠️ អស់ចំនួនកំណត់ហើយ (10ដង/ថ្ងៃ)!" },
     keyGenerator: (req) => req.ip,
     skip: (req) => req.ip === process.env.OWNER_IP
 });
@@ -102,7 +95,7 @@ app.get('/', (req, res) => {
             <h1 style="color: #22c55e;">Server is Online 🟢</h1>
             <p>Math Quiz Pro Backend</p>
             <div style="margin-top: 20px; padding: 10px; background: #f0f9ff; display: inline-block; border-radius: 8px;">
-                <a href="/admin/requests" style="text-decoration: none; color: #0284c7; font-weight: bold;">👮‍♂️ View Certificate Requests (Admin)</a>
+                <a href="/admin/requests" style="text-decoration: none; color: #0284c7; font-weight: bold;">👮‍♂️ ចូលមើលសំណើសុំលិខិតសរសើរ (Admin)</a>
             </div>
         </div>
     `);
@@ -166,11 +159,11 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // 6. CERTIFICATE REQUEST API
 // ==========================================
 
-// ✅ API Receive Request (Score 0 allowed)
+// ✅ API ទទួលសំណើ (អនុញ្ញាតឱ្យ Score 0)
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
     
-    // FIX: Score can be 0
+    // FIX: Score អាចស្មើ 0 បាន
     if (!username || score === undefined || score === null) {
         return res.status(400).json({ success: false, message: "Missing username or score" });
     }
@@ -196,11 +189,11 @@ app.get('/admin/requests', async (req, res) => {
 
         let html = `
         <!DOCTYPE html>
-        <html lang="en">
+        <html lang="km">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Admin - Certificate Requests</title>
+            <title>Admin - សំណើសុំលិខិតសរសើរ</title>
             <style>
                 body { font-family: sans-serif; padding: 20px; background: #f1f5f9; }
                 h1 { color: #1e3a8a; }
@@ -217,34 +210,32 @@ app.get('/admin/requests', async (req, res) => {
             </style>
         </head>
         <body>
-            <h1>👮‍♂️ Admin Panel - Certificate Requests</h1>
+            <h1>👮‍♂️ Admin Panel - សំណើសុំលិខិតសរសើរ</h1>
             <table>
                 <thead>
                     <tr>
                         <th>#ID</th>
-                        <th>Username</th>
-                        <th>Score</th>
-                        <th>Date</th>
-                        <th>Action</th>
+                        <th>ឈ្មោះ (Username)</th>
+                        <th>ពិន្ទុ (Score)</th>
+                        <th>កាលបរិច្ឆេទ</th>
+                        <th>សកម្មភាព (Action)</th>
                     </tr>
                 </thead>
                 <tbody>`;
 
         if (result.rows.length === 0) {
-            html += `<tr><td colspan="5" style="text-align:center; padding: 20px; color: gray;">No new requests yet.</td></tr>`;
+            html += `<tr><td colspan="5" style="text-align:center; padding: 20px; color: gray;">មិនទាន់មានសំណើថ្មីៗទេ។</td></tr>`;
         } else {
             result.rows.forEach(row => {
                 const isHighScore = row.score >= 500;
-                // Note: Khmer date format is preserved for display consistency
-                const requestDate = new Date(row.request_date).toLocaleDateString('km-KH'); 
                 html += `
                     <tr>
                         <td>${row.id}</td>
                         <td style="font-weight:bold; color: #334155;">${row.username}</td>
                         <td style="color:${isHighScore ? '#16a34a' : '#dc2626'}; font-weight:bold;">${row.score}</td>
-                        <td>${requestDate}</td>
+                        <td>${new Date(row.request_date).toLocaleDateString('km-KH')}</td>
                         <td>
-                            <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-gen">🖨️ Generate Certificate</a>
+                            <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-gen">🖨️ បង្កើតលិខិត</a>
                         </td>
                     </tr>`;
             });
@@ -257,7 +248,7 @@ app.get('/admin/requests', async (req, res) => {
 });
 
 // ==========================================
-// 7. GENERATE CERTIFICATE LOGIC (2000x1414) 🎨 - USE WHITE BACKGROUND
+// 7. GENERATE CERTIFICATE LOGIC (2000x1414) 🎨 - ប្រើផ្ទៃស និង Font ស្តង់ដារ
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -270,14 +261,13 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         const { username, score, request_date } = result.rows[0];
 
-        // --- Khmer Date ---
+        // --- កាលបរិច្ឆេទខ្មែរ ---
         const dateObj = new Date(request_date);
         const day = dateObj.getDate().toString().padStart(2, '0');
-        // Khmer Month Names
         const months = ["មករា", "កុម្ភៈ", "មីនា", "មេសា", "ឧសភា", "មិថុនា", "កក្កដា", "សីហា", "កញ្ញា", "តុលា", "វិច្ឆិកា", "ធ្នូ"];
         const month = months[dateObj.getMonth()];
         const year = dateObj.getFullYear();
-        const khmerDate = `ថ្ងៃទី ${day} ខែ ${month} ឆ្នាំ ${year}`; // e.g., Day 04 Month December Year 2025
+        const khmerDate = `ថ្ងៃទី ${day} ខែ ${month} ឆ្នាំ ${year}`;
 
         // --- Setup Canvas (2000x1414) ---
         const width = 2000; 
@@ -285,44 +275,32 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
 
-        // --- RENDER WHITE BACKGROUND (TEMPORARY FIX FOR TESTING) ---
-        ctx.fillStyle = '#FFFFFF'; // Set fill color to White
-        ctx.fillRect(0, 0, width, height); // Fill the entire canvas with white
-
-        /* // --- Original Template Load (Commented Out) ---
-        const templatePath = path.join(__dirname, 'public', 'certificate-template.png');
-        try {
-            const image = await loadImage(templatePath);
-            ctx.drawImage(image, 0, 0, width, height);
-        } catch (e) {
-             // We return a White background, so don't fail the response here.
-             console.error("Template load failed. Using white background.");
-        }
-        */
+        // **✅ ដាក់ផ្ទៃខាងក្រោយពណ៌សសុទ្ធ (ជំនួស Template Image)**
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
 
         // ==========================================
-        // 🎨 DESIGN & TEXT RENDERING (Adjusted for White Background)
+        // 🎨 DESIGN & TEXT RENDERING (ប្រើ Font ស្តង់ដារ)
         // ==========================================
         
         ctx.textAlign = 'center';
 
-        // 1. Opening Phrase
-        // Note: Using Arial for maximum compatibility on Render
+        // 1. ឃ្លាផ្តើម
         ctx.font = '35px Arial, sans-serif'; 
-        ctx.fillStyle = '#334155'; // Darker color for white background
+        ctx.fillStyle = '#334155'; // ពណ៌ខ្មៅរាងងងឹតសម្រាប់ផ្ទៃស
         ctx.fillText("លិខិតសរសើរនេះប្រគល់ជូនដោយសេចក្តីគោរពចំពោះ", width / 2, 530); 
 
-        // 2. Recipient Name (GOLD EFFECT) ✨
+        // 2. ឈ្មោះអ្នកទទួល (GOLD EFFECT) ✨
         const gradient = ctx.createLinearGradient(width/2 - 250, 0, width/2 + 250, 0);
-        gradient.addColorStop(0, "#854d0e");   // Dark Gold
-        gradient.addColorStop(0.5, "#fde047"); // Bright Gold
-        gradient.addColorStop(1, "#854d0e");   // Dark Gold
+        gradient.addColorStop(0, "#854d0e");
+        gradient.addColorStop(0.5, "#fde047");
+        gradient.addColorStop(1, "#854d0e");
 
-        // Reduced Shadow Blur for clarity
-        ctx.shadowColor = "rgba(180, 83, 9, 0.6)"; // Darker Shadow for White BG
+        // ប្រើ Shadow តិចៗ និង Font ស្តង់ដារ
+        ctx.shadowColor = "rgba(180, 83, 9, 0.6)"; 
         ctx.shadowBlur = 10;
         
-        ctx.font = 'bold 140px Arial, sans-serif'; // Using Arial
+        ctx.font = 'bold 140px Arial, sans-serif'; // Font ស្តង់ដារ
         ctx.fillStyle = gradient;
         ctx.fillText(username, width / 2, 700);
 
@@ -330,40 +308,41 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.shadowColor = "transparent";
         ctx.shadowBlur = 0;
 
-        // 3. Score
+        // 3. ពិន្ទុ
         ctx.font = 'bold 45px Arial, sans-serif';
-        ctx.fillStyle = '#b91c1c'; // Dark Red
+        ctx.fillStyle = '#b91c1c'; // ក្រហមដិត
         ctx.fillText(`ពិន្ទុសរុប: ${score}`, width / 2, 820);
 
-        // 4. Content Text 
-        ctx.fillStyle = '#1e293b'; // Very Dark Blue/Gray
-        ctx.font = '32px Arial, sans-serif'; // Using Arial
+        // 4. ខ្លឹមសារ (ពណ៌ស)
+        ctx.fillStyle = '#1e293b'; 
+        ctx.font = '32px Arial, sans-serif'; // Font ស្តង់ដារ
         const lineHeight = 70; 
         let startY = 950;
 
-        // Phrase 1
+        // ឃ្លាទី ១
         ctx.fillText("ប្អូនបានបញ្ចេញសមត្ថភាព និងចូលរួមយ៉ាងសកម្មក្នុងការដោះស្រាយលំហាត់គណិតវិទ្យាថ្នាក់ទី ១២", width / 2, startY);
         
-        // Phrase 2
+        // ឃ្លាទី ២
         ctx.fillText("នៅលើគេហទំព័រ braintest.fun ប្រកបដោយភាពត្រឹមត្រូវ និងទទួលបានលទ្ធផលគួរជាទីមោទកៈ។", width / 2, startY + lineHeight);
         
-        // Phrase 3
+        // ឃ្លាទី ៣
         ctx.fillText("លិខិតសរសើរនេះ គឺជាសក្ខីភាពបញ្ជាក់ថា ប្អូនគឺជាសិស្សដែលមានការតស៊ូ និងមានមូលដ្ឋានគ្រឹះរឹងមាំ។", width / 2, startY + (lineHeight * 2));
         
-        // Phrase 4: Wishing
-        ctx.fillStyle = '#15803d'; // Dark Green
+        // ឃ្លាទី ៤: ជូនពរ
+        ctx.fillStyle = '#15803d'; // បៃតងដិត
+        ctx.font = '32px Arial, sans-serif';
         ctx.fillText("យើងសូមជូនពរឱ្យប្អូនបន្តភាពជោគជ័យក្នុងការសិក្សា និងក្លាយជាធនធានមនុស្សដ៏ល្អសម្រាប់សង្គម។", width / 2, startY + (lineHeight * 3) + 15);
 
-        // 5. Date
-        ctx.fillStyle = '#64748b'; // Gray
+        // 5. កាលបរិច្ឆេទ
+        ctx.fillStyle = '#64748b'; // ប្រផេះ
         ctx.font = 'bold 30px Arial, sans-serif'; 
         ctx.fillText(khmerDate, width / 2, 1280);
 
-        // 6. Footer (Source)
+        // 6. Footer (ទទួលបានពី)
         ctx.font = 'bold 28px "Courier New", monospace';
-        ctx.fillStyle = '#0369a1'; // Dark Sky Blue
+        ctx.fillStyle = '#0369a1'; 
         
-        // Decorative Line
+        // បន្ទាត់តុបតែង
         ctx.beginPath();
         ctx.moveTo(width / 2 - 150, 1315);
         ctx.lineTo(width / 2 + 150, 1315);
