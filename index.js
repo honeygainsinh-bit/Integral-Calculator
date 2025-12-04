@@ -1,9 +1,3 @@
-// =========================================================================
-// ឯកសារកម្ម: MATH QUIZ PRO BACKEND SERVER (FINAL VERSION)
-// គោលបំណង: គ្រប់គ្រង API, Database, និង Image Generation ខាងក្រៅ (Imgix)
-// =========================================================================
-
-// --- 1. REQUIRE DEPENDENCIES (LIBRARY) ---
 Require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -11,48 +5,40 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg'); 
-const axios = require('axios'); // ✅ Library សម្រាប់ Call API ខាងក្រៅ (Imgix)
+const axios = require('axios'); // ✅ នាំចូល Axios
 
-// --- 2. INITIALIZATION & CONFIGURATION ---
 const app = express();
 const port = process.env.PORT || 3000;
 
+// ==========================================
+// 1. SETUP & CONFIGURATION
+// ==========================================
 app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
 const MODEL_NAME = "gemini-2.5-flash"; 
-
-// វ៉ារ្យ៉ាបសម្រាប់ការតាមដានស្ថិតិ
 let totalPlays = 0;           
 const uniqueVisitors = new Set();
 
-// Middleware: Log Request នីមួយៗ
+// Middleware: Log Request
 app.use((req, res, next) => {
-    const timestamp = new Date().toLocaleTimeString('km-KH');
-    console.log(`[${timestamp}] 📡 REQUEST: ${req.method} ${req.path}`);
+    console.log(`[${new Date().toLocaleTimeString('km-KH')}] 📡 ${req.method} ${req.path}`);
     next();
 });
 
-// =========================================================================
-// 3. DATABASE CONFIGURATION & INITIALIZATION (PostgreSQL)
-// =========================================================================
-
-// បង្កើត Pool Connection ទៅកាន់ PostgreSQL
+// ==========================================
+// 2. DATABASE CONFIGURATION
+// ==========================================
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
 });
 
-/**
- * @description: មុខងារចាប់ផ្តើម Database និងធានាថា Tables សំខាន់ៗមានវត្តមាន។
- */
 async function initializeDatabase() {
-    console.log("... ⚙️ កំពុងចាប់ផ្តើម Database ...");
     try {
         const client = await pool.connect();
         
-        // បង្កើត Table Leaderboard (សម្រាប់ដាក់ពិន្ទុអ្នកលេង)
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -63,7 +49,6 @@ async function initializeDatabase() {
             );
         `);
 
-        // បង្កើត Table Certificate Requests (សម្រាប់រក្សាសំណើ Certificate)
         await client.query(`
             CREATE TABLE IF NOT EXISTS certificate_requests (
                 id SERIAL PRIMARY KEY,
@@ -74,18 +59,16 @@ async function initializeDatabase() {
             );
         `);
 
-        console.log("✅ Database initialized: Tables ready.");
+        console.log("✅ Database initialized: Leaderboard & Requests ready.");
         client.release();
     } catch (err) {
         console.error("❌ Database initialization error:", err.message);
     }
 }
 
-// =========================================================================
-// 4. RATE LIMITER & STATIC ROUTES
-// =========================================================================
-
-// កំណត់ Rate Limit (កំណត់ត្រឹម 10 សំណើ/8 ម៉ោង)
+// ==========================================
+// 3. RATE LIMITER & API ROUTES (Omitted for brevity, but retained)
+// ==========================================
 const limiter = rateLimit({
     windowMs: 8 * 60 * 60 * 1000, 
     max: 10, 
@@ -94,10 +77,8 @@ const limiter = rateLimit({
     skip: (req) => req.ip === process.env.OWNER_IP
 });
 
-// បើក File Public (Static)
 app.use(express.static(path.join(__dirname, 'public'))); 
 
-// Home Route (ពិនិត្យមើល Server Status)
 app.get('/', (req, res) => {
     res.status(200).send(`
         <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
@@ -110,36 +91,22 @@ app.get('/', (req, res) => {
     `);
 });
 
-// =========================================================================
-// 5. CORE API ROUTES (AI, Stats, Leaderboard)
-// =========================================================================
-
-// Stats Route
 app.get('/stats', (req, res) => {
     res.json({ total_plays: totalPlays, unique_players: uniqueVisitors.size });
 });
 
-// Gemini AI Route (Generate Math Problem)
 app.post('/api/generate-problem', limiter, async (req, res) => {
     try {
         const { prompt } = req.body;
         if (!prompt) return res.status(400).json({ error: "Prompt required" });
-
-        totalPlays++;
-        uniqueVisitors.add(req.ip);
-
+        totalPlays++; uniqueVisitors.add(req.ip);
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
         const result = await model.generateContent(prompt);
         res.json({ text: result.response.text() });
-
-    } catch (error) {
-        console.error("Gemini Error:", error.message);
-        res.status(500).json({ error: "AI Generation Failed" });
-    }
+    } catch (error) { res.status(500).json({ error: "AI Generation Failed" }); }
 });
 
-// Submit Score to Leaderboard
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
     if (!username || typeof score !== 'number' || score <= 0 || username.trim().length < 3) {
@@ -147,52 +114,38 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     }
     try {
         const client = await pool.connect();
-        await client.query('INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
-            [username.trim().substring(0, 25), score, difficulty]);
+        await client.query('INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', [username.trim().substring(0, 25), score, difficulty]);
         client.release();
         res.status(201).json({ success: true, message: "Score saved." });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "DB Error" });
-    }
+    } catch (err) { res.status(500).json({ success: false, message: "DB Error" }); }
 });
 
-// Get Top Leaderboard Scores
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
         const result = await client.query('SELECT username, score, difficulty FROM leaderboard ORDER BY score DESC LIMIT 1000');
         client.release();
         res.json(result.rows);
-    } catch (err) {
-        res.status(500).json({ success: false, message: "DB Error" });
-    }
+    } catch (err) { res.status(500).json({ success: false, message: "DB Error" }); }
 });
 
-// =========================================================================
-// 6. CERTIFICATE REQUESTS & ADMIN VIEW
-// =========================================================================
-
-// API ទទួលសំណើ Certificate
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
-    
     if (!username || score === undefined || score === null) {
         return res.status(400).json({ success: false, message: "Missing username or score" });
     }
-
     try {
         const client = await pool.connect();
         await client.query('INSERT INTO certificate_requests (username, score, request_date) VALUES ($1, $2, NOW())', [username, score]);
         client.release();
         console.log(`📩 Certificate Request: ${username} (Score: ${score})`);
         res.json({ success: true });
-    } catch (err) {
-        console.error("Submit Request Error:", err.message);
-        res.status(500).json({ success: false, message: "Server Error" });
-    }
+    } catch (err) { res.status(500).json({ success: false, message: "Server Error" }); }
 });
 
-// Admin Panel HTML View (បង្ហាញប៊ូតុងបង្កើត Certificate)
+// ==========================================
+// 4. ADMIN PANEL (INCLUDING BUTTON FIX)
+// ==========================================
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -255,16 +208,10 @@ app.get('/admin/requests', async (req, res) => {
 });
 
 
-// =========================================================================
-// 7. EXTERNAL IMAGE GENERATION LOGIC (IMGIX VIA AXIOS)
-// =========================================================================
-
-/**
- * @description: មុខងារបង្កើត Certificate ដោយ Call API ទៅកាន់ Imgix (ដើម្បីជៀសវាង Canvas Error)
- * @param {string} id - Certificate Request ID
- */
+// ==========================================
+// 5. GENERATE CERTIFICATE LOGIC (EXTERNAL API - IMGIX) 🎨
+// ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
-    console.log("... 🎨 កំពុង Call Imgix API ខាងក្រៅ ...");
     try {
         const id = req.params.id;
         const client = await pool.connect();
@@ -272,28 +219,24 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         client.release();
 
         if (result.rows.length === 0) return res.status(404).send("Not Found");
-        const { username, score, request_date } = result.rows[0];
+        const { username, score } = result.rows[0];
 
-        // 1. គណនាកាលបរិច្ឆេទ និងរៀបចំសារ (Final Formal Content)
-        const dateObj = new Date();
-        const formattedDate = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-        
-        // ឈ្មោះ និងពិន្ទុដែលត្រូវបាន Encode សម្រាប់ URL
+        // ----------------------------------------------------
+        // ✅ 1. Encode Variables (Final high-standard message)
+        // ----------------------------------------------------
         const encodedUsername = encodeURIComponent(username.toUpperCase());
         const scoreText = encodeURIComponent(`Score: ${score}`);
-        const dateText = encodeURIComponent(`Date Issued: ${formattedDate}`);
         
-        // សារលើកតម្កើងសមត្ថភាពខ្ពស់ និង website
-        const encouragementText = encodeURIComponent(`This distinguished certificate serves as an enduring testament to your exceptional intellectual acuity and unwavering dedication. May your scholarly pursuits reach new pinnacles. Presented by: braintest.fun`); 
+        // Final Long English Message
+        const encouragementText = encodeURIComponent(`This certificate serves as a distinguished testimony to your exceptional mathematical prowess and relentless dedication. May your intellectual journey continue to flourish. Presented by: www.braintest.fun`); 
 
-        // 2. កំណត់ Base URL ពី Environment Variable
+        // 2. Get Base URL (Imgix Source + Image Path)
         const EXTERNAL_API_ENDPOINT = process.env.EXTERNAL_IMAGE_API;
         if (!EXTERNAL_API_ENDPOINT) {
              return res.status(500).send("Error: EXTERNAL_IMAGE_API environment variable is not set.");
         }
         
-        // 3. កសាង Full Dynamic Imgix URL (បញ្ចូលគ្រប់ Transformation Parameters)
-        
+        // 3. Construct the Full Dynamic Imgix URL (Embedding all transformations)
         const finalImgixUrl = EXTERNAL_API_ENDPOINT + 
             // Transformation 1: Username (Large, Gold, Center)
             `&txt-align=center` +
@@ -304,7 +247,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             `&w=2000` +
             `&h=1414` +
             
-            // Transformation 2: Score (Smaller, Red)
+            // Transformation 2: Score (Smaller, Red, positioned slightly lower)
             `&mark-align=center` +
             `&mark-size=50` +
             `&mark-color=FF4500` +
@@ -312,52 +255,39 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             `&mark-y=850` +
             `&mark-txt=${scoreText}` +
             
-            // Transformation 3: Date (Medium size, positioned above the long message)
+            // Transformation 3: Encouragement/Source (Small, White, positioned at the very bottom)
             `&mark-align=center` +
-            `&mark-size=35` +
-            `&mark-color=CCCCCC` + 
-            `&mark-x=0` +
-            `&mark-y=1150` + 
-            `&mark-txt=${dateText}` +
-            
-            // Transformation 4: Encouragement/Source (Longest Message at the very bottom)
-            `&mark-align=center` +
-            `mark-size=30` +
+            `&mark-size=30` +
             `&mark-color=FFFFFF` + 
             `&mark-x=0` +
             `&mark-y=1300` + 
             `&mark-txt=${encouragementText}`;
 
-        // 4. Redirect ទៅកាន់ Imgix URL (Image Delivery)
-        console.log(`✅ Image generated. Redirecting to Imgix URL.`);
+        // 4. Redirect to the Imgix URL
+        console.log(`✅ Generated Imgix URL: ${finalImgixUrl}`);
         res.redirect(finalImgixUrl); 
 
     } catch (err) {
-        console.error("❌ External Generation API Error:", err.message);
+        console.error("External Generation API Error:", err.message);
         res.status(500).send(`
-            <h1>❌ Server Error: Cannot Generate Image</h1>
-            <p>សូមផ្ទៀងផ្ទាត់ EXTERNAL_IMAGE_API របស់អ្នក (URL, Key, Parameters)។</p>
+            <h1>❌ Server Error</h1>
+            <p>មិនអាចបង្កើតរូបភាពបានទេ។ សូមផ្ទៀងផ្ទាត់ EXTERNAL_IMAGE_API របស់អ្នក។</p>
         `);
     }
 });
 
-// =========================================================================
-// 8. START SERVER FUNCTION
-// =========================================================================
-
-/**
- * @description: មុខងារចាប់ផ្តើម Server (Non-blocking)
- */
+// ==========================================
+// 6. START SERVER
+// ==========================================
 async function startServer() {
     if (!process.env.DATABASE_URL) {
-        console.error("🛑 CRITICAL: DATABASE_URL is missing. Cannot start.");
+        console.error("🛑 CRITICAL: DATABASE_URL is missing.");
         return;
     }
-    // ចាប់ផ្តើម DB មុនពេល Listen
     await initializeDatabase();
     app.listen(port, () => {
-        console.log(`🚀 Server running successfully on port ${port}`);
-        console.log(`🔗 Admin Panel URL: http://localhost:${port}/admin/requests`);
+        console.log(`🚀 Server running on port ${port}`);
+        console.log(`🔗 Admin: http://localhost:${port}/admin/requests`);
     });
 }
 
