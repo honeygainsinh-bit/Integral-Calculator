@@ -5,11 +5,13 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg'); 
-// Import Canvas modules
-const { createCanvas, loadImage } = require('canvas'); // registerFont ត្រូវបានលុប
+// Import Canvas modules. registerFont has been removed for Render compatibility.
+const { createCanvas, loadImage } = require('canvas');
+
+// ✅ KOR-RECTION: Set port to 3000 as fallback (as requested)
+const port = process.env.PORT || 3000;
 
 const app = express();
-const port = process.env.PORT || 3000;
 
 // ==========================================
 // 1. SETUP & CONFIGURATION
@@ -18,7 +20,7 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
-// 🚫 Font Registration is removed for compatibility on Render
+// 🚫 Font Registration for Moul.ttf has been removed to prevent deployment timeout/failure on Render.
 
 const MODEL_NAME = "gemini-2.5-flash"; 
 
@@ -28,6 +30,7 @@ const uniqueVisitors = new Set();
 
 // Middleware: Log Request
 app.use((req, res, next) => {
+    // Using English locale for consistency with content
     console.log(`[${new Date().toLocaleTimeString('en-US')}] 📡 ${req.method} ${req.path}`);
     next();
 });
@@ -37,7 +40,8 @@ app.use((req, res, next) => {
 // ==========================================
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
+    // Note: SSL is kept for production compatibility, remove if you use a local non-SSL DB.
+    ssl: { rejectUnauthorized: false } 
 });
 
 async function initializeDatabase() {
@@ -69,7 +73,8 @@ async function initializeDatabase() {
         console.log("✅ Database initialized: Tables ready.");
         client.release();
     } catch (err) {
-        console.error("❌ Database initialization error:", err.message);
+        // Log the error but do NOT crash the server if initialization fails after start
+        console.error("❌ Database initialization error (Running in background):", err.message);
     }
 }
 
@@ -278,7 +283,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         ctx.fillRect(0, 0, width, height);
 
         // ==========================================
-        // 🎨 DESIGN & TEXT RENDERING (English Content)
+        // 🎨 DESIGN & TEXT RENDERING (English Content - Standard Font)
         // ==========================================
         
         ctx.textAlign = 'center';
@@ -344,13 +349,13 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         
         // Decorative Line
         ctx.beginPath();
-        ctx.moveTo(width / 2 - 180, 1315); // Adjust line length
+        ctx.moveTo(width / 2 - 180, 1315);
         ctx.lineTo(width / 2 + 180, 1315);
         ctx.strokeStyle = '#94a3b8'; 
         ctx.lineWidth = 3;
         ctx.stroke();
 
-        ctx.fillText("Website: braintest.fun", width / 2, 1360); // Changed Footer Text
+        ctx.fillText("Website: braintest.fun", width / 2, 1360); 
 
         // Output
         const buffer = canvas.toBuffer('image/png');
@@ -364,18 +369,25 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 });
 
 // ==========================================
-// 8. START SERVER
+// 8. START SERVER (FIXED FOR RENDER TIMEOUT)
 // ==========================================
 async function startServer() {
-    if (!process.env.DATABASE_URL) {
-        console.error("🛑 CRITICAL: DATABASE_URL is missing.");
-        return;
-    }
-    await initializeDatabase();
+    
+    // 1. START LISTENING TO PORT IMMEDIATELY
     app.listen(port, () => {
         console.log(`🚀 Server running on port ${port}`);
         console.log(`🔗 Admin: http://localhost:${port}/admin/requests`);
+        
+        // 2. RUN DATABASE INITIALIZATION IN THE BACKGROUND
+        if (!process.env.DATABASE_URL) {
+            console.error("🛑 CRITICAL: DATABASE_URL is missing. DB functions will likely fail.");
+        } else {
+            initializeDatabase().catch(err => {
+                 console.error("⚠️ Failed to initialize Database after server start.");
+            });
+        }
     });
+
 }
 
 startServer();
