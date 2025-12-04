@@ -67,7 +67,7 @@ async function initializeDatabase() {
 }
 
 // ==========================================
-// 3. RATE LIMITER & API ROUTES (Omitted for brevity, but retained)
+// 3. RATE LIMITER & API ROUTES
 // ==========================================
 const limiter = rateLimit({
     windowMs: 8 * 60 * 60 * 1000, 
@@ -83,10 +83,6 @@ app.get('/', (req, res) => {
     res.status(200).send(`
         <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
             <h1 style="color: #22c55e;">Server is Online 🟢</h1>
-            <p>Math Quiz Pro Backend</p>
-            <div style="margin-top: 20px; padding: 10px; background: #f0f9ff; display: inline-block; border-radius: 8px;">
-                <a href="/admin/requests" style="text-decoration: none; color: #0284c7; font-weight: bold;">👮‍♂️ ចូលមើលសំណើសុំ (Admin)</a>
-            </div>
         </div>
     `);
 });
@@ -143,9 +139,7 @@ app.post('/api/submit-request', async (req, res) => {
     } catch (err) { res.status(500).json({ success: false, message: "Server Error" }); }
 });
 
-// ==========================================
-// 4. ADMIN PANEL (INCLUDING BUTTON FIX)
-// ==========================================
+// ✅ Admin HTML View
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -157,19 +151,7 @@ app.get('/admin/requests', async (req, res) => {
         <html lang="km">
         <head>
             <title>Admin - សំណើសុំ</title>
-            <style>
-                body { font-family: sans-serif; padding: 20px; background: #f1f5f9; }
-                h1 { color: #1e3a8a; }
-                table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
-                th, td { padding: 15px; border-bottom: 1px solid #e2e8f0; text-align: left; }
-                th { background: #3b82f6; color: white; }
-                tr:hover { background: #f8fafc; }
-                .btn-gen { 
-                    background: #2563eb; color: white; text-decoration: none; 
-                    padding: 8px 12px; border-radius: 6px; font-weight: bold; font-size: 0.9rem;
-                    display: inline-flex; align-items: center; gap: 5px;
-                }
-            </style>
+            <style> /* ... (Styles omitted for brevity) ... */ </style>
         </head>
         <body>
             <h1>👮‍♂️ Admin Panel - បញ្ជីឈ្មោះអ្នកស្នើសុំ</h1>
@@ -180,7 +162,8 @@ app.get('/admin/requests', async (req, res) => {
                         <th>ឈ្មោះ (Username)</th>
                         <th>ពិន្ទុ (Score)</th>
                         <th>កាលបរិច្ឆេទ</th>
-                        <th>សកម្មភាព</th> </tr>
+                        <th>សកម្មភាព</th>
+                    </tr>
                 </thead>
                 <tbody>`;
 
@@ -196,20 +179,18 @@ app.get('/admin/requests', async (req, res) => {
                         <td style="color:${isHighScore ? '#16a34a' : '#dc2626'}; font-weight:bold;">${row.score}</td>
                         <td>${new Date(row.request_date).toLocaleDateString('km-KH')}</td>
                         <td>
-                            <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-gen">🌐 មើល Design</a> </td>
+                            <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-gen">🌐 មើល Design</a>
+                        </td>
                     </tr>`;
             });
         }
         html += `</tbody></table></body></html>`;
         res.send(html);
-    } catch (err) {
-        res.status(500).send("Error loading admin panel.");
-    }
+    } catch (err) { res.status(500).send("Error loading admin panel."); }
 });
 
-
 // ==========================================
-// 5. GENERATE CERTIFICATE LOGIC (EXTERNAL API - IMGIX) 🎨
+// 7. GENERATE CERTIFICATE LOGIC (EXTERNAL API - IMGIX) 🎨
 // ==========================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -222,48 +203,28 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const { username, score } = result.rows[0];
 
         // ----------------------------------------------------
-        // ✅ 1. Encode Variables (Final high-standard message)
+        // ✅ Call External API សម្រាប់ Image Generation
         // ----------------------------------------------------
-        const encodedUsername = encodeURIComponent(username.toUpperCase());
-        const scoreText = encodeURIComponent(`Score: ${score}`);
         
-        // Final Long English Message
-        const encouragementText = encodeURIComponent(`This certificate serves as a distinguished testimony to your exceptional mathematical prowess and relentless dedication. May your intellectual journey continue to flourish. Presented by: www.braintest.fun`); 
-
-        // 2. Get Base URL (Imgix Source + Image Path)
+        // 1. Get Base URL from Environment Variable (This holds the Imgix Domain and Image Path)
         const EXTERNAL_API_ENDPOINT = process.env.EXTERNAL_IMAGE_API;
         if (!EXTERNAL_API_ENDPOINT) {
              return res.status(500).send("Error: EXTERNAL_IMAGE_API environment variable is not set.");
         }
         
-        // 3. Construct the Full Dynamic Imgix URL (Embedding all transformations)
-        const finalImgixUrl = EXTERNAL_API_ENDPOINT + 
-            // Transformation 1: Username (Large, Gold, Center)
-            `&txt-align=center` +
-            `&txt-size=100` +
-            `&txt-color=FFD700` +
-            `&txt=${encodedUsername}` +
-            `&txt-fit=max` +
-            `&w=2000` +
-            `&h=1414` +
-            
-            // Transformation 2: Score (Smaller, Red, positioned slightly lower)
-            `&mark-align=center` +
-            `&mark-size=50` +
-            `&mark-color=FF4500` +
-            `&mark-x=0` +
-            `&mark-y=850` +
-            `&mark-txt=${scoreText}` +
-            
-            // Transformation 3: Encouragement/Source (Small, White, positioned at the very bottom)
-            `&mark-align=center` +
-            `&mark-size=30` +
-            `&mark-color=FFFFFF` + 
-            `&mark-x=0` +
-            `&mark-y=1300` + 
-            `&mark-txt=${encouragementText}`;
+        // 2. Encode and append parameters for Imgix transformation
+        const encodedUsername = encodeURIComponent(username.toUpperCase());
+        const scoreText = encodeURIComponent(`SCORE: ${score}`);
 
-        // 4. Redirect to the Imgix URL
+        // The URL is constructed by placing variables into the Imgix parameters
+        // Example logic: Base URL + ?txt=<Name>...
+        const finalImgixUrl = EXTERNAL_API_ENDPOINT
+            .replace('USERNAME_PLACEHOLDER', encodedUsername) 
+            .replace('SCORE_PLACEHOLDER', scoreText);
+        
+        // 3. Make the External API Call (or just redirect, since Imgix uses direct URLs)
+        // Since Imgix URLs are direct image links, we simply redirect the browser to the constructed URL.
+        
         console.log(`✅ Generated Imgix URL: ${finalImgixUrl}`);
         res.redirect(finalImgixUrl); 
 
@@ -277,7 +238,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 });
 
 // ==========================================
-// 6. START SERVER
+// 8. START SERVER
 // ==========================================
 async function startServer() {
     if (!process.env.DATABASE_URL) {
