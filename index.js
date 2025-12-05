@@ -1,13 +1,13 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.6 (FINAL CODE - Score Overridden for Print Content)
+ * VERSION: 3.2.7 (FINAL CODE - Percentage Removed)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
  * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
  * - បង្កើត លិខិតសរសើរ តាមរយៈ Imgix URL Transformation 
- * - ចំណាំ៖ ពិន្ទុដែលបង្ហាញលើលិខិតសរសើរ ត្រូវបានកំណត់ថេរ 10000
+ * - ចំណាំ៖ ពិន្ទុដែលបង្ហាញលើលិខិតសរសើរ ត្រូវបានកំណត់ថេរ 10000 គ្មានសញ្ញា %
  * =========================================================================================
  */
 
@@ -113,7 +113,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.6</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.7</p>
         </div>
     `);
 });
@@ -391,10 +391,8 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             return res.status(404).send("Error: Request ID not found.");
         }
 
-        const { username, score } = result.rows[0];
-
         // ⚠️ ការកំណត់ពិន្ទុសម្រាប់បង្ហាញ (Override Score for Print Content)
-        // ពិន្ទុពិតប្រាកដក្នុង DB ត្រូវបាន fetch ខាងលើ ប៉ុន្តែពិន្ទុដែលបង្ហាញត្រូវបាន hardcode ទៅ 10000 តាមសំណើ។
+        // ពិន្ទុដែលបង្ហាញត្រូវបាន hardcode ទៅ 10000 គ្មានសញ្ញា %
         const displayedScore = 10000; 
 
         // 2. រៀបចំទិន្នន័យសម្រាប់បង្ហាញ (Formatting Data)
@@ -404,13 +402,14 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         });
 
         // A. សារជូនពរភាសាអង់គ្លេសថ្មី (Long and Prestigious Message)
+        // ⚠️ បានលុបសញ្ញា % ចេញពីពិន្ទុ
         const formalMessage = 
-            `It is with immense institutional pride and the highest level of academic recognition that this Official Commendation is presented to you. Your exceptional achievement, marked by a score of ${displayedScore}%, signifies not only an intellectual brilliance but a rare dedication to mastering complex mathematical principles. This distinguished accomplishment stands as a testament to your hard work, diligence, and unwavering pursuit of excellence on a truly international standard.`;
+            `It is with immense institutional pride and the highest level of academic recognition that this Official Commendation is presented to you. Your exceptional achievement, marked by a score of ${displayedScore}, signifies not only an intellectual brilliance but a rare dedication to mastering complex mathematical principles. This distinguished accomplishment stands as a testament to your hard work, diligence, and unwavering pursuit of excellence on a truly international standard.`;
         const encodedFormalMessage = encodeURIComponent(formalMessage);
         
         // B. ប្លុកព័ត៌មាន Footer (Score, Date, Website/Branding)
         const footerBlock = 
-            `Score Achieved: ${displayedScore}%0A` + 
+            `Score Achieved: ${displayedScore}%0A` + // %0A គឺជា Newline មិនមែន % ទេ
             `Date Issued: ${formattedDate}%0A%0A` +
             `Presented by: braintest.fun`; 
         const encodedFooterBlock = encodeURIComponent(footerBlock);
@@ -424,7 +423,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         }
 
         // 4. ការសាងសង់ URL (Constructing the Final URL - 3 Layers)
-        const encodedUsername = encodeURIComponent(username); // ប្រើអក្សរតូចធំដើមសម្រាប់ Script Font
+        const encodedUsername = encodeURIComponent(result.rows[0].username); // ប្រើអក្សរតូចធំដើមសម្រាប់ Script Font
 
         const finalUrl = BASE_IMGIX_URL + 
             // Layer 1: ឈ្មោះ (ប្រើ Great Vibes Font ឆើតឆាយ)
