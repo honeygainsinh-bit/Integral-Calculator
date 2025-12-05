@@ -374,6 +374,7 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
 /**
  * Route: /admin/generate-cert/:id
  * Description: បង្កើត URL រូបភាពដោយប្រើ Imgix សម្រាប់លិខិតសរសើរ
+ * ⚠️ កែសម្រួល: ផ្លាស់ប្តូរទីតាំង Y (txt-y និង mark-y) ដើម្បីដោះស្រាយបញ្ហា Print
  */
 app.get('/admin/generate-cert/:id', async (req, res) => {
     console.log(`... 🎨 Starting Certificate Generation for Request ID: ${req.params.id}`);
@@ -422,10 +423,10 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         // C. ផ្គុំ URL ទាំងមូល
         const finalUrl = BASE_IMGIX_URL + 
-            // Layer 1: ឈ្មោះ (Main Text Parameter)
-            `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800` +
-            // Layer 2: ព័ត៌មានផ្សេងៗ (Watermark Parameter - Block តែមួយ)
-            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodedSecondaryBlock}&mark-w=1600&mark-fit=max`;
+            // Layer 1: ឈ្មោះ (Main Text Parameter - ផ្លាស់ប្តូរ txt-y ពី default មក 400)
+            `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800&txt-y=400` +
+            // Layer 2: ព័ត៌មានផ្សេងៗ (Watermark Parameter - ផ្លាស់ប្តូរ mark-y ពី 850 មក 650)
+            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=650&mark-txt=${encodedSecondaryBlock}&mark-w=1600&mark-fit=max`;
 
         // 5. បញ្ជូនលទ្ធផល (Redirect)
         console.log(`✅ Certificate Generated Successfully! Redirecting...`);
@@ -444,6 +445,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 });
 
 // --- 9. START SERVER (ចាប់ផ្តើមដំណើរការ) ---
+
 
 async function startServer() {
     // ពិនិត្យមើលការកំណត់ Database
