@@ -1,7 +1,7 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.1 (Enterprise Stable - Final Certificate Layout)
+ * VERSION: 3.2.2 (Enterprise Stable - Final Certificate Layout with Debug Log)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
@@ -113,7 +113,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.1</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.2</p>
         </div>
     `);
 });
@@ -369,7 +369,7 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
     }
 });
 
-// --- 8. CERTIFICATE GENERATION LOGIC (IMGIX ENGINE - FIXED 3-LAYER LAYOUT) ---
+// --- 8. CERTIFICATE GENERATION LOGIC (IMGIX ENGINE - FIXED 3-LAYER LAYOUT & TIMES NEW ROMAN FONT) ---
 
 /**
  * Route: /admin/generate-cert/:id
@@ -387,6 +387,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         client.release();
 
         if (result.rows.length === 0) {
+            // ⚠️ បើមិនមានទិន្នន័យ វានឹង return 404
             return res.status(404).send("Error: Request ID not found.");
         }
 
@@ -422,19 +423,19 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const encodedUsername = encodeURIComponent(username.toUpperCase());
 
         const finalUrl = BASE_IMGIX_URL + 
-            // Layer 1: ឈ្មោះ (Attractive/Bold/Large)
-            `&txt-align=center&txt-size=120&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800&txt-y=400&txt-font=serif,bold` + 
+            // Layer 1: ឈ្មោះ (Attractive/Bold/Large - ប្រើ Times New Roman)
+            `&txt-align=center&txt-size=120&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800&txt-y=400&txt-font=Times New Roman,bold` + 
             
-            // Layer 2: សារជូនពរស្តង់ដារ (Formal Message - ដាក់នៅចំកណ្តាល)
-            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=600&mark-txt=${encodedFormalMessage}&mark-w=1600&mark-fit=max` +
+            // Layer 2: សារជូនពរស្តង់ដារ (Formal Message - ប្រើ Times New Roman)
+            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=600&mark-txt=${encodedFormalMessage}&mark-w=1600&mark-fit=max&mark-font=Times New Roman` +
             
-            // Layer 3: Footer Block (Score, Date, Website - ដាក់នៅទីតាំងស្តង់ដារក្រោម)
-            `&mark-w=1000&mark-align=center&mark-size=30&mark-color=FFD700&mark-y=900&mark-txt=${encodedFooterBlock}&mark-fit=max`;
+            // Layer 3: Footer Block (Score, Date, Website - ប្រើ Times New Roman)
+            `&mark-w=1000&mark-align=center&mark-size=30&mark-color=FFD700&mark-y=900&mark-txt=${encodedFooterBlock}&mark-fit=max&mark-font=Times New Roman`;
 
         // 5. បញ្ជូនលទ្ធផល (Redirect)
         console.log(`✅ Certificate Generated Successfully! Redirecting...`);
-        // ⚠️ បើអ្នកកំពុង Debug សូមលុបបន្ទាត់ console.log ខាងក្រោមចោល
-        // console.log(`🔎 FINAL IMGIX URL: ${finalUrl}`);
+        // 🚨 នេះគឺជាបន្ទាត់ Debug ដ៏សំខាន់! ត្រូវពិនិត្យមើលក្នុង Log!
+        console.log(`🔎 FINAL IMGIX URL (Check for Data): ${finalUrl}`);
         res.redirect(finalUrl);
 
     } catch (err) {
