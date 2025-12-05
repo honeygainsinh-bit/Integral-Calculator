@@ -1,13 +1,13 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.4 (Enterprise Stable - FINAL CODE SOLUTION)
+ * VERSION: 3.2.6 (FINAL CODE - Score Overridden for Print Content)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
  * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
- * - បង្កើត លិខិតសរសើរ តាមរយៈ Imgix URL Transformation (FIXED 3-Layer Standard Layout)
- * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ (បន្ថែមមុខងារលុប និងកែ UI)
+ * - បង្កើត លិខិតសរសើរ តាមរយៈ Imgix URL Transformation 
+ * - ចំណាំ៖ ពិន្ទុដែលបង្ហាញលើលិខិតសរសើរ ត្រូវបានកំណត់ថេរ 10000
  * =========================================================================================
  */
 
@@ -113,7 +113,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.4</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.6</p>
         </div>
     `);
 });
@@ -204,7 +204,7 @@ app.post('/api/submit-request', async (req, res) => {
             [username, score]
         );
         client.release();
-        console.log(`📩 New Certificate Request: ${username} - ${score}`);
+        console.log(`📩 New Commendation Letter Request: ${username} - ${score}`);
         res.json({ success: true, message: "សំណើត្រូវបានផ្ញើទៅ Admin" });
     } catch (err) {
         console.error("Submit Request Error:", err.message);
@@ -290,7 +290,8 @@ app.get('/admin/requests', async (req, res) => {
             html += `<tr><td colspan="4" style="text-align:center; padding:30px;">🚫 មិនទាន់មានសំណើ។</td></tr>`;
         } else {
             result.rows.forEach(row => {
-                const scoreClass = row.score >= 500 ? 'score-high' : 'score-low';
+                // ប្រើ 10000 ជាចំណុចកំណត់ពណ៌នៅក្នុង Admin UI
+                const scoreClass = row.score >= 10000 ? 'score-high' : 'score-low';
                 html += `
                     <tr id="row-${row.id}">
                         <td>#${row.id}</td>
@@ -392,22 +393,26 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         const { username, score } = result.rows[0];
 
+        // ⚠️ ការកំណត់ពិន្ទុសម្រាប់បង្ហាញ (Override Score for Print Content)
+        // ពិន្ទុពិតប្រាកដក្នុង DB ត្រូវបាន fetch ខាងលើ ប៉ុន្តែពិន្ទុដែលបង្ហាញត្រូវបាន hardcode ទៅ 10000 តាមសំណើ។
+        const displayedScore = 10000; 
+
         // 2. រៀបចំទិន្នន័យសម្រាប់បង្ហាញ (Formatting Data)
         const dateObj = new Date();
         const formattedDate = dateObj.toLocaleDateString('en-US', { 
             day: 'numeric', month: 'long', year: 'numeric' 
         });
 
-        // A. សារជូនពរភាសាអង់គ្លេស
+        // A. សារជូនពរភាសាអង់គ្លេសថ្មី (Long and Prestigious Message)
         const formalMessage = 
-            `With immense pride and recognition of your intellectual brilliance, we bestow this official Master Certificate upon you. Your outstanding performance demonstrates a profound mastery of mathematics and a relentless spirit of excellence. Your accomplishment is truly noteworthy.`;
+            `It is with immense institutional pride and the highest level of academic recognition that this Official Commendation is presented to you. Your exceptional achievement, marked by a score of ${displayedScore}%, signifies not only an intellectual brilliance but a rare dedication to mastering complex mathematical principles. This distinguished accomplishment stands as a testament to your hard work, diligence, and unwavering pursuit of excellence on a truly international standard.`;
         const encodedFormalMessage = encodeURIComponent(formalMessage);
         
         // B. ប្លុកព័ត៌មាន Footer (Score, Date, Website/Branding)
         const footerBlock = 
-            `Score Achieved: ${score}%0A` + 
+            `Score Achieved: ${displayedScore}%0A` + 
             `Date Issued: ${formattedDate}%0A%0A` +
-            `Presented by: braintest.fun`; // បញ្ជាក់ Website ឲ្យច្បាស់
+            `Presented by: braintest.fun`; 
         const encodedFooterBlock = encodeURIComponent(footerBlock);
 
 
@@ -433,7 +438,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         // 5. បញ្ជូនលទ្ធផល (Redirect)
         console.log(`✅ Commendation Letter Generated Successfully! Redirecting...`);
-        console.log(`🔎 FINAL IMGIX URL (Check for Data): ${finalUrl}`);
+        console.log(`🔎 FINAL IMGIX URL: ${finalUrl}`);
         res.redirect(finalUrl);
 
     } catch (err) {
