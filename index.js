@@ -1,10 +1,10 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.15 (FINAL ADJUSTMENT - Position, Size, & Auto Format)
+ * VERSION: 3.2.18 (FINAL SOLUTION - Long Message Re-inserted into Single Layer)
  * DESCRIPTION: 
- * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
- * - បានដោះស្រាយបញ្ហា Layering: ប្តូរទីតាំង (Y=650) បង្កើនទំហំ (Size=40) និងបន្ថែម &auto=format។
+ * - បានបញ្ចូល Name, សារជូនពរវែង, និង Footer ទាំងអស់ចូលទៅក្នុង Single Text Layer (&txt-).
+ * - កាត់បន្ថយ Font Size មកត្រឹម 80 និងប្រើ Times New Roman ដើម្បីធានាថាអក្សរវែងអាចបង្ហាញបាន។
  * - ចំណាំ៖ Server ចាប់ផ្ដើម Listen មុនពេលភ្ជាប់ Database ដើម្បីចៀសវាង Deployment Timeout។
  * =========================================================================================
  */
@@ -48,7 +48,6 @@ const pool = new Pool({
 /**
  * មុខងារ: initializeDatabase
  * តួនាទី: បង្កើត Table ដោយស្វ័យប្រវត្តិប្រសិនបើវាមិនទាន់មាន
- * ⚠️ មុខងារនេះលែង Block Server Start ទៀតហើយ
  */
 async function initializeDatabase() {
     console.log("... ⚙️ កំពុងពិនិត្យ Database Tables ...");
@@ -112,7 +111,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.15</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.18</p>
         </div>
     `);
 });
@@ -211,7 +210,7 @@ app.post('/api/submit-request', async (req, res) => {
     }
 });
 
-// --- 7. ROUTES: ADMIN PANEL (ផ្ទាំងគ្រប់គ្រង - UPDATED) ---
+// --- 7. ROUTES: ADMIN PANEL (ផ្ទាំងគ្រប់គ្រង) ---
 
 app.get('/admin/requests', async (req, res) => {
     try {
@@ -399,12 +398,28 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             day: 'numeric', month: 'long', year: 'numeric' 
         });
 
-        // C. ប្លុកព័ត៌មាន Footer (Score, Date, Website/Branding)
-        const footerBlock = 
+        const username = result.rows[0].username;
+
+        // ⭐️⭐️ NEW: សារជូនពរវែងដែលត្រូវបានបញ្ចូលឡើងវិញ
+        const longMessage = 
+            `We hereby certify that you have successfully completed the Math Quiz Pro Program,` +
+            `%0A` + 
+            `demonstrating exceptional skill and dedication. This achievement reflects your` +
+            `%0A` + 
+            `commitment to academic excellence.`;
+
+        // ⭐️⭐️ កែសម្រួល៖ បង្កើត Text Block តែមួយ (Name + Message + Footer)
+        const finalTextBlock = 
+            // 1. Name
+            `${username}%0A%0A%0A` + // ឈ្មោះ + Line Breaks
+            // 2. Long Message (សារជូនពរវែង)
+            `${longMessage}%0A%0A%0A` +
+            // 3. Footer
             `Score Achieved: ${displayedScore}%0A` + 
             `Date Issued: ${formattedDate}%0A%0A` +
             `Presented by: braintest.fun`; 
-        const encodedFooterBlock = encodeURIComponent(footerBlock);
+
+        const encodedFinalTextBlock = encodeURIComponent(finalTextBlock);
 
 
         // 3. ពិនិត្យមើល Environment Variable 
@@ -414,15 +429,10 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
              return res.status(500).send("Server Config Error: Missing Image API URL.");
         }
 
-        // 4. ការសាងសង់ URL (Constructing the Final URL - 2 Layers ONLY)
-        const encodedUsername = encodeURIComponent(result.rows[0].username);
-
+        // 4. ការសាងសង់ URL (Constructing the Final URL - SINGLE LAYER ONLY)
         const finalUrl = BASE_IMGIX_URL + 
-            // Layer 1: ឈ្មោះ (ប្រើ Great Vibes Font ឆើតឆាយ)
-            `&txt-align=center&txt-size=120&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800&txt-y=400&txt-font=Great Vibes` + 
-            
-            // Layer 2: Footer Block (កែទីតាំង Y=650, Size=40, និង Font ស្តង់ដារ Times New Roman)
-            `&mark-1-w=1000&mark-1-align=center&mark-1-size=40&mark-1-color=FFD700&mark-1-y=650&mark-1-txt=${encodedFooterBlock}&mark-1-fit=max&mark-1-font=Times New Roman` + 
+            // ⭐️⭐️ ប្រើ Times New Roman, Size 80, និង Y=300
+            `&txt-align=center&txt-size=80&txt-color=FFD700&txt=${encodedFinalTextBlock}&txt-fit=max&w=1800&txt-y=300&txt-font=Times New Roman` + 
             
             // ⭐️ ការកំណត់ទ្រង់ទ្រាយបន្ថែមដើម្បីធានាការបង្ហាញ
             `&auto=format`; 
@@ -453,7 +463,6 @@ async function startServer() {
     // ពិនិត្យមើលការកំណត់ Database
     if (!process.env.DATABASE_URL) {
         console.error("🛑 CRITICAL ERROR: DATABASE_URL is missing in .env");
-        // We allow the server to start, but API endpoints relying on DB will fail gracefully.
     }
     
     // 1. បើក Server មុនគេដើម្បីឆ្លើយតបទៅ Hosting Platform (Non-Blocking Startup)
