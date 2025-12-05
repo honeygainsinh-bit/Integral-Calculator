@@ -1,12 +1,12 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.0 (Enterprise Stable - Final Fixes)
+ * VERSION: 3.2.1 (Enterprise Stable - Final Certificate Layout)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
  * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
- * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation (Stable & Fixed Position)
+ * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation (Fixed 3-Layer Standard Layout)
  * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ (បន្ថែមមុខងារលុប និងកែ UI)
  * =========================================================================================
  */
@@ -113,7 +113,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.1</p>
         </div>
     `);
 });
@@ -369,7 +369,7 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
     }
 });
 
-// --- 8. CERTIFICATE GENERATION LOGIC (IMGIX ENGINE - FIXED POSITION) ---
+// --- 8. CERTIFICATE GENERATION LOGIC (IMGIX ENGINE - FIXED 3-LAYER LAYOUT) ---
 
 /**
  * Route: /admin/generate-cert/:id
@@ -381,7 +381,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
         const id = req.params.id;
         
-        // 1. ទាញយកទិន្នន័យពី Database
+        // 1. ទាញយកទិន្នន័យពី Database 
         const client = await pool.connect();
         const result = await client.query('SELECT * FROM certificate_requests WHERE id = $1', [id]);
         client.release();
@@ -398,37 +398,43 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             day: 'numeric', month: 'long', year: 'numeric' 
         });
 
-        // សារជូនពរភាសាអង់គ្លេស (Professional Text)
-        const formalMessage = `With immense pride and recognition of your intellectual brilliance, we bestow this award upon you. Your outstanding performance demonstrates a profound mastery of mathematics and a relentless spirit of excellence. May this achievement serve as a stepping stone to a future filled with boundless success and wisdom. Presented by: braintest.fun`;
+        // A. សារជូនពរភាសាអង់គ្លេស (Long and Standardized Message)
+        const formalMessage = 
+            `With immense pride and recognition of your intellectual brilliance, we bestow this official Master Certificate upon you. Your outstanding performance demonstrates a profound mastery of mathematics and a relentless spirit of excellence. Your accomplishment is truly noteworthy.`;
+        const encodedFormalMessage = encodeURIComponent(formalMessage);
+        
+        // B. ប្លុកព័ត៌មាន Footer (Score, Date, Website/Branding)
+        const footerBlock = 
+            `Score Achieved: ${score}%0A` + 
+            `Date Issued: ${formattedDate}%0A%0A` +
+            `Presented by: braintest.fun`; // បញ្ជាក់ Website ឲ្យច្បាស់
+        const encodedFooterBlock = encodeURIComponent(footerBlock);
 
-        // 3. ពិនិត្យមើល Environment Variable
+
+        // 3. ពិនិត្យមើល Environment Variable 
         const BASE_IMGIX_URL = process.env.EXTERNAL_IMAGE_API;
         if (!BASE_IMGIX_URL) {
              console.error("❌ MISSING CONFIG: EXTERNAL_IMAGE_API is not set.");
              return res.status(500).send("Server Config Error: Missing Image API URL.");
         }
 
-        // 4. ការសាងសង់ URL (Constructing the Final URL)
-        // A. ឈ្មោះអ្នកទទួល (Username) - ធំ, ពណ៌មាស, កណ្តាល
+        // 4. ការសាងសង់ URL (Constructing the Final URL - 3 Layers)
         const encodedUsername = encodeURIComponent(username.toUpperCase());
 
-        // B. ប្លុកបន្ទាប់បន្សំ (Score, Date, Message - ប្រើ Newline)
-        const secondaryBlock = 
-            `Score: ${score}%0A%0A` + 
-            `Date Issued: ${formattedDate}%0A%0A%0A` +
-            `${formalMessage}`;
-        const encodedSecondaryBlock = encodeURIComponent(secondaryBlock);
-
-
-        // C. ផ្គុំ URL ទាំងមូល
         const finalUrl = BASE_IMGIX_URL + 
-            // Layer 1: ឈ្មោះ (Main Text Parameter - ប្រើ txt-y=400)
-            `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800&txt-y=400` +
-            // Layer 2: ព័ត៌មានផ្សេងៗ (Watermark Parameter - ប្រើ mark-y=650)
-            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=650&mark-txt=${encodedSecondaryBlock}&mark-w=1600&mark-fit=max`;
+            // Layer 1: ឈ្មោះ (Attractive/Bold/Large)
+            `&txt-align=center&txt-size=120&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800&txt-y=400&txt-font=serif,bold` + 
+            
+            // Layer 2: សារជូនពរស្តង់ដារ (Formal Message - ដាក់នៅចំកណ្តាល)
+            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=600&mark-txt=${encodedFormalMessage}&mark-w=1600&mark-fit=max` +
+            
+            // Layer 3: Footer Block (Score, Date, Website - ដាក់នៅទីតាំងស្តង់ដារក្រោម)
+            `&mark-w=1000&mark-align=center&mark-size=30&mark-color=FFD700&mark-y=900&mark-txt=${encodedFooterBlock}&mark-fit=max`;
 
         // 5. បញ្ជូនលទ្ធផល (Redirect)
         console.log(`✅ Certificate Generated Successfully! Redirecting...`);
+        // ⚠️ បើអ្នកកំពុង Debug សូមលុបបន្ទាត់ console.log ខាងក្រោមចោល
+        // console.log(`🔎 FINAL IMGIX URL: ${finalUrl}`);
         res.redirect(finalUrl);
 
     } catch (err) {
