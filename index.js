@@ -1,10 +1,10 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.13 (FINAL CODE - Explicit Layer Mark Numbering)
+ * VERSION: 3.2.15 (FINAL ADJUSTMENT - Position, Size, & Auto Format)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
- * - បានដោះស្រាយបញ្ហា Deployment Timeout, Runtime Timeout, និងបញ្ហា Layering ជាមួយ &mark-1-។
+ * - បានដោះស្រាយបញ្ហា Layering: ប្តូរទីតាំង (Y=650) បង្កើនទំហំ (Size=40) និងបន្ថែម &auto=format។
  * - ចំណាំ៖ Server ចាប់ផ្ដើម Listen មុនពេលភ្ជាប់ Database ដើម្បីចៀសវាង Deployment Timeout។
  * =========================================================================================
  */
@@ -112,7 +112,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.13</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.15</p>
         </div>
     `);
 });
@@ -421,8 +421,11 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             // Layer 1: ឈ្មោះ (ប្រើ Great Vibes Font ឆើតឆាយ)
             `&txt-align=center&txt-size=120&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800&txt-y=400&txt-font=Great Vibes` + 
             
-            // Layer 2: Footer Block (ប្រើ &mark-1- វិញ)
-            `&mark-1-w=1000&mark-1-align=center&mark-1-size=30&mark-1-color=FFD700&mark-1-y=750&mark-1-txt=${encodedFooterBlock}&mark-1-fit=max&mark-1-font=Great Vibes`; 
+            // Layer 2: Footer Block (កែទីតាំង Y=650, Size=40, និង Font ស្តង់ដារ Times New Roman)
+            `&mark-1-w=1000&mark-1-align=center&mark-1-size=40&mark-1-color=FFD700&mark-1-y=650&mark-1-txt=${encodedFooterBlock}&mark-1-fit=max&mark-1-font=Times New Roman` + 
+            
+            // ⭐️ ការកំណត់ទ្រង់ទ្រាយបន្ថែមដើម្បីធានាការបង្ហាញ
+            `&auto=format`; 
             
         // 5. បញ្ជូនលទ្ធផល (Redirect)
         console.log(`✅ Commendation Letter Generated Successfully! Redirecting...`);
