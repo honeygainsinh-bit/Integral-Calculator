@@ -1,13 +1,12 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.7 (FINAL CODE - Percentage Removed)
+ * VERSION: 3.2.10 (FINAL CODE - Non-Blocking Database Init)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
- * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
- * - បង្កើត លិខិតសរសើរ តាមរយៈ Imgix URL Transformation 
- * - ចំណាំ៖ ពិន្ទុដែលបង្ហាញលើលិខិតសរសើរ ត្រូវបានកំណត់ថេរ 10000 គ្មានសញ្ញា %
+ * - បង្កើន Server Timeout និងរៀបចំ StartUp Flow ឡើងវិញ។
+ * - ចំណាំ៖ Server ចាប់ផ្ដើម Listen មុនពេលភ្ជាប់ Database ដើម្បីចៀសវាង Deployment Timeout។
  * =========================================================================================
  */
 
@@ -50,12 +49,13 @@ const pool = new Pool({
 /**
  * មុខងារ: initializeDatabase
  * តួនាទី: បង្កើត Table ដោយស្វ័យប្រវត្តិប្រសិនបើវាមិនទាន់មាន
+ * ⚠️ មុខងារនេះលែង Block Server Start ទៀតហើយ
  */
 async function initializeDatabase() {
     console.log("... ⚙️ កំពុងពិនិត្យ Database Tables ...");
     try {
         const client = await pool.connect();
-
+        
         // 1. បង្កើត Table Leaderboard (សម្រាប់ពិន្ទុទូទៅ)
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
@@ -78,10 +78,10 @@ async function initializeDatabase() {
             );
         `);
 
-        console.log("✅ Database System: Online & Ready.");
+        console.log("✅ Database System: Online & Ready. (Tables checked)");
         client.release();
     } catch (err) {
-        console.error("❌ Database Initialization Failed:", err.message);
+        console.error("❌ Database Initialization FAILED. API endpoints relying on DB will fail:", err.message);
     }
 }
 
@@ -113,7 +113,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.7</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.10</p>
         </div>
     `);
 });
@@ -173,7 +173,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
         res.status(201).json({ success: true, message: "ពិន្ទុត្រូវបានរក្សាទុក" });
     } catch (err) {
         console.error("DB Error:", err);
-        res.status(500).json({ success: false, message: "Server Error" });
+        res.status(500).json({ success: false, message: "Server Error: Could not connect to database." });
     }
 });
 
@@ -208,7 +208,7 @@ app.post('/api/submit-request', async (req, res) => {
         res.json({ success: true, message: "សំណើត្រូវបានផ្ញើទៅ Admin" });
     } catch (err) {
         console.error("Submit Request Error:", err.message);
-        res.status(500).json({ success: false, message: "Server Error" });
+        res.status(500).json({ success: false, message: "Server Error: Could not connect to database." });
     }
 });
 
@@ -346,7 +346,7 @@ app.get('/admin/requests', async (req, res) => {
         res.send(html);
     } catch (err) {
         console.error("Admin Panel Error:", err);
-        res.status(500).send("Server Error");
+        res.status(500).send("Server Error: Could not connect to database.");
     }
 });
 
@@ -366,7 +366,7 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
         res.json({ success: true, message: "លុបបានជោគជ័យ" });
     } catch (err) {
         console.error("Delete Error:", err);
-        res.status(500).json({ success: false, message: "Server Error" });
+        res.status(500).json({ success: false, message: "Server Error: Could not connect to database." });
     }
 });
 
@@ -392,7 +392,6 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         }
 
         // ⚠️ ការកំណត់ពិន្ទុសម្រាប់បង្ហាញ (Override Score for Print Content)
-        // ពិន្ទុដែលបង្ហាញត្រូវបាន hardcode ទៅ 10000 គ្មានសញ្ញា %
         const displayedScore = 10000; 
 
         // 2. រៀបចំទិន្នន័យសម្រាប់បង្ហាញ (Formatting Data)
@@ -401,15 +400,9 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             day: 'numeric', month: 'long', year: 'numeric' 
         });
 
-        // A. សារជូនពរភាសាអង់គ្លេសថ្មី (Long and Prestigious Message)
-        // ⚠️ បានលុបសញ្ញា % ចេញពីពិន្ទុ
-        const formalMessage = 
-            `It is with immense institutional pride and the highest level of academic recognition that this Official Commendation is presented to you. Your exceptional achievement, marked by a score of ${displayedScore}, signifies not only an intellectual brilliance but a rare dedication to mastering complex mathematical principles. This distinguished accomplishment stands as a testament to your hard work, diligence, and unwavering pursuit of excellence on a truly international standard.`;
-        const encodedFormalMessage = encodeURIComponent(formalMessage);
-        
-        // B. ប្លុកព័ត៌មាន Footer (Score, Date, Website/Branding)
+        // C. ប្លុកព័ត៌មាន Footer (Score, Date, Website/Branding)
         const footerBlock = 
-            `Score Achieved: ${displayedScore}%0A` + // %0A គឺជា Newline មិនមែន % ទេ
+            `Score Achieved: ${displayedScore}%0A` + 
             `Date Issued: ${formattedDate}%0A%0A` +
             `Presented by: braintest.fun`; 
         const encodedFooterBlock = encodeURIComponent(footerBlock);
@@ -422,21 +415,20 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
              return res.status(500).send("Server Config Error: Missing Image API URL.");
         }
 
-        // 4. ការសាងសង់ URL (Constructing the Final URL - 3 Layers)
-        const encodedUsername = encodeURIComponent(result.rows[0].username); // ប្រើអក្សរតូចធំដើមសម្រាប់ Script Font
+        // 4. ការសាងសង់ URL (Constructing the Final URL - 2 Layers ONLY)
+        const encodedUsername = encodeURIComponent(result.rows[0].username);
 
         const finalUrl = BASE_IMGIX_URL + 
             // Layer 1: ឈ្មោះ (ប្រើ Great Vibes Font ឆើតឆាយ)
             `&txt-align=center&txt-size=120&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800&txt-y=400&txt-font=Great Vibes` + 
             
-            // Layer 2: សារជូនពរស្តង់ដារ (mark-y=600) - ប្រើ Times New Roman
-            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=600&mark-txt=${encodedFormalMessage}&mark-w=1600&mark-fit=max&mark-font=Times New Roman` +
+            // Layer 2: ***ត្រូវបានលុបចោល***
             
-            // Layer 3: Footer Block (mark-1-y=900) - ជួសជុល Parameter Conflict & ប្រើ Times New Roman
-            `&mark-1-w=1000&mark-1-align=center&mark-1-size=30&mark-1-color=FFD700&mark-1-y=900&mark-1-txt=${encodedFooterBlock}&mark-1-fit=max&mark-1-font=Times New Roman`;
+            // Layer 3: Footer Block (mark-1-y=750)
+            `&mark-1-w=1000&mark-1-align=center&mark-1-size=30&mark-1-color=FFD700&mark-1-y=750&mark-1-txt=${encodedFooterBlock}&mark-1-fit=max&mark-1-font=Times New Roman`;
 
         // 5. បញ្ជូនលទ្ធផល (Redirect)
-        console.log(`✅ Commendation Letter Generated Successfully! Redirecting...`);
+        console.log(`✅ Commendation Letter (No Message) Generated Successfully! Redirecting...`);
         console.log(`🔎 FINAL IMGIX URL: ${finalUrl}`);
         res.redirect(finalUrl);
 
@@ -455,23 +447,31 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 // --- 9. START SERVER (ចាប់ផ្តើមដំណើរការ) ---
 
 async function startServer() {
+    // ⚠️ កំណត់ពេលវេលា Timeout ខ្ពស់ (5 នាទី) 
+    const SERVER_TIMEOUT_MS = 300000; 
+    
     // ពិនិត្យមើលការកំណត់ Database
     if (!process.env.DATABASE_URL) {
         console.error("🛑 CRITICAL ERROR: DATABASE_URL is missing in .env");
-        return;
+        // We allow the server to start, but API endpoints relying on DB will fail gracefully.
     }
-
-    // ចាប់ផ្តើម Database
-    await initializeDatabase();
-
-    // បើក Server
-    app.listen(port, () => {
+    
+    // 1. បើក Server មុនគេដើម្បីឆ្លើយតបទៅ Hosting Platform (Non-Blocking Startup)
+    const server = app.listen(port, () => {
         console.log(`\n===================================================`);
-        console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING!`);
+        console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING! (HTTP LISTENING)`);
         console.log(`👉 PORT: ${port}`);
         console.log(`👉 ADMIN PANEL: http://localhost:${port}/admin/requests`);
         console.log(`===================================================\n`);
     });
+
+    // កំណត់ Timeout
+    server.timeout = SERVER_TIMEOUT_MS;
+    console.log(`⏱️ Server Timeout set to ${SERVER_TIMEOUT_MS / 1000} seconds.`);
+
+    // 2. ចាប់ផ្តើម Database Initialization ក្នុងផ្ទៃខាងក្រោយ
+    await initializeDatabase(); 
+    
 }
 
 // Execute Start Function
