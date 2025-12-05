@@ -1,13 +1,13 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.0.0 (Enterprise Stable - Final Release)
+ * VERSION: 3.1.0 (Enterprise Stable - With Delete Feature)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
  * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
  * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation (Stable)
- * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ
+ * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ (បន្ថែមមុខងារលុប)
  * =========================================================================================
  */
 
@@ -113,7 +113,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.0</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.1</p>
         </div>
     `);
 });
@@ -212,88 +212,160 @@ app.post('/api/submit-request', async (req, res) => {
     }
 });
 
-// --- 7. ROUTES: ADMIN PANEL (ផ្ទាំងគ្រប់គ្រង) ---
+// --- 7. ROUTES: ADMIN PANEL (ផ្ទាំងគ្រប់គ្រង - UPDATED) ---
 
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
+        // ទាញយកទិន្នន័យ (រៀបតាមថ្មីទៅចាស់)
         const result = await client.query('SELECT * FROM certificate_requests ORDER BY request_date DESC LIMIT 50');
         client.release();
 
-        // HTML Design ដ៏ស្រស់ស្អាត (Embedded CSS)
         let html = `
         <!DOCTYPE html>
         <html lang="km">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Admin Dashboard - Certificate Center</title>
+            <title>Admin Dashboard</title>
             <style>
                 @import url('https://fonts.googleapis.com/css2?family=Hanuman:wght@400;700&family=Poppins:wght@400;600&display=swap');
                 body { font-family: 'Poppins', 'Hanuman', sans-serif; background: #f3f4f6; padding: 20px; margin: 0; }
                 .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); overflow: hidden; }
                 .header { background: #1e293b; color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center; }
                 .header h1 { margin: 0; font-size: 1.5rem; }
-                .stats { font-size: 0.9rem; color: #94a3b8; }
+                
                 table { width: 100%; border-collapse: collapse; }
-                th { background: #3b82f6; color: white; padding: 15px; text-align: left; font-weight: 600; text-transform: uppercase; font-size: 0.85rem; }
-                td { padding: 15px; border-bottom: 1px solid #e2e8f0; color: #334155; }
+                th { background: #3b82f6; color: white; padding: 15px; text-align: left; font-size: 0.85rem; text-transform: uppercase; }
+                td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; color: #334155; vertical-align: middle; }
                 tr:hover { background: #f8fafc; }
+                
+                /* Name Cell Style - ដាក់ឈ្មោះ និងប៊ូតុងនៅជាមួយគ្នា */
+                .name-cell {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    gap: 15px;
+                }
+                .username-text { font-weight: 700; color: #1e293b; font-size: 1rem; }
+                
+                /* Action Buttons Group */
+                .actions { display: flex; gap: 5px; }
+
+                .btn {
+                    border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer;
+                    font-size: 0.8rem; font-weight: bold; color: white; text-decoration: none;
+                    transition: all 0.2s; display: flex; align-items: center;
+                }
+                .btn:hover { transform: scale(1.05); }
+                
+                /* Print Button (Green/Blue) */
+                .btn-print { background: #3b82f6; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3); }
+                
+                /* Delete Button (Red) */
+                .btn-delete { background: #ef4444; box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3); }
+
                 .score-high { color: #16a34a; font-weight: bold; }
                 .score-low { color: #dc2626; font-weight: bold; }
-                .btn-action { 
-                    background: linear-gradient(135deg, #3b82f6, #2563eb); 
-                    color: white; text-decoration: none; padding: 8px 16px; 
-                    border-radius: 6px; font-weight: bold; font-size: 0.85rem; 
-                    display: inline-flex; align-items: center; gap: 5px; 
-                    box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);
-                    transition: transform 0.2s;
-                }
-                .btn-action:hover { transform: translateY(-2px); box-shadow: 0 6px 8px rgba(59, 130, 246, 0.4); }
-                .empty-state { text-align: center; padding: 40px; color: #64748b; }
             </style>
         </head>
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>👮‍♂️ Admin Dashboard</h1>
-                    <span class="stats">Total Requests: ${result.rows.length}</span>
+                    <h1>👮‍♂️ Admin Control</h1>
+                    <span>Total: ${result.rows.length}</span>
                 </div>
                 <table>
                     <thead>
                         <tr>
-                            <th>ID</th>
-                            <th>Username</th>
-                            <th>Score</th>
-                            <th>Date</th>
-                            <th>🖨️ Print (Action)</th> </tr>
+                            <th style="width: 50px;">ID</th>
+                            <th>👤 Username & Actions (ឈ្មោះ & ប៊ូតុង)</th>
+                            <th style="width: 100px;">Score</th>
+                            <th style="width: 150px;">Date</th>
+                        </tr>
                     </thead>
                     <tbody>`;
 
         if (result.rows.length === 0) {
-            html += `<tr><td colspan="5" class="empty-state">🚫 មិនទាន់មានសំណើសុំនៅឡើយទេ។</td></tr>`;
+            html += `<tr><td colspan="4" style="text-align:center; padding:30px;">🚫 មិនទាន់មានសំណើ។</td></tr>`;
         } else {
             result.rows.forEach(row => {
                 const scoreClass = row.score >= 500 ? 'score-high' : 'score-low';
                 html += `
-                    <tr>
+                    <tr id="row-${row.id}">
                         <td>#${row.id}</td>
-                        <td style="font-weight: 600;">${row.username}</td>
+                        <td>
+                            <div class="name-cell">
+                                <span class="username-text">${row.username}</span>
+                                <div class="actions">
+                                    <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn btn-print" title="Print Certificate">
+                                        🖨️ Print
+                                    </a>
+                                    <button onclick="deleteRequest(${row.id})" class="btn btn-delete" title="Delete User">
+                                        🗑️ លុប
+                                    </button>
+                                </div>
+                            </div>
+                        </td>
                         <td class="${scoreClass}">${row.score}</td>
                         <td>${new Date(row.request_date).toLocaleDateString('en-GB')}</td>
-                        <td>
-                            <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-action">
-                                🖨️ Print Certificate
-                            </a>
-                        </td>
                     </tr>`;
             });
         }
-        html += `</tbody></table></div></body></html>`;
+        
+        html += `
+                    </tbody>
+                </table>
+            </div>
+
+            <script>
+                async function deleteRequest(id) {
+                    if (!confirm("⚠️ តើអ្នកពិតជាចង់លុបឈ្មោះនេះមែនទេ?")) return;
+
+                    try {
+                        const response = await fetch('/admin/delete-request/' + id, { method: 'DELETE' });
+                        const result = await response.json();
+
+                        if (result.success) {
+                            // Highlight red before delete
+                            const row = document.getElementById('row-' + id);
+                            row.style.backgroundColor = "#fee2e2"; 
+                            setTimeout(() => row.remove(), 300); // Remove row from table
+                        } else {
+                            alert("បរាជ័យ: " + result.message);
+                        }
+                    } catch (err) {
+                        alert("Error communicating with server.");
+                    }
+                }
+            </script>
+        </body>
+        </html>`;
+        
         res.send(html);
     } catch (err) {
         console.error("Admin Panel Error:", err);
-        res.status(500).send("<h1>500 Server Error</h1><p>Cannot load admin panel.</p>");
+        res.status(500).send("Server Error");
+    }
+});
+
+// --- NEW ROUTE: DELETE REQUEST (លុបសំណើ) ---
+app.delete('/admin/delete-request/:id', async (req, res) => {
+    const id = req.params.id;
+    try {
+        const client = await pool.connect();
+        const result = await client.query('DELETE FROM certificate_requests WHERE id = $1', [id]);
+        client.release();
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ success: false, message: "រកមិនឃើញ ID នេះទេ" });
+        }
+
+        console.log(`🗑️ Deleted Request ID: ${id}`);
+        res.json({ success: true, message: "លុបបានជោគជ័យ" });
+    } catch (err) {
+        console.error("Delete Error:", err);
+        res.status(500).json({ success: false, message: "Server Error" });
     }
 });
 
@@ -397,5 +469,5 @@ async function startServer() {
 startServer();
 
 // =========================================================================================
-// END OF FILE (~280+ Lines)
+// END OF FILE 
 // =========================================================================================
