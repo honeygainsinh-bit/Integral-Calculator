@@ -1,5 +1,5 @@
 // =========================================================================
-// MATH QUIZ PRO BACKEND - FINAL PROFESSIONAL EDITION
+// MATH QUIZ PRO BACKEND - PRESTIGE EDITION
 // =========================================================================
 
 require('dotenv').config();
@@ -138,7 +138,7 @@ app.post('/api/submit-request', async (req, res) => {
 });
 
 // =========================================================================
-// ✅ ADMIN PANEL - WITH ACTION BUTTON
+// ✅ ADMIN PANEL
 // =========================================================================
 app.get('/admin/requests', async (req, res) => {
     try {
@@ -202,7 +202,7 @@ app.get('/admin/requests', async (req, res) => {
 });
 
 // =========================================================================
-// ✅ GENERATE CERTIFICATE LOGIC (PROFESSIONAL STANDARD)
+// ✅ GENERATE CERTIFICATE LOGIC (NEW LONG MESSAGE)
 // =========================================================================
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
@@ -214,35 +214,31 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         if (result.rows.length === 0) return res.status(404).send("Not Found");
         const { username, score } = result.rows[0];
 
-        // 1. កាលបរិច្ឆេទស្តង់ដារ (Standard Date Format)
+        // 1. កាលបរិច្ឆេទ
         const dateObj = new Date();
         const formattedDate = dateObj.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
 
-        // 2. សារជូនពរ & លើកទឹកចិត្ត (High Standard English Message)
-        const formalMessage = `This official certificate is proudly presented to acknowledge your exceptional mathematical proficiency and unwavering dedication to self-improvement. Your hard work has set a new standard of excellence. We wish you continued success in your future academic endeavors. Verified by: braintest.fun`;
+        // 2. សារជូនពរថ្មី (វែងជាងមុន, អត់មាន official/verified, ភាសាស្តង់ដារ)
+        const formalMessage = `With immense pride and recognition of your intellectual brilliance, we bestow this certificate upon you. Your outstanding performance demonstrates a profound mastery of mathematics and a relentless spirit of excellence. May this achievement serve as a stepping stone to a future filled with boundless success and wisdom. Presented by: braintest.fun`;
 
-        // 3. Encode Data for URL
+        // 3. Encode Data
         const encodedUsername = encodeURIComponent(username.toUpperCase());
         const scoreText = encodeURIComponent(`Score: ${score}`);
-        const dateText = encodeURIComponent(`Date: ${formattedDate}`);
+        const dateText = encodeURIComponent(`Date Issued: ${formattedDate}`);
         const encouragementText = encodeURIComponent(formalMessage);
 
-        // 4. Validate ENV
+        // 4. Check Env
         const BASE_URL = process.env.EXTERNAL_IMAGE_API;
         if (!BASE_URL) return res.status(500).send("Error: EXTERNAL_IMAGE_API missing.");
 
-        // 5. Construct Professional Design URL
-        // - Username: Center, Gold, Large
-        // - Score: Center, Red, Medium
-        // - Date: Center, Gray, Medium (Above footer)
-        // - Footer: Center, White, Small, Long Message
+        // 5. Construct URL (Imgix)
         const finalUrl = BASE_URL + 
             `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800` + 
             `&mark-align=center&mark-size=60&mark-color=FF4500&mark-y=850&mark-txt=${scoreText}` +
             `&mark-align=center&mark-size=40&mark-color=BBBBBB&mark-y=1120&mark-txt=${dateText}` +
-            `&mark-align=center&mark-size=28&mark-color=FFFFFF&mark-y=1320&mark-txt=${encouragementText}`;
+            `&mark-align=center&mark-size=26&mark-color=FFFFFF&mark-y=1320&mark-txt=${encouragementText}`;
 
-        // 6. Redirect to Imgix
+        // 6. Redirect
         res.redirect(finalUrl);
 
     } catch (err) {
