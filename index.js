@@ -1,13 +1,12 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.0.0 (Enterprise Stable)
- * AUTHOR: You & Gemini
+ * VERSION: 3.0.0 (Enterprise Stable - Final Release)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
  * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
- * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation (No Crash)
+ * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation (Stable)
  * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ
  * =========================================================================================
  */
@@ -267,8 +266,7 @@ app.get('/admin/requests', async (req, res) => {
                             <th>Username</th>
                             <th>Score</th>
                             <th>Date</th>
-                            <th>Action</th>
-                        </tr>
+                            <th>🖨️ Print (Action)</th> </tr>
                     </thead>
                     <tbody>`;
 
@@ -285,7 +283,7 @@ app.get('/admin/requests', async (req, res) => {
                         <td>${new Date(row.request_date).toLocaleDateString('en-GB')}</td>
                         <td>
                             <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn-action">
-                                🎨 Generate Design
+                                🖨️ Print Certificate
                             </a>
                         </td>
                     </tr>`;
@@ -304,7 +302,6 @@ app.get('/admin/requests', async (req, res) => {
 /**
  * Route: /admin/generate-cert/:id
  * Description: បង្កើត URL រូបភាពដោយប្រើ Imgix សម្រាប់លិខិតសរសើរ
- * Technology: URL Parameter Encoding (No Canvas required)
  */
 app.get('/admin/generate-cert/:id', async (req, res) => {
     console.log(`... 🎨 Starting Certificate Generation for Request ID: ${req.params.id}`);
@@ -333,7 +330,6 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const formalMessage = `With immense pride and recognition of your intellectual brilliance, we bestow this award upon you. Your outstanding performance demonstrates a profound mastery of mathematics and a relentless spirit of excellence. May this achievement serve as a stepping stone to a future filled with boundless success and wisdom. Presented by: braintest.fun`;
 
         // 3. ពិនិត្យមើល Environment Variable
-        // សំខាន់៖ អ្នកត្រូវដាក់ URL ទាំងមូលអោយត្រូវក្នុង EXTERNAL_IMAGE_API
         const BASE_IMGIX_URL = process.env.EXTERNAL_IMAGE_API;
         if (!BASE_IMGIX_URL) {
              console.error("❌ MISSING CONFIG: EXTERNAL_IMAGE_API is not set.");
@@ -341,38 +337,23 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         }
 
         // 4. ការសាងសង់ URL (Constructing the Final URL)
-        // យើងនឹងបំបែកវាជាផ្នែកៗដើម្បីងាយស្រួលមើល
-        
         // A. ឈ្មោះអ្នកទទួល (Username) - ធំ, ពណ៌មាស, កណ្តាល
-        const paramName = `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodeURIComponent(username.toUpperCase())}&txt-fit=max&w=1800`;
-        
-        // B. ពិន្ទុ (Score) - ពណ៌ទឹកក្រូច
-        const paramScore = `&mark-align=center&mark-size=60&mark-color=FF4500&mark-y=850&mark-txt=${encodeURIComponent("Score: " + score)}`;
-        
-        // C. កាលបរិច្ឆេទ (Date) - ពណ៌ប្រផេះ
-        const paramDate = `&mark-align=center&mark-size=40&mark-color=BBBBBB&mark-y=1120&mark-txt=${encodeURIComponent("Date Issued: " + formattedDate)}`;
-        
-        // D. សារជូនពរ (Message) - ពណ៌ស, តូចល្មម
-        const paramMsg = `&mark-align=center&mark-size=26&mark-color=FFFFFF&mark-y=1320&mark-txt=${encodeURIComponent(formalMessage)}`;
+        const encodedUsername = encodeURIComponent(username.toUpperCase());
 
-        // E. បញ្ចូលគ្នា (Merge) - ប្រើ Logic ថ្មីដែលបូកបញ្ចូលគ្នាដើម្បីកុំអោយបាត់
-        // ចំណាំ៖ Imgix អាចនឹងត្រូវការវិធីសាស្ត្រមួយដែលមិន overwrite mark. 
-        // ដំណោះស្រាយល្អបំផុតគឺយើងប្រើវិធីដែលខ្ញុំបានផ្ដល់ចុងក្រោយគឺ Encode ចូលគ្នា ឬប្រើ Base URL ដែលមាន Layer ត្រឹមត្រូវ។
-        // ប៉ុន្តែដើម្បីអោយងាយស្រួលបំផុត យើងប្រើវិធី Redirect ទៅ Base URL ហើយជំនួស Placeholder ។
-        
-        // សន្មតថាអ្នកបានដាក់ URL វែងក្នុង ENV. យើងនឹងធ្វើការ Replace Placeholder វិញប្រសិនបើអ្នកចង់។
-        // ប៉ុន្តែសម្រាប់ស្ថេរភាព យើងនឹងប្រើវិធីផ្គុំ String ដូចខាងក្រោម៖
+        // B. ប្លុកបន្ទាប់បន្សំ (Score, Date, Message - ប្រើ Newline)
+        const secondaryBlock = 
+            `Score: ${score}%0A%0A` + 
+            `Date Issued: ${formattedDate}%0A%0A%0A` +
+            `${formalMessage}`;
+        const encodedSecondaryBlock = encodeURIComponent(secondaryBlock);
 
-        // សំខាន់៖ ដោយសារអ្នកមានបញ្ហា "ចេញតែឈ្មោះ" យើងនឹងប្រើវិធីដាក់ Text ទាំងអស់ក្នុង Mark តែមួយ (Multiline)
-        const combinedText = `Score: ${score}%0A%0A` + 
-                             `Date Issued: ${formattedDate}%0A%0A%0A` +
-                             `${formalMessage}`;
-        
+
+        // C. ផ្គុំ URL ទាំងមូល
         const finalUrl = BASE_IMGIX_URL + 
-            // Layer 1: ឈ្មោះ (Text Parameter)
-            `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodeURIComponent(username.toUpperCase())}&txt-fit=max&w=1800` +
-            // Layer 2: ព័ត៌មានផ្សេងៗ (Watermark Parameter)
-            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodeURIComponent(combinedText)}&mark-w=1600&mark-fit=max`;
+            // Layer 1: ឈ្មោះ (Main Text Parameter)
+            `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800` +
+            // Layer 2: ព័ត៌មានផ្សេងៗ (Watermark Parameter - Block តែមួយ)
+            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodedSecondaryBlock}&mark-w=1600&mark-fit=max`;
 
         // 5. បញ្ជូនលទ្ធផល (Redirect)
         console.log(`✅ Certificate Generated Successfully! Redirecting...`);
@@ -416,5 +397,5 @@ async function startServer() {
 startServer();
 
 // =========================================================================================
-// END OF FILE
+// END OF FILE (~280+ Lines)
 // =========================================================================================
