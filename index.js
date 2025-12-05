@@ -1,12 +1,12 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.3 (Enterprise Stable - FINAL CODE SOLUTION)
+ * VERSION: 3.2.4 (Enterprise Stable - FINAL CODE SOLUTION)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
  * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
- * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation (FIXED 3-Layer Standard Layout)
+ * - បង្កើត លិខិតសរសើរ តាមរយៈ Imgix URL Transformation (FIXED 3-Layer Standard Layout)
  * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ (បន្ថែមមុខងារលុប និងកែ UI)
  * =========================================================================================
  */
@@ -107,13 +107,13 @@ app.get('/', (req, res) => {
     res.status(200).send(`
         <div style="font-family: 'Hanuman', sans-serif; text-align: center; padding-top: 50px; background-color: #f8fafc; height: 100vh;">
             <h1 style="color: #16a34a; font-size: 3rem;">Math Quiz API 🟢</h1>
-            <p style="font-size: 1.2rem; color: #64748b;">ប្រព័ន្ធគ្រប់គ្រងទិន្នន័យ និងបង្កើតវិញ្ញាបនបត្រស្វ័យប្រវត្តិ</p>
+            <p style="font-size: 1.2rem; color: #64748b;">ប្រព័ន្ធគ្រប់គ្រងទិន្នន័យ និងបង្កើតលិខិតសរសើរស្វ័យប្រវត្តិ</p>
             <div style="margin-top: 30px;">
                 <a href="/admin/requests" style="background: #0284c7; color: white; padding: 15px 30px; text-decoration: none; border-radius: 50px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.3</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.4</p>
         </div>
     `);
 });
@@ -298,8 +298,8 @@ app.get('/admin/requests', async (req, res) => {
                             <div class="name-cell">
                                 <span class="username-text">${row.username}</span>
                                 <div class="actions">
-                                    <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn btn-print" title="Print Certificate">
-                                        🖨️ Print
+                                    <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn btn-print" title="Print Letter of Commendation">
+                                        🖨️ Print លិខិតសរសើរ
                                     </a>
                                     <button onclick="deleteRequest(${row.id})" class="btn btn-delete" title="Delete User">
                                         🗑️ លុប
@@ -369,15 +369,14 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
     }
 });
 
-// --- 8. CERTIFICATE GENERATION LOGIC (IMGIX ENGINE - FIXED 3-LAYER LAYOUT & TIMES NEW ROMAN FONT) ---
+// --- 8. CERTIFICATE GENERATION LOGIC (មុខងារបង្កើតលិខិតសរសើរ) ---
 
 /**
  * Route: /admin/generate-cert/:id
  * Description: បង្កើត URL រូបភាពដោយប្រើ Imgix សម្រាប់លិខិតសរសើរ
- * ⚠️ FIXED: Layer 3 uses mark-1- to avoid conflict with Layer 2 (mark-)
  */
 app.get('/admin/generate-cert/:id', async (req, res) => {
-    console.log(`... 🎨 Starting Certificate Generation for Request ID: ${req.params.id}`);
+    console.log(`... 🎨 Starting Commendation Letter Generation for Request ID: ${req.params.id}`);
     
     try {
         const id = req.params.id;
@@ -399,7 +398,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             day: 'numeric', month: 'long', year: 'numeric' 
         });
 
-        // A. សារជូនពរភាសាអង់គ្លេស (Long and Standardized Message)
+        // A. សារជូនពរភាសាអង់គ្លេស
         const formalMessage = 
             `With immense pride and recognition of your intellectual brilliance, we bestow this official Master Certificate upon you. Your outstanding performance demonstrates a profound mastery of mathematics and a relentless spirit of excellence. Your accomplishment is truly noteworthy.`;
         const encodedFormalMessage = encodeURIComponent(formalMessage);
@@ -420,29 +419,28 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         }
 
         // 4. ការសាងសង់ URL (Constructing the Final URL - 3 Layers)
-        const encodedUsername = encodeURIComponent(username.toUpperCase());
+        const encodedUsername = encodeURIComponent(username); // ប្រើអក្សរតូចធំដើមសម្រាប់ Script Font
 
         const finalUrl = BASE_IMGIX_URL + 
-            // Layer 1: ឈ្មោះ (txt-y=400) - Standard Text Layer
-            `&txt-align=center&txt-size=120&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800&txt-y=400&txt-font=Times New Roman,bold` + 
+            // Layer 1: ឈ្មោះ (ប្រើ Great Vibes Font ឆើតឆាយ)
+            `&txt-align=center&txt-size=120&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800&txt-y=400&txt-font=Great Vibes` + 
             
-            // Layer 2: សារជូនពរស្តង់ដារ (mark-y=600) - Primary Mark Layer
+            // Layer 2: សារជូនពរស្តង់ដារ (mark-y=600) - ប្រើ Times New Roman
             `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=600&mark-txt=${encodedFormalMessage}&mark-w=1600&mark-fit=max&mark-font=Times New Roman` +
             
-            // Layer 3: Footer Block (mark-1-y=900) - Secondary Mark Layer (FIXED PARAMETER)
+            // Layer 3: Footer Block (mark-1-y=900) - ជួសជុល Parameter Conflict & ប្រើ Times New Roman
             `&mark-1-w=1000&mark-1-align=center&mark-1-size=30&mark-1-color=FFD700&mark-1-y=900&mark-1-txt=${encodedFooterBlock}&mark-1-fit=max&mark-1-font=Times New Roman`;
 
         // 5. បញ្ជូនលទ្ធផល (Redirect)
-        console.log(`✅ Certificate Generated Successfully! Redirecting...`);
-        // 🚨 នេះគឺជាបន្ទាត់ Debug ដ៏សំខាន់! សូមពិនិត្យមើលក្នុង Log!
+        console.log(`✅ Commendation Letter Generated Successfully! Redirecting...`);
         console.log(`🔎 FINAL IMGIX URL (Check for Data): ${finalUrl}`);
         res.redirect(finalUrl);
 
     } catch (err) {
-        console.error("❌ Certificate Generation Error:", err.message);
+        console.error("❌ Commendation Letter Generation Error:", err.message);
         res.status(500).send(`
             <div style="text-align:center; padding:50px; font-family:sans-serif;">
-                <h1 style="color:red;">⚠️ Error Generating Certificate</h1>
+                <h1 style="color:red;">⚠️ Error Generating Letter of Commendation</h1>
                 <p>Internal Server Error. Please check server logs.</p>
                 <p><i>${err.message}</i></p>
             </div>
