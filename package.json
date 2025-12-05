@@ -1,7 +1,7 @@
 {
   "name": "math-game-api-final",
   "version": "1.0.0",
-  "description": "Final Backend API for Math Game - Stable Version",
+  "description": "Final Backend API for Math Game",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
