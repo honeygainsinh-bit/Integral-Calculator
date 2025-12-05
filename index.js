@@ -1,11 +1,11 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.10 (FINAL CODE - Non-Blocking Database Init)
+ * VERSION: 3.2.11 (FINAL CODE - All Fixes Implemented)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
- * - បង្កើន Server Timeout និងរៀបចំ StartUp Flow ឡើងវិញ។
+ * - បានដោះស្រាយបញ្ហា Deployment Timeout, Runtime Timeout, និង Image Layering.
  * - ចំណាំ៖ Server ចាប់ផ្ដើម Listen មុនពេលភ្ជាប់ Database ដើម្បីចៀសវាង Deployment Timeout។
  * =========================================================================================
  */
@@ -113,7 +113,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.10</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.11</p>
         </div>
     `);
 });
@@ -422,13 +422,11 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             // Layer 1: ឈ្មោះ (ប្រើ Great Vibes Font ឆើតឆាយ)
             `&txt-align=center&txt-size=120&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800&txt-y=400&txt-font=Great Vibes` + 
             
-            // Layer 2: ***ត្រូវបានលុបចោល***
+            // Layer 2: Footer Block (ប្រើ &mark- ត្រឹមត្រូវសម្រាប់ Layer ទីពីរ)
+            `&mark-w=1000&mark-align=center&mark-size=30&mark-color=FFD700&mark-y=750&mark-txt=${encodedFooterBlock}&mark-fit=max&mark-font=Times New Roman`;
             
-            // Layer 3: Footer Block (mark-1-y=750)
-            `&mark-1-w=1000&mark-1-align=center&mark-1-size=30&mark-1-color=FFD700&mark-1-y=750&mark-1-txt=${encodedFooterBlock}&mark-1-fit=max&mark-1-font=Times New Roman`;
-
         // 5. បញ្ជូនលទ្ធផល (Redirect)
-        console.log(`✅ Commendation Letter (No Message) Generated Successfully! Redirecting...`);
+        console.log(`✅ Commendation Letter Generated Successfully! Redirecting...`);
         console.log(`🔎 FINAL IMGIX URL: ${finalUrl}`);
         res.redirect(finalUrl);
 
