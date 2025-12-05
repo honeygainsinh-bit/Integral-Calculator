@@ -1,13 +1,13 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.1.0 (Enterprise Stable - With Delete Feature)
+ * VERSION: 3.2.0 (Enterprise Stable - Final Fixes)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
  * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
- * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation (Stable)
- * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ (បន្ថែមមុខងារលុប)
+ * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation (Stable & Fixed Position)
+ * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ (បន្ថែមមុខងារលុប និងកែ UI)
  * =========================================================================================
  */
 
@@ -113,7 +113,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.1</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2</p>
         </div>
     `);
 });
@@ -369,12 +369,11 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
     }
 });
 
-// --- 8. CERTIFICATE GENERATION LOGIC (IMGIX ENGINE) ---
+// --- 8. CERTIFICATE GENERATION LOGIC (IMGIX ENGINE - FIXED POSITION) ---
 
 /**
  * Route: /admin/generate-cert/:id
  * Description: បង្កើត URL រូបភាពដោយប្រើ Imgix សម្រាប់លិខិតសរសើរ
- * ⚠️ កែសម្រួល: ផ្លាស់ប្តូរទីតាំង Y (txt-y និង mark-y) ដើម្បីដោះស្រាយបញ្ហា Print
  */
 app.get('/admin/generate-cert/:id', async (req, res) => {
     console.log(`... 🎨 Starting Certificate Generation for Request ID: ${req.params.id}`);
@@ -423,9 +422,9 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         // C. ផ្គុំ URL ទាំងមូល
         const finalUrl = BASE_IMGIX_URL + 
-            // Layer 1: ឈ្មោះ (Main Text Parameter - ផ្លាស់ប្តូរ txt-y ពី default មក 400)
+            // Layer 1: ឈ្មោះ (Main Text Parameter - ប្រើ txt-y=400)
             `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800&txt-y=400` +
-            // Layer 2: ព័ត៌មានផ្សេងៗ (Watermark Parameter - ផ្លាស់ប្តូរ mark-y ពី 850 មក 650)
+            // Layer 2: ព័ត៌មានផ្សេងៗ (Watermark Parameter - ប្រើ mark-y=650)
             `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=650&mark-txt=${encodedSecondaryBlock}&mark-w=1600&mark-fit=max`;
 
         // 5. បញ្ជូនលទ្ធផល (Redirect)
@@ -445,7 +444,6 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 });
 
 // --- 9. START SERVER (ចាប់ផ្តើមដំណើរការ) ---
-
 
 async function startServer() {
     // ពិនិត្យមើលការកំណត់ Database
