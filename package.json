@@ -1,7 +1,7 @@
 {
-  "name": "math-game-api-final",
-  "version": "3.0.0",
-  "description": "Math Game API - Final Stable Enterprise Version",
+  "name": "math-game-api-hybrid",
+  "version": "4.0.0",
+  "description": "Math Game API - Hybrid Edition (PostgreSQL + MongoDB)",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -12,6 +12,7 @@
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
+    "mongoose": "^8.2.0",
     "pg": "^8.11.3"
   },
   "engines": {
