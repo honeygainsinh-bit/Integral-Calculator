@@ -1,13 +1,11 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.0 (Fixed Leaderboard Logic)
+ * VERSION: 3.4.0 (FIXED: Atomic Score Addition)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
- * - ភ្ជាប់ជាមួយ PostgreSQL Database
- * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
- * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation
- * - Leaderboard: ជួសជុលការបូកពិន្ទុ (Accumulate Score)
+ * - ប្រើប្រាស់ Atomic UPSERT ដើម្បីធានាថាពិន្ទុ (សូម្បីតែ 5) ត្រូវបានបូកចូលជានិច្ច
+ * - ប្រើប្រាស់ Google Gemini 2.5 Flash
  * =========================================================================================
  */
 
@@ -49,7 +47,8 @@ const pool = new Pool({
 
 /**
  * មុខងារ: initializeDatabase
- * តួនាទី: បង្កើត Table ដោយស្វ័យប្រវត្តិប្រសិនបើវាមិនទាន់មាន
+ * តួនាទី: បង្កើត Table ដោយស្វ័យប្រវត្តិ
+ * UPDATE: បន្ថែម 'UNIQUE' ទៅលើ username ដើម្បីអនុញ្ញាតឱ្យបូកពិន្ទុបានត្រឹមត្រូវ
  */
 async function initializeDatabase() {
     console.log("... ⚙️ កំពុងពិនិត្យ Database Tables ...");
@@ -57,10 +56,11 @@ async function initializeDatabase() {
         const client = await pool.connect();
 
         // 1. បង្កើត Table Leaderboard (សម្រាប់ពិន្ទុទូទៅ)
+        // សម្គាល់: username ត្រូវតែ UNIQUE (មិនអាចមានឈ្មោះដូចគ្នា២ជួរទេ តែត្រូវបូកពិន្ទុចូលគ្នា)
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
-                username VARCHAR(50) NOT NULL,
+                username VARCHAR(50) NOT NULL UNIQUE, 
                 score INTEGER NOT NULL,
                 difficulty VARCHAR(20) NOT NULL,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -113,7 +113,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.4 (Fix Score)</p>
         </div>
     `);
 });
@@ -154,48 +154,46 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     }
 });
 
-// B. ដាក់ពិន្ទុចូល Leaderboard (UPDATED - FIX SCORING LOGIC)
+// B. ដាក់ពិន្ទុចូល Leaderboard (FIXED: ATOMIC UPSERT)
 app.post('/api/leaderboard/submit', async (req, res) => {
-    const { username, score, difficulty } = req.body;
+    let { username, score, difficulty } = req.body;
     
-    // Validation
-    if (!username || typeof score !== 'number' || !difficulty) {
+    // 1. Validation & Data Type Conversion
+    if (!username || score === undefined || !difficulty) {
         return res.status(400).json({ success: false, message: "ទិន្នន័យមិនត្រឹមត្រូវ" });
     }
 
-    const safeUsername = username.substring(0, 50);
+    // ធានាថា score គឺជាលេខ (ការពារបញ្ហា "5" + "5" = "55")
+    const numericScore = parseInt(score, 10);
+    const cleanUsername = username.trim().substring(0, 50);
+
+    if (isNaN(numericScore)) {
+        return res.status(400).json({ success: false, message: "ពិន្ទុត្រូវតែជាលេខ" });
+    }
 
     try {
         const client = await pool.connect();
         
-        // ជំហានទី 1: ពិនិត្យមើលថាតើឈ្មោះនេះមាននៅក្នុង Database ឬនៅ?
-        const checkUser = await client.query('SELECT * FROM leaderboard WHERE username = $1', [safeUsername]);
+        // 2. ATOMIC OPERATION: បញ្ចូល ឬ បូកពិន្ទុ ក្នុងជំហានតែមួយ
+        // ប្រសិនបើឈ្មោះមានហើយ (Conflict) -> វានឹងធ្វើការ UPDATE ពិន្ទុ (score = old + new)
+        const query = `
+            INSERT INTO leaderboard (username, score, difficulty) 
+            VALUES ($1, $2, $3)
+            ON CONFLICT (username) 
+            DO UPDATE SET 
+                score = leaderboard.score + EXCLUDED.score, 
+                difficulty = EXCLUDED.difficulty,
+                created_at = NOW()
+        `;
 
-        if (checkUser.rows.length > 0) {
-            // --- ករណីមានឈ្មោះចាស់ (UPDATE) ---
-            // បូកពិន្ទុថ្មីចូលពិន្ទុចាស់ (Accumulate Score)
-            const currentScore = checkUser.rows[0].score;
-            const newTotalScore = currentScore + score;
-            
-            await client.query(
-                'UPDATE leaderboard SET score = $1, difficulty = $2, created_at = NOW() WHERE username = $3', 
-                [newTotalScore, difficulty, safeUsername]
-            );
-            console.log(`🔄 Score Updated for ${safeUsername}: ${currentScore} -> ${newTotalScore}`);
-        } else {
-            // --- ករណីឈ្មោះថ្មី (INSERT) ---
-            await client.query(
-                'INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
-                [safeUsername, score, difficulty]
-            );
-            console.log(`✨ New User Added: ${safeUsername} with score ${score}`);
-        }
+        await client.query(query, [cleanUsername, numericScore, difficulty]);
 
         client.release();
-        res.status(201).json({ success: true, message: "ពិន្ទុត្រូវបានធ្វើបច្ចុប្បន្នភាព" });
+        console.log(`✅ Leaderboard Updated: ${cleanUsername} (Added +${numericScore})`);
+        res.status(201).json({ success: true, message: "ពិន្ទុត្រូវបានរក្សាទុក" });
 
     } catch (err) {
-        console.error("DB Error:", err);
+        console.error("❌ DB Error (Leaderboard):", err);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
@@ -204,7 +202,6 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
-        // ទាញយកអ្នកដែលមានពិន្ទុខ្ពស់ជាងគេ 100 នាក់
         const result = await client.query('SELECT username, score, difficulty FROM leaderboard ORDER BY score DESC LIMIT 100');
         client.release();
         res.json(result.rows);
@@ -241,6 +238,7 @@ app.post('/api/submit-request', async (req, res) => {
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
+        // ទាញយកទិន្នន័យ (រៀបតាមថ្មីទៅចាស់)
         const result = await client.query('SELECT * FROM certificate_requests ORDER BY request_date DESC LIMIT 50');
         client.release();
 
@@ -263,20 +261,13 @@ app.get('/admin/requests', async (req, res) => {
                 td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; color: #334155; vertical-align: middle; }
                 tr:hover { background: #f8fafc; }
                 
-                .name-cell {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    gap: 15px;
-                }
+                /* Name Cell Style */
+                .name-cell { display: flex; justify-content: space-between; align-items: center; gap: 15px; }
                 .username-text { font-weight: 700; color: #1e293b; font-size: 1rem; }
+                
+                /* Action Buttons */
                 .actions { display: flex; gap: 5px; }
-
-                .btn {
-                    border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer;
-                    font-size: 0.8rem; font-weight: bold; color: white; text-decoration: none;
-                    transition: all 0.2s; display: flex; align-items: center;
-                }
+                .btn { border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: bold; color: white; text-decoration: none; transition: all 0.2s; display: flex; align-items: center; }
                 .btn:hover { transform: scale(1.05); }
                 .btn-print { background: #3b82f6; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3); }
                 .btn-delete { background: #ef4444; box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3); }
@@ -314,12 +305,8 @@ app.get('/admin/requests', async (req, res) => {
                             <div class="name-cell">
                                 <span class="username-text">${row.username}</span>
                                 <div class="actions">
-                                    <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn btn-print" title="Print Certificate">
-                                        🖨️ Print
-                                    </a>
-                                    <button onclick="deleteRequest(${row.id})" class="btn btn-delete" title="Delete User">
-                                        🗑️ លុប
-                                    </button>
+                                    <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn btn-print" title="Print">🖨️ Print</a>
+                                    <button onclick="deleteRequest(${row.id})" class="btn btn-delete" title="Delete">🗑️ លុប</button>
                                 </div>
                             </div>
                         </td>
@@ -333,25 +320,18 @@ app.get('/admin/requests', async (req, res) => {
                     </tbody>
                 </table>
             </div>
-
             <script>
                 async function deleteRequest(id) {
                     if (!confirm("⚠️ តើអ្នកពិតជាចង់លុបឈ្មោះនេះមែនទេ?")) return;
-
                     try {
                         const response = await fetch('/admin/delete-request/' + id, { method: 'DELETE' });
                         const result = await response.json();
-
                         if (result.success) {
                             const row = document.getElementById('row-' + id);
                             row.style.backgroundColor = "#fee2e2"; 
                             setTimeout(() => row.remove(), 300);
-                        } else {
-                            alert("បរាជ័យ: " + result.message);
-                        }
-                    } catch (err) {
-                        alert("Error communicating with server.");
-                    }
+                        } else { alert("បរាជ័យ: " + result.message); }
+                    } catch (err) { alert("Error communicating with server."); }
                 }
             </script>
         </body>
@@ -364,7 +344,7 @@ app.get('/admin/requests', async (req, res) => {
     }
 });
 
-// --- Delete Route ---
+// Route: លុបសំណើ
 app.delete('/admin/delete-request/:id', async (req, res) => {
     const id = req.params.id;
     try {
@@ -372,9 +352,7 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
         const result = await client.query('DELETE FROM certificate_requests WHERE id = $1', [id]);
         client.release();
 
-        if (result.rowCount === 0) {
-            return res.status(404).json({ success: false, message: "រកមិនឃើញ ID នេះទេ" });
-        }
+        if (result.rowCount === 0) return res.status(404).json({ success: false, message: "រកមិនឃើញ ID" });
         res.json({ success: true, message: "លុបបានជោគជ័យ" });
     } catch (err) {
         res.status(500).json({ success: false, message: "Server Error" });
@@ -382,8 +360,8 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
 });
 
 // --- 8. CERTIFICATE GENERATION LOGIC ---
+
 app.get('/admin/generate-cert/:id', async (req, res) => {
-    console.log(`... 🎨 Starting Certificate Generation for Request ID: ${req.params.id}`);
     try {
         const id = req.params.id;
         const client = await pool.connect();
@@ -393,12 +371,11 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         if (result.rows.length === 0) return res.status(404).send("Error: Request ID not found.");
 
         const { username, score } = result.rows[0];
-        const dateObj = new Date();
-        const formattedDate = dateObj.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+        const formattedDate = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
         const formalMessage = `With immense pride and recognition of your intellectual brilliance, we bestow this award upon you. Your outstanding performance demonstrates a profound mastery of mathematics and a relentless spirit of excellence. May this achievement serve as a stepping stone to a future filled with boundless success and wisdom. Presented by: braintest.fun`;
-
+        
         const BASE_IMGIX_URL = process.env.EXTERNAL_IMAGE_API;
-        if (!BASE_IMGIX_URL) return res.status(500).send("Server Config Error: Missing Image API URL.");
+        if (!BASE_IMGIX_URL) return res.status(500).send("Missing Image API URL.");
 
         const encodedUsername = encodeURIComponent(username.toUpperCase());
         const secondaryBlock = `Score: ${score}%0A%0A` + `Date Issued: ${formattedDate}%0A%0A%0A` + `${formalMessage}`;
@@ -410,12 +387,13 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         res.redirect(finalUrl);
     } catch (err) {
-        console.error("❌ Certificate Generation Error:", err.message);
-        res.status(500).send("Internal Server Error.");
+        console.error("Certificate Error:", err);
+        res.status(500).send("Error Generating Certificate");
     }
 });
 
 // --- 9. START SERVER ---
+
 async function startServer() {
     if (!process.env.DATABASE_URL) {
         console.error("🛑 CRITICAL ERROR: DATABASE_URL is missing in .env");
