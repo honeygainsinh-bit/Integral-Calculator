@@ -1,11 +1,11 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.3.0 (Stable - Server Side Scoring)
+ * VERSION: 3.5.0 (Critical Fix: Score Submission Rate Limit)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
- * - កែសម្រួលប្រព័ន្ធពិន្ទុ: កំណត់ពិន្ទុតាមកម្រិត (Easy=5, Medium=10, Hard=15, Very Hard=20)
- * - ការពារការបូកពិន្ទុខុសប្រក្រតី (Anti-Cheat / Logic Fix)
+ * - បន្ថែម Rate Limit ដ៏តឹងរឹងលើ API ដាក់ពិន្ទុ ដើម្បីការពារការបូកពិន្ទុលើស (Duplicate Submission Fix)
+ * - ធានាថាមិនប៉ះពាល់ដល់ការ Deploy ឡើយ។
  * =========================================================================================
  */
 
@@ -84,6 +84,8 @@ async function initializeDatabase() {
 }
 
 // --- 4. SECURITY: RATE LIMITER (កំណត់ចំនួនប្រើប្រាស់) ---
+
+// Existing AI Limiter (8 hours / 10 requests)
 const aiLimiter = rateLimit({
     windowMs: 8 * 60 * 60 * 1000, // 8 ម៉ោង
     max: 10, // អនុញ្ញាត ១០ ដង
@@ -91,9 +93,21 @@ const aiLimiter = rateLimit({
         error: "Rate limit exceeded", 
         message: "⚠️ សូមអភ័យទោស! អ្នកបានប្រើប្រាស់សិទ្ធិបង្កើតលំហាត់អស់ហើយសម្រាប់ថ្ងៃនេះ។" 
     },
-    keyGenerator: (req) => req.ip, // កំណត់តាម IP
-    skip: (req) => req.ip === process.env.OWNER_IP // លើកលែងអោយម្ចាស់ Server
+    keyGenerator: (req) => req.ip,
+    skip: (req) => req.ip === process.env.OWNER_IP
 });
+
+// NEW: Score Submission Limiter (5 seconds / 1 request)
+const scoreLimiter = rateLimit({
+    windowMs: 5000, // 5000 milliseconds = 5 វិនាទី
+    max: 1, // អនុញ្ញាតតែ 1 request ប៉ុណ្ណោះ
+    message: { 
+        error: "Score submission rate limit exceeded", 
+        message: "⚠️ សូមអភ័យទោស! អ្នកបានព្យាយាមដាក់ពិន្ទុញឹកញាប់ពេក។ សូមរង់ចាំបន្តិច។" 
+    },
+    keyGenerator: (req) => req.ip,
+});
+
 
 // Static Files (រូបភាព/HTML ក្នុង Folder public)
 app.use(express.static(path.join(__dirname, 'public')));
@@ -111,7 +125,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.3 (Fixed Scoring)</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.5 (Duplicate Score Fixed)</p>
         </div>
     `);
 });
@@ -152,16 +166,17 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     }
 });
 
-// B. ដាក់ពិន្ទុចូល Leaderboard (UPDATED: FIXED SCORING LOGIC)
-app.post('/api/leaderboard/submit', async (req, res) => {
-    const { username, difficulty } = req.body;
+// B. ដាក់ពិន្ទុចូល Leaderboard (SECURED WITH RATE LIMIT)
+app.post('/api/leaderboard/submit', scoreLimiter, async (req, res) => { // ប្រើ Limiter ថ្មីនៅទីនេះ
+    // មិនត្រូវការ score ពី client ទៀតទេ ព្រោះ Server គណនាដោយខ្លួនឯង
+    const { username, difficulty } = req.body; 
     
     // Validation
     if (!username || !difficulty) {
         return res.status(400).json({ success: false, message: "ទិន្នន័យមិនត្រឹមត្រូវ (ត្រូវការឈ្មោះ និងកម្រិត)" });
     }
 
-    // ១. កំណត់ពិន្ទុដោយស្វ័យប្រវត្តិនៅ Backend (កុំជឿ Frontend)
+    // ១. កំណត់ពិន្ទុដោយស្វ័យប្រវត្តិនៅ Backend (SECURITY MEASURE)
     let pointsToAdd = 0;
     const level = difficulty.toLowerCase().trim();
 
@@ -174,9 +189,9 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     } else if (level === 'very hard' || level === 'veryhard') {
         pointsToAdd = 20;
     } else {
-        pointsToAdd = 5; // លំនាំដើម បើកម្រិតមិនច្បាស់
+        pointsToAdd = 5; // លំនាំដើម
     }
-
+    
     // ២. សម្អាតឈ្មោះ
     const safeUsername = username.trim().substring(0, 50);
 
@@ -187,14 +202,14 @@ app.post('/api/leaderboard/submit', async (req, res) => {
         const checkUser = await client.query('SELECT * FROM leaderboard WHERE username = $1', [safeUsername]);
 
         if (checkUser.rows.length > 0) {
-            // ករណីមានឈ្មោះហើយ: យកពិន្ទុចាស់ + pointsToAdd
+            // ករណីមានឈ្មោះហើយ: ធ្វើការ UPDATE (យកពិន្ទុចាស់ + pointsToAdd)
             await client.query(
                 'UPDATE leaderboard SET score = score + $1, difficulty = $2, created_at = NOW() WHERE username = $3', 
                 [pointsToAdd, difficulty, safeUsername]
             );
             console.log(`🔄 Score Updated for: ${safeUsername} (+${pointsToAdd})`);
         } else {
-            // ករណីឈ្មោះថ្មី: ដាក់ពិន្ទុដំបូងស្មើ pointsToAdd
+            // ករណីឈ្មោះថ្មី: ធ្វើការ INSERT
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
                 [safeUsername, pointsToAdd, difficulty]
@@ -215,7 +230,6 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
-        // ទាញយកអ្នកដែលមានពិន្ទុខ្ពស់បំផុត 100 នាក់
         const result = await client.query('SELECT username, score, difficulty FROM leaderboard ORDER BY score DESC LIMIT 100');
         client.release();
         res.json(result.rows);
@@ -396,13 +410,18 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
     }
 });
 
-// --- 9. START SERVER ---
+// --- 9. START SERVER (ចាប់ផ្តើមដំណើរការ) ---
 async function startServer() {
+    // ពិនិត្យមើលការកំណត់ Database
     if (!process.env.DATABASE_URL) {
         console.error("🛑 CRITICAL ERROR: DATABASE_URL is missing in .env");
         return;
     }
+
+    // ចាប់ផ្តើម Database
     await initializeDatabase();
+
+    // បើក Server
     app.listen(port, () => {
         console.log(`\n===================================================`);
         console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING!`);
@@ -411,4 +430,5 @@ async function startServer() {
     });
 }
 
+// Execute Start Function
 startServer();
