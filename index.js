@@ -1,14 +1,14 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.0 (Security Patch & Accumulate Score)
+ * VERSION: 3.2.1 (Leaderboard Fix & Accumulation Stable)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
  * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
  * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation (Stable)
  * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ (បន្ថែមមុខងារលុប)
- * - UPDATE: ការពារការលួចបន្លំពិន្ទុ និង បូកពិន្ទុឈ្មោះចាស់
+ * - UPDATE: ការពារការលួចបន្លំពិន្ទុ និង បូកពិន្ទុឈ្មោះចាស់ និង Fix Leaderboard Display
  * =========================================================================================
  */
 
@@ -114,7 +114,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2 (Secure Score)</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.1 (Leaderboard Fixed)</p>
         </div>
     `);
 });
@@ -173,7 +173,6 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     };
 
     // ប្រសិនបើ Difficulty មិនត្រឹមត្រូវ ឬ ពិន្ទុដែលផ្ញើមកលើសពីការកំណត់
-    // ឧទាហរណ៍: លេង Easy តែផ្ញើមក 100 ពិន្ទុ => Block ភ្លាម
     if (!ALLOWED_SCORES[difficulty] || score > ALLOWED_SCORES[difficulty]) {
         console.warn(`🚨 SECURITY ALERT: IP ${req.ip} tried to cheat! User: ${username}, Score: ${score}, Mode: ${difficulty}`);
         return res.status(403).json({ success: false, message: "🚫 ការដាក់ពិន្ទុត្រូវបានបដិសេធ! ពិន្ទុមិនត្រឹមត្រូវ។" });
@@ -212,15 +211,26 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     }
 });
 
-// C. ទាញយកពិន្ទុពី Leaderboard
+// C. ទាញយកពិន្ទុពី Leaderboard (UPDATED: Aggregation/Grouping FIX)
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
-        // ទាញយកពិន្ទុដែលបានបូករួច
-        const result = await client.query('SELECT username, score, difficulty FROM leaderboard ORDER BY score DESC LIMIT 100');
+        // ប្រើ SUM(score) និង GROUP BY username ដើម្បីបូកពិន្ទុសរុបសម្រាប់ឈ្មោះនីមួយៗ
+        const result = await client.query(`
+            SELECT 
+                username, 
+                SUM(score) AS score,
+                COUNT(difficulty) AS total_games_played
+            FROM leaderboard 
+            GROUP BY username 
+            ORDER BY score DESC 
+            LIMIT 100
+        `);
         client.release();
+        // វានឹង return តែឈ្មោះមួយ និងពិន្ទុសរុប (SUM) របស់គាត់ប៉ុណ្ណោះ
         res.json(result.rows);
     } catch (err) {
+        console.error("Leaderboard GET Error:", err);
         res.status(500).json({ success: false, message: "មិនអាចទាញយកទិន្នន័យបាន" });
     }
 });
