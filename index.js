@@ -1,10 +1,11 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.0 (Stable - Score Accumulation Fixed)
+ * VERSION: 3.3.0 (Stable - Server Side Scoring)
  * DESCRIPTION: 
- * - បានកែសម្រួល Logic Leaderboard ឱ្យបូកពិន្ទុចូលគ្នា (Accumulate Score)
- * - រក្សាទុកមុខងារ Delete និង Admin Panel ដដែល
+ * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
+ * - កែសម្រួលប្រព័ន្ធពិន្ទុ: កំណត់ពិន្ទុតាមកម្រិត (Easy=5, Medium=10, Hard=15, Very Hard=20)
+ * - ការពារការបូកពិន្ទុខុសប្រក្រតី (Anti-Cheat / Logic Fix)
  * =========================================================================================
  */
 
@@ -110,7 +111,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2 (Score Fixed)</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.3 (Fixed Scoring)</p>
         </div>
     `);
 });
@@ -151,44 +152,58 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     }
 });
 
-// B. ដាក់ពិន្ទុចូល Leaderboard (UPDATED LOGIC: CHECK THEN UPDATE)
+// B. ដាក់ពិន្ទុចូល Leaderboard (UPDATED: FIXED SCORING LOGIC)
 app.post('/api/leaderboard/submit', async (req, res) => {
-    const { username, score, difficulty } = req.body;
+    const { username, difficulty } = req.body;
     
     // Validation
-    if (!username || typeof score !== 'number') {
-        return res.status(400).json({ success: false, message: "ទិន្នន័យមិនត្រឹមត្រូវ" });
+    if (!username || !difficulty) {
+        return res.status(400).json({ success: false, message: "ទិន្នន័យមិនត្រឹមត្រូវ (ត្រូវការឈ្មោះ និងកម្រិត)" });
     }
 
-    // សម្អាតឈ្មោះ (លុប Space មុខក្រោយ)
+    // ១. កំណត់ពិន្ទុដោយស្វ័យប្រវត្តិនៅ Backend (កុំជឿ Frontend)
+    let pointsToAdd = 0;
+    const level = difficulty.toLowerCase().trim();
+
+    if (level === 'easy') {
+        pointsToAdd = 5;
+    } else if (level === 'medium') {
+        pointsToAdd = 10;
+    } else if (level === 'hard') {
+        pointsToAdd = 15;
+    } else if (level === 'very hard' || level === 'veryhard') {
+        pointsToAdd = 20;
+    } else {
+        pointsToAdd = 5; // លំនាំដើម បើកម្រិតមិនច្បាស់
+    }
+
+    // ២. សម្អាតឈ្មោះ
     const safeUsername = username.trim().substring(0, 50);
-    // កំណត់ Difficulty ដើម បើមិនមាន
-    const safeDifficulty = difficulty || 'Normal';
 
     try {
         const client = await pool.connect();
         
-        // ជំហានទី 1: ពិនិត្យមើលថាឈ្មោះនេះមានឬនៅ?
+        // ៣. ពិនិត្យមើលថាឈ្មោះនេះមានឬនៅ?
         const checkUser = await client.query('SELECT * FROM leaderboard WHERE username = $1', [safeUsername]);
 
         if (checkUser.rows.length > 0) {
-            // ករណីមានឈ្មោះហើយ: ធ្វើការ UPDATE (យកពិន្ទុចាស់ + ពិន្ទុថ្មី)
+            // ករណីមានឈ្មោះហើយ: យកពិន្ទុចាស់ + pointsToAdd
             await client.query(
                 'UPDATE leaderboard SET score = score + $1, difficulty = $2, created_at = NOW() WHERE username = $3', 
-                [score, safeDifficulty, safeUsername]
+                [pointsToAdd, difficulty, safeUsername]
             );
-            console.log(`🔄 Score Updated for: ${safeUsername} (+${score})`);
+            console.log(`🔄 Score Updated for: ${safeUsername} (+${pointsToAdd})`);
         } else {
-            // ករណីឈ្មោះថ្មី: ធ្វើការ INSERT
+            // ករណីឈ្មោះថ្មី: ដាក់ពិន្ទុដំបូងស្មើ pointsToAdd
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
-                [safeUsername, score, safeDifficulty]
+                [safeUsername, pointsToAdd, difficulty]
             );
-            console.log(`🆕 New User Added: ${safeUsername} (${score})`);
+            console.log(`🆕 New User Added: ${safeUsername} (${pointsToAdd})`);
         }
 
         client.release();
-        res.status(200).json({ success: true, message: "ពិន្ទុត្រូវបានធ្វើបច្ចុប្បន្នភាព" });
+        res.status(200).json({ success: true, message: `បានបូកបន្ថែម ${pointsToAdd} ពិន្ទុ` });
 
     } catch (err) {
         console.error("DB Error:", err);
