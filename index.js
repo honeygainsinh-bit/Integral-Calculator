@@ -1,19 +1,12 @@
 /**
  * =================================================================================================
  * PROJECT:      MATH QUIZ PRO - ULTIMATE HYBRID BACKEND
- * VERSION:      6.0.0 (PRODUCTION READY)
+ * VERSION:      6.2.0 (FULL ENTERPRISE EDITION)
  * AUTHOR:       BRAINTEST TEAM
- * ENGINE:       Node.js + Express + PostgreSQL + MongoDB + Gemini AI
- * * [SYSTEM ARCHITECTURE]
- * 1. PRIMARY DB (PostgreSQL):
- * - រក្សាទុក Leaderboard (ពិន្ទុអ្នកលេង)
- * - រក្សាទុក Certificate Requests (សំណើលិខិតសរសើរ)
- * - ប្រើប្រាស់ Smart Merge Logic ដើម្បីការពារឈ្មោះស្ទួន
- * * 2. CACHE DB (MongoDB):
- * - រក្សាទុកលំហាត់ដែល AI បង្កើតរួច (Permanent Cache)
- * - ជួយកាត់បន្ថយការហៅទៅ Gemini API
- * * 3. AI ENGINE (Google Gemini):
- * - បង្កើតលំហាត់គណិតវិទ្យាថ្មីៗនៅពេល Cache រកមិនឃើញ
+ * DESCRIPTION:  
+ * - Full Feature Set (Admin Panel, Certificate, Logs)
+ * - UPDATED: Rate Limit 10 requests / 8 Hours
+ * - UPDATED: Owner IP Bypass System
  * =================================================================================================
  */
 
@@ -48,7 +41,10 @@ const CONFIG = {
     
     // Security & Logic
     IMG_API: process.env.EXTERNAL_IMAGE_API,
-    OWNER_IP: process.env.OWNER_IP || '127.0.0.1',
+    
+    // 🔥 OWNER IP CONFIGURATION (ដាក់ IP របស់អ្នកក្នុង .env)
+    OWNER_IP: process.env.OWNER_IP, 
+    
     CACHE_RATE: 0.25, // 25% Chance to use Cache, 75% use AI
     
     // Score Validation
@@ -134,7 +130,7 @@ async function initPostgres() {
         const client = await pgPool.connect();
         SYSTEM_STATE.postgresConnected = true;
         
-        // Auto-Create Tables
+        // Auto-Create Tables (Including new Columns)
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -200,12 +196,12 @@ const problemSchema = new mongoose.Schema({
 const MathCache = mongoose.model('MathProblemCache', problemSchema);
 
 // =================================================================================================
-// SECTION 5: MIDDLEWARE CONFIGURATION
+// SECTION 5: MIDDLEWARE & NEW RATE LIMITER
 // =================================================================================================
 
 const app = express();
 
-// Trust Proxy for Render
+// Trust Proxy for Render (To get real IP)
 app.set('trust proxy', 1);
 
 // Standard Middleware
@@ -217,7 +213,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Traffic Logging Middleware
 app.use((req, res, next) => {
     SYSTEM_STATE.totalRequests++;
-    const ip = req.ip || req.connection.remoteAddress;
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     SYSTEM_STATE.visitors.add(ip);
     
     // Log essential routes
@@ -227,12 +223,36 @@ app.use((req, res, next) => {
     next();
 });
 
-// AI Rate Limiter (Prevent Abuse)
+/**
+ * 🔥 UPDATED RATE LIMITER
+ * - 10 Requests per 8 Hours
+ * - Skip if IP matches OWNER_IP
+ */
 const aiLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000, // 1 hour
-    max: 20, // Limit each IP to 20 requests per windowMs
-    message: { error: "Rate limit exceeded" },
-    skip: (req) => req.ip === CONFIG.OWNER_IP
+    windowMs: 8 * 60 * 60 * 1000, // 8 ម៉ោង (8 Hours)
+    max: 10, // អនុញ្ញាត 10 ដង
+    message: { 
+        error: "Rate limit exceeded", 
+        message: "⚠️ អ្នកបានប្រើប្រាស់សិទ្ធិអស់ហើយ (10ដង/8ម៉ោង)។" 
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => {
+        // យក IP ពិតប្រាកដពី Render Header
+        return req.headers['x-forwarded-for'] || req.ip; 
+    },
+    skip: (req) => {
+        // 🔍 ពិនិត្យមើលថាតើ IP នេះជា Owner IP ដែរឬទេ?
+        const currentIP = req.headers['x-forwarded-for'] || req.ip;
+        const ownerIP = CONFIG.OWNER_IP;
+        
+        // បើ IP ស្មើនឹង Owner IP => Skip Limit (លេងបានរហូត)
+        if (ownerIP && currentIP && currentIP.includes(ownerIP)) {
+            logSystem('OK', '👑 Owner Access Bypass', `IP: ${currentIP}`);
+            return true; 
+        }
+        return false;
+    }
 });
 
 // =================================================================================================
@@ -257,7 +277,7 @@ app.get('/', (req, res) => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>BrainTest Hybrid Server v6.0</title>
+        <title>BrainTest Enterprise v6.2</title>
         <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;700&display=swap" rel="stylesheet">
         <style>
             :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; }
@@ -284,8 +304,8 @@ app.get('/', (req, res) => {
     <body>
         <div class="container">
             <div class="card">
-                <h1>🚀 BRAINTEST ENGINE v6.0</h1>
-                <div class="sub">Uptime: ${d}d ${h}h ${m}m | Env: ${CONFIG.ENV.toUpperCase()}</div>
+                <h1>🚀 BRAINTEST v6.2 (Enterprise)</h1>
+                <div class="sub">Uptime: ${d}d ${h}h ${m}m | RateLimit: 10/8h</div>
                 
                 <div class="stats-grid">
                     <div class="stat"><div class="stat-label">PostgreSQL</div><div class="stat-val">${pgStatus}</div></div>
@@ -333,8 +353,6 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     SYSTEM_STATE.totalGamesGenerated++;
 
     // 3. CACHE STRATEGY: Try MongoDB First?
-    // We use Math.random() < 0.25 to try cache 25% of the time.
-    // This saves AI costs but keeps content fresh.
     let problemContent = null;
     let source = "ai";
 
@@ -364,14 +382,14 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
         SYSTEM_STATE.aiCalls++;
         
         try {
-            // --- CRITICAL: DO NOT TOUCH THIS GEMINI LOGIC ---
+            // --- GEMINI LOGIC ---
             const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
             const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
             
             const result = await model.generateContent(prompt);
             const response = await result.response;
             problemContent = response.text();
-            // ------------------------------------------------
+            // --------------------
 
             // 5. SAVE TO CACHE (If successful)
             if (problemContent && SYSTEM_STATE.mongoConnected && topic && difficulty) {
@@ -443,10 +461,11 @@ app.post('/api/leaderboard/submit', async (req, res) => {
             }
 
         } else {
-            // INSERT MODE (New User)
+            // INSERT MODE (New User) - Now includes ip_address
+            const userIP = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
-                [username, score, difficulty, req.ip]
+                [username, score, difficulty, userIP]
             );
             logSystem('DB', `New Leaderboard Entry`, `${username}: ${score}`);
         }
@@ -571,7 +590,7 @@ app.get('/admin/requests', async (req, res) => {
 
 async function startSystem() {
     console.clear();
-    logSystem('OK', `Starting BrainTest Engine v6.0`);
+    logSystem('OK', `Starting BrainTest Engine v6.2`);
 
     // 1. Init Databases
     await initPostgres(); // Leaderboard
