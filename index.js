@@ -1,14 +1,14 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.1 (Leaderboard Fix & Accumulation Stable)
+ * VERSION: 3.2.3 (Stable Full - Duplicate Fix Included)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
  * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
- * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation (Stable)
- * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ (បន្ថែមមុខងារលុប)
- * - UPDATE: ការពារការលួចបន្លំពិន្ទុ និង បូកពិន្ទុឈ្មោះចាស់ និង Fix Leaderboard Display
+ * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation
+ * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ
+ * - FIX: ដោះស្រាយបញ្ហាឈ្មោះចាស់បូកពិន្ទុឡើងខុសប្រក្រតី (Fix Score Inflation & Duplicate Rows)
  * =========================================================================================
  */
 
@@ -114,7 +114,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.1 (Leaderboard Fixed)</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.3 (Duplicate Fix Active)</p>
         </div>
     `);
 });
@@ -155,7 +155,9 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     }
 });
 
-// B. ដាក់ពិន្ទុចូល Leaderboard (UPDATED: SECURITY CHECK & ACCUMULATION)
+// =========================================================================
+// B. ដាក់ពិន្ទុចូល Leaderboard (FIXED: DUPLICATE & SCORE INFLATION BUG)
+// =========================================================================
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
     
@@ -172,7 +174,6 @@ app.post('/api/leaderboard/submit', async (req, res) => {
         "Very Hard": 20
     };
 
-    // ប្រសិនបើ Difficulty មិនត្រឹមត្រូវ ឬ ពិន្ទុដែលផ្ញើមកលើសពីការកំណត់
     if (!ALLOWED_SCORES[difficulty] || score > ALLOWED_SCORES[difficulty]) {
         console.warn(`🚨 SECURITY ALERT: IP ${req.ip} tried to cheat! User: ${username}, Score: ${score}, Mode: ${difficulty}`);
         return res.status(403).json({ success: false, message: "🚫 ការដាក់ពិន្ទុត្រូវបានបដិសេធ! ពិន្ទុមិនត្រឹមត្រូវ។" });
@@ -181,19 +182,38 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     try {
         const client = await pool.connect();
         
-        // 3. ពិនិត្យមើលថាតើឈ្មោះនេះមានក្នុង Difficulty នេះហើយឬនៅ?
+        // 3. ស្វែងរកមើលថាតើឈ្មោះនេះមានប៉ុន្មាន row ក្នុង difficulty នេះ?
+        // យើងទាញយក ID មកដើម្បីកំណត់អត្តសញ្ញាណជួរ
         const checkUser = await client.query(
-            'SELECT * FROM leaderboard WHERE username = $1 AND difficulty = $2',
+            'SELECT id FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC',
             [username.substring(0, 50), difficulty]
         );
 
         if (checkUser.rows.length > 0) {
-            // ករណីទី ១: មានឈ្មោះហើយ => ធ្វើការបូកពិន្ទុបន្ថែម (UPDATE)
+            // === កែសម្រួលថ្មី (IMPORTANT FIX) ===
+            
+            // យក ID របស់ជួរទីមួយ (Row ចាស់បំផុត) មកធ្វើការ Update
+            const targetId = checkUser.rows[0].id;
+
+            // Update តែមួយជួរនេះគត់ (WHERE id = targetId)
+            // នេះធានាថា បើទោះជាមានឈ្មោះដូចគ្នា ១០០ ក៏ដោយ ក៏វាបូកតែ ១ កន្លែងទេ
             await client.query(
-                'UPDATE leaderboard SET score = score + $1 WHERE username = $2 AND difficulty = $3',
-                [score, username.substring(0, 50), difficulty]
+                'UPDATE leaderboard SET score = score + $1 WHERE id = $2',
+                [score, targetId]
             );
-            console.log(`🔄 Updated Score for ${username}: +${score}`);
+            console.log(`🔄 Updated Score for ${username} (ID: ${targetId}): +${score}`);
+
+            // === CLEANUP DUPLICATES (លុបចោលជួរដែលស្ទួន) ===
+            if (checkUser.rows.length > 1) {
+                console.log(`🧹 Cleaning up duplicates for user: ${username} (${checkUser.rows.length} rows found)`);
+                
+                // ប្រមូល ID ដែលលើស (ចាប់ពីជួរទី ២ ទៅ)
+                const duplicateIds = checkUser.rows.slice(1).map(row => row.id);
+                
+                // លុបជួរដែលស្ទួនចោល
+                await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [duplicateIds]);
+            }
+
         } else {
             // ករណីទី ២: មិនទាន់មានឈ្មោះ => បង្កើតថ្មី (INSERT)
             await client.query(
@@ -211,7 +231,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     }
 });
 
-// C. ទាញយកពិន្ទុពី Leaderboard (UPDATED: Aggregation/Grouping FIX)
+// C. ទាញយកពិន្ទុពី Leaderboard
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -227,7 +247,6 @@ app.get('/api/leaderboard/top', async (req, res) => {
             LIMIT 100
         `);
         client.release();
-        // វានឹង return តែឈ្មោះមួយ និងពិន្ទុសរុប (SUM) របស់គាត់ប៉ុណ្ណោះ
         res.json(result.rows);
     } catch (err) {
         console.error("Leaderboard GET Error:", err);
@@ -513,7 +532,3 @@ async function startServer() {
 
 // Execute Start Function
 startServer();
-
-// =========================================================================================
-// END OF FILE 
-// =========================================================================================
