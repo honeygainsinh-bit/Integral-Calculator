@@ -1,8 +1,12 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.0 (SECURE & AUTO-SUM EDITION)
- * UPDATE: ដោះស្រាយបញ្ហាឈ្មោះស្ទួន និង ការពារការបន្លំពិន្ទុ (Anti-Cheat)
+ * VERSION: 3.2.0 (Stable - Score Accumulation & Fixes)
+ * DESCRIPTION: 
+ * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
+ * - ភ្ជាប់ជាមួយ PostgreSQL Database
+ * - Leaderboard: បូកពិន្ទុបន្ត (Accumulate Score)
+ * - Security: ការពារការលួចបន្លំពិន្ទុ
  * =========================================================================================
  */
 
@@ -18,16 +22,16 @@ const { Pool } = require('pg');
 // --- 2. SERVER CONFIGURATION (កំណត់រចនាសម្ព័ន្ធ) ---
 const app = express();
 const port = process.env.PORT || 3000;
-const MODEL_NAME = "gemini-1.5-flash"; // AI Model (អាចប្រើ gemini-2.5-flash ក៏បាន)
+const MODEL_NAME = "gemini-1.5-flash"; // AI Model Update
 
 // សម្រាប់ការតាមដានស្ថិតិ (In-memory stats)
 let totalPlays = 0;
 const uniqueVisitors = new Set();
 
 // Middleware Setup
-app.set('trust proxy', 1);
-app.use(cors());
-app.use(express.json());
+app.set('trust proxy', 1); // ចាំបាច់សម្រាប់ Render/Heroku
+app.use(cors()); // អនុញ្ញាតអោយ Web ផ្សេងៗហៅ API បាន
+app.use(express.json()); // អាចអាន JSON Body បាន
 
 // Logger Middleware (កត់ត្រារាល់ការហៅចូល)
 app.use((req, res, next) => {
@@ -52,11 +56,12 @@ async function initializeDatabase() {
         const client = await pool.connect();
 
         // 1. បង្កើត Table Leaderboard (សម្រាប់ពិន្ទុទូទៅ)
+        // សម្គាល់: យើងប្រើ username ជា unique key ដើម្បីងាយស្រួល update
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(50) NOT NULL,
-                score INTEGER NOT NULL,
+                score INTEGER NOT NULL DEFAULT 0,
                 difficulty VARCHAR(20) NOT NULL,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
@@ -100,14 +105,15 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Home Route
 app.get('/', (req, res) => {
     res.status(200).send(`
-        <div style="font-family: sans-serif; text-align: center; padding-top: 50px;">
-            <h1 style="color: #16a34a;">Math Quiz API 🟢 (Secure v3.2)</h1>
-            <p style="color: #64748b;">ប្រព័ន្ធគ្រប់គ្រងទិន្នន័យ និងបង្កើតវិញ្ញាបនបត្រស្វ័យប្រវត្តិ</p>
+        <div style="font-family: 'Hanuman', sans-serif; text-align: center; padding-top: 50px; background-color: #f8fafc; height: 100vh;">
+            <h1 style="color: #16a34a; font-size: 3rem;">Math Quiz API 🟢</h1>
+            <p style="font-size: 1.2rem; color: #64748b;">ប្រព័ន្ធគ្រប់គ្រងទិន្នន័យ និងបង្កើតវិញ្ញាបនបត្រស្វ័យប្រវត្តិ</p>
             <div style="margin-top: 30px;">
-                <a href="/admin/requests" style="background: #0284c7; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                <a href="/admin/requests" style="background: #0284c7; color: white; padding: 15px 30px; text-decoration: none; border-radius: 50px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2 (Accumulate Score)</p>
         </div>
     `);
 });
@@ -148,62 +154,59 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     }
 });
 
-// B. ដាក់ពិន្ទុចូល Leaderboard (SECURE & AUTO-SUM LOGIC)
+// B. ដាក់ពិន្ទុចូល Leaderboard (UPDATED: Accumulate Logic)
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
-
-    // 1. Check Data Format
+    
+    // 1. Validation: ទិន្នន័យមូលដ្ឋាន
     if (!username || score === undefined || !difficulty) {
-        return res.status(400).json({ success: false, message: "ទិន្នន័យមិនត្រឹមត្រូវ!" });
+        return res.status(400).json({ success: false, message: "ទិន្នន័យមិនត្រឹមត្រូវ" });
     }
 
-    // 2. SECURITY RULES (ច្បាប់សុវត្ថិភាព)
-    const RULES = {
-        'easy': 5,
-        'medium': 10,
-        'hard': 15,
-        'very hard': 20
+    // 2. Validation: កំណត់ពិន្ទុតាមកម្រិត (Security Check)
+    const POINTS_SYSTEM = {
+        'Easy': 5,
+        'Medium': 10,
+        'Hard': 15,
+        'Very Hard': 20
     };
 
-    const level = difficulty.toLowerCase().trim();
-    const allowedScore = RULES[level];
+    // រកពិន្ទុដែលអនុញ្ញាតអោយខ្ពស់បំផុតសម្រាប់កម្រិតនោះ
+    const allowedScore = POINTS_SYSTEM[difficulty];
 
-    // 3. HACK PROTECTION CHECK (ការត្រួតពិនិត្យការបន្លំ)
-    // បើកម្រិតមិនមានក្នុង Rules ឬ ពិន្ទុដែលផ្ញើមកខុសពីច្បាប់កំណត់ -> BLOCK
-    if (!allowedScore || score !== allowedScore) {
-        console.warn(`⛔ FRAUD DETECTED: IP=${req.ip}, User=${username}, Diff=${difficulty}, SentScore=${score}`);
-        return res.status(403).json({ 
+    // បើគ្មានក្នុងបញ្ជី ឬ ពិន្ទុបោះមកធំជាងពិន្ទុដែលកំណត់ => បដិសេធចោល (Anti-Cheat)
+    if (!allowedScore || score > allowedScore) {
+        console.warn(`⚠️ CHEATING ATTEMPT: ${username} tried to submit ${score} for ${difficulty}`);
+        return res.status(400).json({ 
             success: false, 
-            message: `⚠️ ការព្រមាន: ពិន្ទុមិនត្រឹមត្រូវតាមកម្រិតលំបាក! (អនុញ្ញាតត្រឹម: ${allowedScore})` 
+            message: "ពិន្ទុមិនត្រឹមត្រូវតាមកម្រិតវិញ្ញាសា (Score exceeds limit)" 
         });
     }
 
-    // 4. DATABASE LOGIC (បូកពិន្ទុ ឬ បង្កើតថ្មី)
     try {
         const client = await pool.connect();
 
-        // ពិនិត្យមើលឈ្មោះចាស់
+        // 3. ពិនិត្យមើលថាតើឈ្មោះនេះមានក្នុង Database ហើយឬនៅ?
         const checkUser = await client.query('SELECT * FROM leaderboard WHERE username = $1', [username]);
 
         if (checkUser.rows.length > 0) {
-            // A. មានឈ្មោះចាស់ -> UPDATE (យកពិន្ទុចាស់ + ពិន្ទុថ្មី)
+            // ករណីទី១: មានឈ្មោះរួចហើយ => ធ្វើការ UPDATE (បូកពិន្ទុថែម)
             await client.query(
-                // ប្រើ $1 ជាពិន្ទុដែលបានអនុញ្ញាត (allowedScore)
                 'UPDATE leaderboard SET score = score + $1, difficulty = $2 WHERE username = $3',
-                [allowedScore, difficulty, username.substring(0, 50)] // កាត់ឈ្មោះខ្លីបំផុត
+                [score, difficulty, username]
             );
-            console.log(`🔄 UPDATED: ${username} (+${allowedScore} points)`);
+            console.log(`🔄 Updated Score for ${username}: +${score}`);
         } else {
-            // B. អត់មានឈ្មោះ -> INSERT (បង្កើតថ្មី)
+            // ករណីទី២: មិនទាន់មានឈ្មោះ => ធ្វើការ INSERT ថ្មី
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
-                [username.substring(0, 50), allowedScore, difficulty]
+                [username.substring(0, 50), score, difficulty]
             );
-            console.log(`✅ CREATED: ${username} (First Score: ${allowedScore})`);
+            console.log(`✅ New User Added: ${username} with ${score}`);
         }
 
         client.release();
-        res.status(200).json({ success: true, message: "រក្សាទុកដោយជោគជ័យ" });
+        res.status(201).json({ success: true, message: "ពិន្ទុត្រូវបានបូកបញ្ចូលជោគជ័យ" });
 
     } catch (err) {
         console.error("DB Error:", err);
@@ -215,7 +218,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
-        // យក Top 100 អ្នកពិន្ទុខ្ពស់បំផុត
+        // ទាញយកអ្នកពិន្ទុខ្ពស់បំផុត ១០០ នាក់
         const result = await client.query('SELECT username, score, difficulty FROM leaderboard ORDER BY score DESC LIMIT 100');
         client.release();
         res.json(result.rows);
@@ -247,7 +250,7 @@ app.post('/api/submit-request', async (req, res) => {
     }
 });
 
-// --- 7. ROUTES: ADMIN PANEL ---
+// --- 7. ROUTES: ADMIN PANEL (ផ្ទាំងគ្រប់គ្រង - UPDATED) ---
 
 app.get('/admin/requests', async (req, res) => {
     try {
@@ -264,16 +267,42 @@ app.get('/admin/requests', async (req, res) => {
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Admin Dashboard</title>
             <style>
-                body { font-family: sans-serif; background: #f3f4f6; padding: 20px; margin: 0; }
+                @import url('https://fonts.googleapis.com/css2?family=Hanuman:wght@400;700&family=Poppins:wght@400;600&display=swap');
+                body { font-family: 'Poppins', 'Hanuman', sans-serif; background: #f3f4f6; padding: 20px; margin: 0; }
                 .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); overflow: hidden; }
                 .header { background: #1e293b; color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center; }
+                .header h1 { margin: 0; font-size: 1.5rem; }
+                
                 table { width: 100%; border-collapse: collapse; }
-                th { background: #3b82f6; color: white; padding: 15px; text-align: left; }
-                td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; }
+                th { background: #3b82f6; color: white; padding: 15px; text-align: left; font-size: 0.85rem; text-transform: uppercase; }
+                td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; color: #334155; vertical-align: middle; }
+                tr:hover { background: #f8fafc; }
+                
+                /* Name Cell Style - ដាក់ឈ្មោះ និងប៊ូតុងនៅជាមួយគ្នា */
+                .name-cell {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    gap: 15px;
+                }
+                .username-text { font-weight: 700; color: #1e293b; font-size: 1rem; }
+                
+                /* Action Buttons Group */
                 .actions { display: flex; gap: 5px; }
-                .btn { border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: bold; color: white; text-decoration: none; }
-                .btn-print { background: #3b82f6; }
-                .btn-delete { background: #ef4444; }
+
+                .btn {
+                    border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer;
+                    font-size: 0.8rem; font-weight: bold; color: white; text-decoration: none;
+                    transition: all 0.2s; display: flex; align-items: center;
+                }
+                .btn:hover { transform: scale(1.05); }
+                
+                /* Print Button (Green/Blue) */
+                .btn-print { background: #3b82f6; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3); }
+                
+                /* Delete Button (Red) */
+                .btn-delete { background: #ef4444; box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3); }
+
                 .score-high { color: #16a34a; font-weight: bold; }
                 .score-low { color: #dc2626; font-weight: bold; }
             </style>
@@ -282,37 +311,42 @@ app.get('/admin/requests', async (req, res) => {
             <div class="container">
                 <div class="header">
                     <h1>👮‍♂️ Admin Control</h1>
-                    <span>Total Requests: ${result.rows.length}</span>
+                    <span>Total: ${result.rows.length}</span>
                 </div>
                 <table>
                     <thead>
                         <tr>
                             <th style="width: 50px;">ID</th>
-                            <th>👤 Username</th>
+                            <th>👤 Username & Actions (ឈ្មោះ & ប៊ូតុង)</th>
                             <th style="width: 100px;">Score</th>
                             <th style="width: 150px;">Date</th>
-                            <th style="width: 150px;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>`;
 
         if (result.rows.length === 0) {
-            html += `<tr><td colspan="5" style="text-align:center; padding:30px;">🚫 មិនទាន់មានសំណើ។</td></tr>`;
+            html += `<tr><td colspan="4" style="text-align:center; padding:30px;">🚫 មិនទាន់មានសំណើ។</td></tr>`;
         } else {
             result.rows.forEach(row => {
                 const scoreClass = row.score >= 500 ? 'score-high' : 'score-low';
                 html += `
                     <tr id="row-${row.id}">
                         <td>#${row.id}</td>
-                        <td>${row.username}</td>
-                        <td class="${scoreClass}">${row.score}</td>
-                        <td>${new Date(row.request_date).toLocaleDateString('en-GB')}</td>
                         <td>
-                            <div class="actions">
-                                <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn btn-print">🖨️ Print</a>
-                                <button onclick="deleteRequest(${row.id})" class="btn btn-delete">🗑️ លុប</button>
+                            <div class="name-cell">
+                                <span class="username-text">${row.username}</span>
+                                <div class="actions">
+                                    <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn btn-print" title="Print Certificate">
+                                        🖨️ Print
+                                    </a>
+                                    <button onclick="deleteRequest(${row.id})" class="btn btn-delete" title="Delete User">
+                                        🗑️ លុប
+                                    </button>
+                                </div>
                             </div>
                         </td>
+                        <td class="${scoreClass}">${row.score}</td>
+                        <td>${new Date(row.request_date).toLocaleDateString('en-GB')}</td>
                     </tr>`;
             });
         }
@@ -325,14 +359,17 @@ app.get('/admin/requests', async (req, res) => {
             <script>
                 async function deleteRequest(id) {
                     if (!confirm("⚠️ តើអ្នកពិតជាចង់លុបឈ្មោះនេះមែនទេ?")) return;
+
                     try {
                         const response = await fetch('/admin/delete-request/' + id, { method: 'DELETE' });
-                        if (response.ok) {
+                        const result = await response.json();
+
+                        if (result.success) {
                             const row = document.getElementById('row-' + id);
                             row.style.backgroundColor = "#fee2e2"; 
                             setTimeout(() => row.remove(), 300);
                         } else {
-                            alert("បរាជ័យក្នុងការលុប។");
+                            alert("បរាជ័យ: " + result.message);
                         }
                     } catch (err) {
                         alert("Error communicating with server.");
@@ -349,7 +386,7 @@ app.get('/admin/requests', async (req, res) => {
     }
 });
 
-// DELETE REQUEST
+// --- NEW ROUTE: DELETE REQUEST (លុបសំណើ) ---
 app.delete('/admin/delete-request/:id', async (req, res) => {
     const id = req.params.id;
     try {
@@ -358,8 +395,9 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
         client.release();
 
         if (result.rowCount === 0) {
-            return res.status(404).json({ success: false, message: "រកមិនឃើញ ID" });
+            return res.status(404).json({ success: false, message: "រកមិនឃើញ ID នេះទេ" });
         }
+
         console.log(`🗑️ Deleted Request ID: ${id}`);
         res.json({ success: true, message: "លុបបានជោគជ័យ" });
     } catch (err) {
@@ -369,8 +407,9 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
 });
 
 // --- 8. CERTIFICATE GENERATION LOGIC (IMGIX ENGINE) ---
-
 app.get('/admin/generate-cert/:id', async (req, res) => {
+    console.log(`... 🎨 Starting Certificate Generation for Request ID: ${req.params.id}`);
+    
     try {
         const id = req.params.id;
         
@@ -378,7 +417,9 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const result = await client.query('SELECT * FROM certificate_requests WHERE id = $1', [id]);
         client.release();
 
-        if (result.rows.length === 0) return res.status(404).send("Error: Request ID not found.");
+        if (result.rows.length === 0) {
+            return res.status(404).send("Error: Request ID not found.");
+        }
 
         const { username, score } = result.rows[0];
 
@@ -387,56 +428,47 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             day: 'numeric', month: 'long', year: 'numeric' 
         });
 
-        const formalMessage = `With immense pride and recognition of your intellectual brilliance, we bestow this award upon you. Your outstanding performance demonstrates a profound mastery of mathematics and a relentless spirit of excellence. Presented by: braintest.fun`;
+        const formalMessage = `With immense pride and recognition of your intellectual brilliance, we bestow this award upon you. Your outstanding performance demonstrates a profound mastery of mathematics and a relentless spirit of excellence. May this achievement serve as a stepping stone to a future filled with boundless success and wisdom. Presented by: braintest.fun`;
 
         const BASE_IMGIX_URL = process.env.EXTERNAL_IMAGE_API;
-        if (!BASE_IMGIX_URL) return res.status(500).send("Server Config Error: Missing Image API URL.");
+        if (!BASE_IMGIX_URL) {
+             console.error("❌ MISSING CONFIG: EXTERNAL_IMAGE_API is not set.");
+             return res.status(500).send("Server Config Error: Missing Image API URL.");
+        }
 
-        // 4. ការសាងសង់ URL
         const encodedUsername = encodeURIComponent(username.toUpperCase());
-
         const secondaryBlock = 
             `Score: ${score}%0A%0A` + 
             `Date Issued: ${formattedDate}%0A%0A%0A` +
             `${formalMessage}`;
         const encodedSecondaryBlock = encodeURIComponent(secondaryBlock);
 
-
         const finalUrl = BASE_IMGIX_URL + 
             `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800` +
             `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodedSecondaryBlock}&mark-w=1600&mark-fit=max`;
 
-        console.log(`✅ Certificate Generated Successfully! Redirecting...`);
         res.redirect(finalUrl);
 
     } catch (err) {
         console.error("❌ Certificate Generation Error:", err.message);
-        res.status(500).send(`Error Generating Certificate: ${err.message}`);
+        res.status(500).send(`Error: ${err.message}`);
     }
 });
 
 // --- 9. START SERVER (ចាប់ផ្តើមដំណើរការ) ---
-
 async function startServer() {
     if (!process.env.DATABASE_URL) {
         console.error("🛑 CRITICAL ERROR: DATABASE_URL is missing in .env");
         return;
     }
-
     await initializeDatabase();
-
     app.listen(port, () => {
         console.log(`\n===================================================`);
-        console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING! (SECURE v3.2)`);
+        console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING!`);
         console.log(`👉 PORT: ${port}`);
-        console.log(`👉 ADMIN PANEL: http://localhost:${port}/admin/requests`);
+        console.log(`👉 LEADERBOARD LOGIC: ACCUMULATIVE`);
         console.log(`===================================================\n`);
     });
 }
 
-// Execute Start Function
 startServer();
-
-// =========================================================================================
-// END OF FILE 
-// =========================================================================================
