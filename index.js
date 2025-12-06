@@ -1,14 +1,13 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.0 (Stable - Score Accumulation Fixed)
+ * VERSION: 3.1.0 (Enterprise Stable - With Delete Feature)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
  * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
  * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation (Stable)
  * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ (បន្ថែមមុខងារលុប)
- * - *UPDATE: កែសម្រួលប្រព័ន្ធពិន្ទុ (បូកពិន្ទុចូលឈ្មោះដើម)*
  * =========================================================================================
  */
 
@@ -114,7 +113,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2 (Score Fix)</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.1</p>
         </div>
     `);
 });
@@ -155,7 +154,7 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     }
 });
 
-// B. ដាក់ពិន្ទុចូល Leaderboard (FIXED: បូកពិន្ទុជំនួសអោយការបង្កើតជួរថ្មី)
+// B. ដាក់ពិន្ទុចូល Leaderboard (FIXED: Auto Update Score)
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
     
@@ -164,32 +163,28 @@ app.post('/api/leaderboard/submit', async (req, res) => {
         return res.status(400).json({ success: false, message: "ទិន្នន័យមិនត្រឹមត្រូវ" });
     }
 
-    const cleanUsername = username.trim().substring(0, 50); // កាត់ដកឃ្លាចេញ
-
     try {
         const client = await pool.connect();
-        
-        // 1. ពិនិត្យមើលថាឈ្មោះមានឬនៅ
-        const checkUser = await client.query('SELECT * FROM leaderboard WHERE username = $1', [cleanUsername]);
+
+        // ជំហានទី ១: ពិនិត្យមើលថាតើឈ្មោះនេះមានក្នុងតារាងហើយឬនៅ?
+        const checkUser = await client.query('SELECT * FROM leaderboard WHERE username = $1', [username]);
 
         if (checkUser.rows.length > 0) {
-            // 2. បើមានហើយ -> ធ្វើការ UPDATE (បូកពិន្ទុថែម)
+            // ជំហានទី ២: បើមានឈ្មោះហើយ => ធ្វើការ Update (បូកពិន្ទុថែមលើពិន្ទុចាស់)
             await client.query(
-                'UPDATE leaderboard SET score = score + $1, difficulty = $2, created_at = NOW() WHERE username = $3',
-                [score, difficulty, cleanUsername]
+                'UPDATE leaderboard SET score = score + $1 WHERE username = $2', 
+                [score, username]
             );
-            console.log(`🔄 Updated score for existing user: ${cleanUsername}`);
         } else {
-            // 3. បើមិនទាន់មាន -> ធ្វើការ INSERT (បង្កើតថ្មី)
+            // ជំហានទី ៣: បើមិនទាន់មានឈ្មោះនេះ => បង្កើតថ្មី (Insert)
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
-                [cleanUsername, score, difficulty]
+                [username.substring(0, 50), score, difficulty]
             );
-            console.log(`🆕 Created new user: ${cleanUsername}`);
         }
 
         client.release();
-        res.status(200).json({ success: true, message: "ពិន្ទុត្រូវបានរក្សាទុក" });
+        res.status(201).json({ success: true, message: "ពិន្ទុត្រូវបានរក្សាទុក" });
     } catch (err) {
         console.error("DB Error:", err);
         res.status(500).json({ success: false, message: "Server Error" });
