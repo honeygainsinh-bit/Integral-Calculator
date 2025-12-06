@@ -1,11 +1,10 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.8.0 (FINAL FIX: Atomic Update Condition)
+ * VERSION: 4.0.0 (FINAL FIX: Transaction ID Lock)
  * DESCRIPTION: 
- * - ប្រើ Atomic SQL Update ជាមួយនឹងលក្ខខណ្ឌពេលវេលា (EXTRACT(EPOCH)) 
- * - ដើម្បីការពារ Race Condition ដែលបណ្តាលឱ្យបូកពិន្ទុលើស។ 
- * - ធានាថាមានតែសំណើមួយប៉ុណ្ណោះដែលអាចបូកពិន្ទុសម្រាប់ Username មួយបន្ទាប់ពី 3 វិនាទី។
+ * - ប្រើ Unique Transaction ID (TxID) ដើម្បីធានាថាការដាក់ពិន្ទុនីមួយៗកើតឡើងតែម្តងគត់ (Idempotency)។
+ * - TxID ត្រូវបានបង្កើតនៅ generate-problem និងត្រូវបានប្រើប្រាស់/បិទចោលនៅ leaderboard/submit។
  * - រួមបញ្ចូលគ្រប់ Routes និង Admin Panel ទាំងអស់។
  * =========================================================================================
  */
@@ -18,14 +17,12 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg');
+const { randomUUID } = require('crypto'); // 🔑 NEW: សម្រាប់បង្កើត Unique ID
 
 // --- 2. SERVER CONFIGURATION (កំណត់រចនាសម្ព័ន្ធ) ---
 const app = express();
 const port = process.env.PORT || 3000;
 const MODEL_NAME = "gemini-2.5-flash"; // AI Model
-
-// ពេលវេលាអប្បបរមរវាងការដាក់ពិន្ទុ (3 វិនាទី)
-const MIN_TIME_BETWEEN_SUBMISSIONS = 3000; // 3000ms
 
 // សម្រាប់ការតាមដានស្ថិតិ (In-memory stats)
 let totalPlays = 0;
@@ -62,7 +59,7 @@ async function initializeDatabase() {
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
-                username VARCHAR(50) NOT NULL,
+                username VARCHAR(50) NOT NULL UNIQUE,
                 score INTEGER NOT NULL,
                 difficulty VARCHAR(20) NOT NULL,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -77,6 +74,16 @@ async function initializeDatabase() {
                 score INTEGER NOT NULL,
                 status VARCHAR(20) DEFAULT 'Pending',
                 request_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        
+        // 🔑 NEW v4.0.0: បង្កើត Table Question Tokens (TxID Lock)
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS question_tokens (
+                tx_id UUID PRIMARY KEY,
+                username VARCHAR(50) NOT NULL,
+                status VARCHAR(10) DEFAULT 'Pending',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
 
@@ -101,7 +108,7 @@ const aiLimiter = rateLimit({
     skip: (req) => req.ip === process.env.OWNER_IP
 });
 
-// Score Submission Limiter (5 seconds / 1 request) - ស្រទាប់ការពារទី១
+// Score Submission Limiter (5 seconds / 1 request)
 const scoreLimiter = rateLimit({
     windowMs: 5000, 
     max: 1, 
@@ -129,7 +136,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.8 (Atomic Lock Activated)</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v4.0.0 (TxID Lock Activated)</p>
         </div>
     `);
 });
@@ -146,8 +153,9 @@ app.get('/stats', (req, res) => {
 
 // --- 6. ROUTES: API FUNCTIONALITY (មុខងារស្នូល) ---
 
-// A. បង្កើតលំហាត់ដោយប្រើ AI (Gemini)
+// A. បង្កើតលំហាត់ដោយប្រើ AI (Gemini) - 🔑 UPDATED for v4.0.0
 app.post('/api/generate-problem', aiLimiter, async (req, res) => {
+    let client;
     try {
         const { prompt } = req.body;
         if (!prompt) return res.status(400).json({ error: "ត្រូវការ Prompt ជាចាំបាច់" });
@@ -156,30 +164,46 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
         totalPlays++;
         uniqueVisitors.add(req.ip);
 
+        // 🔑 1. បង្កើត Transaction ID ថ្មី
+        const txId = randomUUID();
+        const dummyUsername = "TEMP_LOCK"; 
+
+        // 🔑 2. រក្សាទុក TxID ទៅក្នុង Database (Pending)
+        client = await pool.connect();
+        await client.query(
+            'INSERT INTO question_tokens (tx_id, username, status) VALUES ($1, $2, $3)',
+            [txId, dummyUsername, 'Pending']
+        );
+        client.release();
+        client = null;
+
         // Call Gemini API
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
         const result = await model.generateContent(prompt);
         
-        console.log(`🤖 AI Generated Problem for IP: ${req.ip}`);
-        res.json({ text: result.response.text() });
+        console.log(`🤖 AI Generated Problem, TxID: ${txId.substring(0, 8)}`);
+        
+        // 🔑 3. ផ្ញើ TxID ទៅ Client វិញ
+        res.json({ text: result.response.text(), txId: txId });
 
     } catch (error) {
+        if (client) client.release();
         console.error("❌ Gemini API Error:", error.message);
         res.status(500).json({ error: "បរាជ័យក្នុងការបង្កើតលំហាត់។ សូមព្យាយាមម្តងទៀត។" });
     }
 });
 
-// B. ដាក់ពិន្ទុចូល Leaderboard (FINAL FIX: ATOMIC UPDATE CONDITION)
+// B. ដាក់ពិន្ទុចូល Leaderboard (FINAL FIX v4.0.0: TxID Lock)
 app.post('/api/leaderboard/submit', scoreLimiter, async (req, res) => {
-    const { username, difficulty } = req.body; 
+    // 🔑 ទទួល TxID ពី Client មកជាមួយ
+    const { username, difficulty, txId } = req.body; 
     
-    // Validation
-    if (!username || !difficulty) {
-        return res.status(400).json({ success: false, message: "ទិន្នន័យមិនត្រឹមត្រូវ (ត្រូវការឈ្មោះ និងកម្រិត)" });
+    if (!username || !difficulty || !txId) {
+        return res.status(400).json({ success: false, message: "ទិន្នន័យមិនគ្រប់គ្រាន់ (ត្រូវការឈ្មោះ, កម្រិត, និង txId)" });
     }
 
-    // ១. កំណត់ពិន្ទុដោយស្វ័យប្រវត្តិនៅ Backend (SECURITY: Server-Side Scoring)
+    // ១. កំណត់ពិន្ទុដោយស្វ័យប្រវត្តិនៅ Backend (Server-Side Scoring)
     let pointsToAdd = 0;
     const level = difficulty.toLowerCase().trim();
 
@@ -195,58 +219,58 @@ app.post('/api/leaderboard/submit', scoreLimiter, async (req, res) => {
         pointsToAdd = 5; // លំនាំដើម
     }
     
-    // ២. សម្អាតឈ្មោះ
     const safeUsername = username.trim().substring(0, 50);
 
     let client;
     try {
         client = await pool.connect();
+        await client.query('BEGIN'); // 🔑 ចាប់ផ្តើម Transaction
+
+        // 🔑 ២. ព្យាយាម Lock & Consume TxID (Single-Use Token)
+        // UPDATE នឹងដំណើរការលុះត្រាតែ status នៅតែ Pending
+        const tokenLock = await client.query(
+            `UPDATE question_tokens SET status = 'Used', username = $2 WHERE tx_id = $1 AND status = 'Pending' RETURNING tx_id;`, 
+            [txId, safeUsername]
+        );
         
-        // ៣. ព្យាយាមធ្វើ Atomic Update (សម្រាប់អ្នកលេងចាស់)
-        // UPDATE នឹងដំណើរការលុះត្រាតែពេលវេលាចុងក្រោយខុសគ្នា > 3000ms
-        const updateResult = await client.query(`
-            UPDATE leaderboard 
-            SET score = score + $1, difficulty = $2, created_at = NOW() 
-            WHERE username = $3 
-              AND (EXTRACT(EPOCH FROM NOW()) - EXTRACT(EPOCH FROM created_at)) * 1000 > $4
-            RETURNING score;
-        `, [pointsToAdd, difficulty, safeUsername, MIN_TIME_BETWEEN_SUBMISSIONS]);
-
-        if (updateResult.rowCount > 0) {
-            // បាន Update ជោគជ័យ (លុះត្រាតែឆ្លងកាត់ 3 វិនាទី)
-            console.log(`✅ ATOMIC UPDATE SUCCESS for: ${safeUsername} (+${pointsToAdd})`);
+        if (tokenLock.rowCount === 0) {
+            // TxID រកមិនឃើញ ឬត្រូវបានប្រើរួចហើយ (Block the score inflation!)
+            await client.query('ROLLBACK');
             client.release();
-            return res.status(200).json({ success: true, message: `បានបូកបន្ថែម ${pointsToAdd} ពិន្ទុ` });
+            console.log(`❌ BLOCK (TxID Lock): TxID ${txId.substring(0, 8)} used or invalid.`);
+            return res.status(200).json({ 
+                success: false, 
+                message: "🚫 លេខសម្គាល់លំហាត់នេះត្រូវបានប្រើប្រាស់រួចហើយ ឬមិនត្រឹមត្រូវ។ (Score Blocked)" 
+            });
         }
-
-        // ៤. ពិនិត្យមើលថាតើឈ្មោះមានរួចហើយឬនៅ
-        const checkUser = await client.query(
-            'SELECT username FROM leaderboard WHERE username = $1', 
-            [safeUsername]
+        
+        // 🔑 ៣. បើ TxID ត្រូវបាន Lock/Consume ដោយជោគជ័យ នោះបូកពិន្ទុ
+        const updateResult = await client.query(
+            'UPDATE leaderboard SET score = score + $1, difficulty = $2, created_at = NOW() WHERE username = $3 RETURNING score', 
+            [pointsToAdd, difficulty, safeUsername]
         );
 
-        if (checkUser.rows.length === 0) {
-            // ជា User ថ្មី - ធ្វើការ INSERT
+        if (updateResult.rowCount === 0) {
+            // បើមិនមាន Username ទេ ធ្វើការ Insert (New User)
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty, created_at) VALUES($1, $2, $3, NOW())', 
                 [safeUsername, pointsToAdd, difficulty]
             );
-            console.log(`🆕 New User Added: ${safeUsername} (${pointsToAdd})`);
-            client.release();
-            return res.status(200).json({ success: true, message: `បានបូកបន្ថែម ${pointsToAdd} ពិន្ទុ` });
+            console.log(`🆕 New User Added with TxID: ${safeUsername} (+${pointsToAdd})`);
+        } else {
+            console.log(`✅ Score Updated with TxID: ${safeUsername} (+${pointsToAdd})`);
         }
-        
-        // ៥. បើ RowCount = 0 តែឈ្មោះមានរួចហើយ មានន័យថា Time Check បាន Block ការ Update
+
+        await client.query('COMMIT'); // 🔑 បញ្ចប់ Transaction ដោយជោគជ័យ
         client.release();
-        console.log(`❌ BLOCK (Atomic Check): ${safeUsername} submitted too soon.`);
-        return res.status(200).json({ 
-            success: false, 
-            message: `✋ អ្នកមិនអាចដាក់ពិន្ទុញឹកញាប់ជាង 3 វិនាទីទេ។ សូមរង់ចាំ! (Score Blocked)` 
-        });
+        return res.status(200).json({ success: true, message: `បានបូកបន្ថែម ${pointsToAdd} ពិន្ទុ` });
 
     } catch (err) {
-        if (client) client.release();
-        console.error("CRITICAL DB Error (v3.8):", err);
+        if (client) {
+            await client.query('ROLLBACK'); // 🔑 Rollback បើមាន Error
+            client.release();
+        }
+        console.error("CRITICAL DB Error (v4.0.0):", err);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
@@ -256,9 +280,24 @@ app.post('/api/leaderboard/submit', scoreLimiter, async (req, res) => {
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
-        const result = await client.query('SELECT username, score, difficulty FROM leaderboard ORDER BY score DESC LIMIT 100');
+        // ប្រើ SUM និង GROUP BY ដើម្បីបូកពិន្ទុសម្រាប់ឈ្មោះតែមួយ
+        const result = await client.query(`
+            SELECT username, SUM(score) AS total_score 
+            FROM leaderboard 
+            GROUP BY username 
+            ORDER BY total_score DESC 
+            LIMIT 100
+        `);
+        
+        // ផ្លាស់ប្តូរ Format មកដូចដើម
+        const formattedResults = result.rows.map(row => ({
+            username: row.username,
+            score: parseInt(row.total_score),
+            // difficulty មិនចាំបាច់ទេសម្រាប់ Top Leaderboard
+        }));
+        
         client.release();
-        res.json(result.rows);
+        res.json(formattedResults);
     } catch (err) {
         res.status(500).json({ success: false, message: "មិនអាចទាញយកទិន្នន័យបាន" });
     }
@@ -449,7 +488,7 @@ async function startServer() {
     // បើក Server
     app.listen(port, () => {
         console.log(`\n===================================================`);
-        console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING!`);
+        console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING! (v4.0.0)`);
         console.log(`👉 PORT: ${port}`);
         console.log(`===================================================\n`);
     });
