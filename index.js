@@ -1,11 +1,11 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 5.0.0 (FINAL CLEAN FIX)
+ * VERSION: 5.0.1 (ADMIN PANEL CONFIRMED)
  * DESCRIPTION: 
- * - បានដក Imgix និងមុខងារ Print ចេញទាំងអស់។
- * - បានជួសជុលបញ្ហា "ពិន្ទុមិនបូកចូលគ្នា" (Score Aggregation Fix)។
- * - Admin Panel ទុកសម្រាប់តែមើល និងលុបសំណើប៉ុណ្ណោះ។
+ * - Admin Panel (View & Delete) ត្រូវបានរក្សាទុក។
+ * - Logic បូកពិន្ទុ (Aggregation) គឺដំណើរការត្រឹមត្រូវ។
+ * - Imgix / Print Feature ត្រូវបានដកចេញ។
  * =========================================================================================
  */
 
@@ -24,11 +24,11 @@ const port = process.env.PORT || 3000;
 const MODEL_NAME = "gemini-2.5-flash"; 
 
 // Middleware Setup
-app.set('trust proxy', 1); // សម្រាប់ Render Proxy
-app.use(cors()); // អនុញ្ញាតអោយ Web ផ្សេងៗហៅ API
-app.use(express.json()); // អនុញ្ញាតអោយអាន JSON Body
+app.set('trust proxy', 1);
+app.use(cors());
+app.use(express.json());
 
-// Logger (មើលការហៅចូលក្នុង Console)
+// Logger
 app.use((req, res, next) => {
     console.log(`[${new Date().toLocaleTimeString('km-KH')}] 📡 ${req.method} ${req.path}`);
     next();
@@ -37,7 +37,7 @@ app.use((req, res, next) => {
 // 3. DATABASE CONNECTION
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false } // ចាំបាច់សម្រាប់ Cloud DB
+    ssl: { rejectUnauthorized: false } 
 });
 
 // Function បង្កើត Table (បើមិនទាន់មាន)
@@ -67,27 +67,26 @@ async function initializeDatabase() {
             );
         `);
 
-        console.log("✅ Database Tables are Ready.");
+        console.log("✅ Database Tables are Checked.");
         client.release();
     } catch (err) {
         console.error("❌ Database Init Error:", err.message);
     }
 }
 
-// 4. RATE LIMITER (ការពារការ Spam AI)
+// 4. RATE LIMITER
 const aiLimiter = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, // 8 ម៉ោង
-    max: 10, // អនុញ្ញាត 10 ដង
+    windowMs: 8 * 60 * 60 * 1000, 
+    max: 10, 
     message: { error: "Rate limit exceeded" },
     keyGenerator: (req) => req.ip,
     skip: (req) => req.ip === process.env.OWNER_IP 
 });
 
-// Static Files
 app.use(express.static(path.join(__dirname, 'public')));
 
 // =========================================================================
-// API ROUTES (ចំណុចសំខាន់)
+// API ROUTES
 // =========================================================================
 
 // Home Route
@@ -121,12 +120,10 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
     
-    // Validation: ពិនិត្យមើលទិន្នន័យ
     if (!username || typeof score !== 'number') {
         return res.status(400).json({ success: false, message: "Invalid Data" });
     }
 
-    // កាត់ឈ្មោះអោយស្អាត (Trim whitespace)
     const cleanUsername = username.trim().substring(0, 50);
 
     try {
@@ -147,7 +144,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
                 'UPDATE leaderboard SET score = $1, difficulty = $2 WHERE username = $3',
                 [newTotal, difficulty, cleanUsername]
             );
-            console.log(`🔄 UPDATED: ${cleanUsername} (Old: ${currentTotal} + New: ${score} = ${newTotal})`);
+            console.log(`🔄 UPDATED: ${cleanUsername} (New Total: ${newTotal})`);
         } else {
             // ✅ ករណីឈ្មោះថ្មី: បង្កើតថ្មី (Insert)
             await client.query(
@@ -178,7 +175,7 @@ app.get('/api/leaderboard/top', async (req, res) => {
     }
 });
 
-// D. SUBMIT CERTIFICATE REQUEST (គ្រាន់តែរក្សាទុកអោយ Admin មើល)
+// D. SUBMIT CERTIFICATE REQUEST
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
     if (!username) return res.status(400).json({ success: false });
@@ -196,10 +193,11 @@ app.post('/api/submit-request', async (req, res) => {
     }
 });
 
-// E. ADMIN PANEL (View Only - No Print Button)
+// E. ADMIN PANEL (View Requests & Delete Button)
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
+        // ផ្ទាំងនេះសម្រាប់ Admin ពិនិត្យមើលអ្នកដែលស្នើសុំ Certificate
         const result = await client.query('SELECT * FROM certificate_requests ORDER BY request_date DESC LIMIT 50');
         client.release();
 
@@ -224,7 +222,7 @@ app.get('/admin/requests', async (req, res) => {
         </head>
         <body>
             <div class="container">
-                <h1>👮‍♂️ Admin Panel (Requests)</h1>
+                <h1>👮‍♂️ Admin Panel (Certificate Requests)</h1>
                 <table>
                     <thead>
                         <tr>
@@ -240,11 +238,12 @@ app.get('/admin/requests', async (req, res) => {
             html += `<tr><td colspan="4" style="text-align:center;">No requests found.</td></tr>`;
         } else {
             result.rows.forEach(row => {
+                const scoreDisplay = row.score >= 10000 ? 'score-high' : '';
                 html += `
                     <tr id="row-${row.id}">
                         <td>#${row.id}</td>
                         <td><b>${row.username}</b></td>
-                        <td class="${row.score >= 10000 ? 'score-high' : ''}">${row.score}</td>
+                        <td class="${scoreDisplay}">${row.score}</td>
                         <td>
                             <button onclick="deleteRequest(${row.id})" class="btn-delete">🗑️ Remove</button>
                         </td>
@@ -258,6 +257,7 @@ app.get('/admin/requests', async (req, res) => {
             </div>
 
             <script>
+                // This JS runs on the Admin HTML page
                 async function deleteRequest(id) {
                     if(!confirm("Are you sure you want to delete this request?")) return;
                     
@@ -267,7 +267,7 @@ app.get('/admin/requests', async (req, res) => {
                         if(data.success) {
                             document.getElementById('row-' + id).remove();
                         } else {
-                            alert("Failed to delete.");
+                            alert("Failed to delete: " + data.message);
                         }
                     } catch(e) {
                         alert("Error connecting to server.");
@@ -284,15 +284,20 @@ app.get('/admin/requests', async (req, res) => {
     }
 });
 
-// F. DELETE REQUEST API
+// F. DELETE REQUEST API (Called by the Admin Panel)
 app.delete('/admin/delete-request/:id', async (req, res) => {
     try {
         const client = await pool.connect();
-        await client.query('DELETE FROM certificate_requests WHERE id = $1', [req.params.id]);
+        const result = await client.query('DELETE FROM certificate_requests WHERE id = $1', [req.params.id]);
         client.release();
+        
+        if (result.rowCount === 0) {
+            return res.status(404).json({ success: false, message: "Request not found" });
+        }
+        
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ success: false });
+        res.status(500).json({ success: false, message: "Server deletion failed" });
     }
 });
 
@@ -301,9 +306,9 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
 // =========================================================================
 
 async function startServer() {
-    // 1. Start listening immediately (Prevent Render Timeout)
+    // 1. Start listening immediately
     app.listen(port, () => {
-        console.log(`🚀 Server is running on Port ${port}`);
+        console.log(`🚀 Server Running on Port ${port}`);
         console.log(`🔗 Admin Link: http://localhost:${port}/admin/requests`);
     });
 
