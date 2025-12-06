@@ -1,14 +1,12 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.3 (Stable Full - Duplicate Fix Included)
+ * VERSION: 3.2.4 (FINAL STABLE: Merge Scores & Auto-Cleanup)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
- * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
- * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation
- * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ
- * - FIX: ដោះស្រាយបញ្ហាឈ្មោះចាស់បូកពិន្ទុឡើងខុសប្រក្រតី (Fix Score Inflation & Duplicate Rows)
+ * - FIX: ដោះស្រាយបញ្ហាឈ្មោះស្ទួន ដោយធ្វើការបូកពិន្ទុបញ្ចូលគ្នា (Merge) មុននឹងលុបចោល
+ * - ធានាថាពិន្ទុមិនបាត់បង់ និងមិនបូកខុស (No Score Inflation)
  * =========================================================================================
  */
 
@@ -114,7 +112,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.3 (Duplicate Fix Active)</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.4 (Score Merge Active)</p>
         </div>
     `);
 });
@@ -156,7 +154,7 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
 });
 
 // =========================================================================
-// B. ដាក់ពិន្ទុចូល Leaderboard (FIXED: DUPLICATE & SCORE INFLATION BUG)
+// B. ដាក់ពិន្ទុចូល Leaderboard (SMART MERGE & CLEANUP)
 // =========================================================================
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
@@ -168,10 +166,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 
     // 2. SECURITY CHECK: កំណត់ពិន្ទុតាមកម្រិត (Anti-Cheat)
     const ALLOWED_SCORES = {
-        "Easy": 5,
-        "Medium": 10,
-        "Hard": 15,
-        "Very Hard": 20
+        "Easy": 5, "Medium": 10, "Hard": 15, "Very Hard": 20
     };
 
     if (!ALLOWED_SCORES[difficulty] || score > ALLOWED_SCORES[difficulty]) {
@@ -182,36 +177,38 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     try {
         const client = await pool.connect();
         
-        // 3. ស្វែងរកមើលថាតើឈ្មោះនេះមានប៉ុន្មាន row ក្នុង difficulty នេះ?
-        // យើងទាញយក ID មកដើម្បីកំណត់អត្តសញ្ញាណជួរ
+        // 3. ស្វែងរកមើលថាតើឈ្មោះនេះមានប៉ុន្មាន row (យកទាំង ID និង Score)
         const checkUser = await client.query(
-            'SELECT id FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC',
+            'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC',
             [username.substring(0, 50), difficulty]
         );
 
         if (checkUser.rows.length > 0) {
-            // === កែសម្រួលថ្មី (IMPORTANT FIX) ===
+            // === LOGIC ថ្មី: បូកបញ្ចូលគ្នា (Merge) ===
             
-            // យក ID របស់ជួរទីមួយ (Row ចាស់បំផុត) មកធ្វើការ Update
-            const targetId = checkUser.rows[0].id;
+            const targetId = checkUser.rows[0].id; // ទុក ID ចាស់គេ
+            
+            // ជំហានទី 1: បូកពិន្ទុដែលមានស្រាប់ទាំងអស់បញ្ចូលគ្នា (ការពារការបាត់ពិន្ទុ)
+            let totalExistingScore = 0;
+            checkUser.rows.forEach(row => {
+                totalExistingScore += row.score;
+            });
 
-            // Update តែមួយជួរនេះគត់ (WHERE id = targetId)
-            // នេះធានាថា បើទោះជាមានឈ្មោះដូចគ្នា ១០០ ក៏ដោយ ក៏វាបូកតែ ១ កន្លែងទេ
+            // ជំហានទី 2: បូកពិន្ទុថ្មីដែលទើបលេងបាន
+            const finalScore = totalExistingScore + score;
+
+            // ជំហានទី 3: Update ពិន្ទុសរុបចូលទៅក្នុង ID តែមួយ
             await client.query(
-                'UPDATE leaderboard SET score = score + $1 WHERE id = $2',
-                [score, targetId]
+                'UPDATE leaderboard SET score = $1 WHERE id = $2',
+                [finalScore, targetId]
             );
-            console.log(`🔄 Updated Score for ${username} (ID: ${targetId}): +${score}`);
+            console.log(`🔄 Merged & Updated: ${username} (ID: ${targetId}) -> Total: ${finalScore}`);
 
-            // === CLEANUP DUPLICATES (លុបចោលជួរដែលស្ទួន) ===
+            // ជំហានទី 4: លុប ID ផ្សេងៗចោល (Cleanup) ព្រោះពិន្ទុបានបូកចូល targetId អស់ហើយ
             if (checkUser.rows.length > 1) {
-                console.log(`🧹 Cleaning up duplicates for user: ${username} (${checkUser.rows.length} rows found)`);
-                
-                // ប្រមូល ID ដែលលើស (ចាប់ពីជួរទី ២ ទៅ)
                 const duplicateIds = checkUser.rows.slice(1).map(row => row.id);
-                
-                // លុបជួរដែលស្ទួនចោល
                 await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [duplicateIds]);
+                console.log(`🧹 Cleaned up duplicates: IDs [${duplicateIds.join(', ')}] deleted.`);
             }
 
         } else {
@@ -235,7 +232,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
-        // ប្រើ SUM(score) និង GROUP BY username ដើម្បីបូកពិន្ទុសរុបសម្រាប់ឈ្មោះនីមួយៗ
+        // ប្រើ SUM(score) ដើម្បីប្រាកដ (ទោះជាយើងបាន Merge ក៏ដោយ ក៏ការពារមួយតង់ទៀត)
         const result = await client.query(`
             SELECT 
                 username, 
@@ -282,7 +279,6 @@ app.post('/api/submit-request', async (req, res) => {
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
-        // ទាញយកទិន្នន័យ (រៀបតាមថ្មីទៅចាស់)
         const result = await client.query('SELECT * FROM certificate_requests ORDER BY request_date DESC LIMIT 50');
         client.release();
 
@@ -305,29 +301,17 @@ app.get('/admin/requests', async (req, res) => {
                 td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; color: #334155; vertical-align: middle; }
                 tr:hover { background: #f8fafc; }
                 
-                /* Name Cell Style - ដាក់ឈ្មោះ និងប៊ូតុងនៅជាមួយគ្នា */
-                .name-cell {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    gap: 15px;
-                }
+                .name-cell { display: flex; justify-content: space-between; align-items: center; gap: 15px; }
                 .username-text { font-weight: 700; color: #1e293b; font-size: 1rem; }
                 
-                /* Action Buttons Group */
                 .actions { display: flex; gap: 5px; }
-
                 .btn {
                     border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer;
                     font-size: 0.8rem; font-weight: bold; color: white; text-decoration: none;
                     transition: all 0.2s; display: flex; align-items: center;
                 }
                 .btn:hover { transform: scale(1.05); }
-                
-                /* Print Button (Green/Blue) */
                 .btn-print { background: #3b82f6; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3); }
-                
-                /* Delete Button (Red) */
                 .btn-delete { background: #ef4444; box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3); }
 
                 .score-high { color: #16a34a; font-weight: bold; }
@@ -344,7 +328,7 @@ app.get('/admin/requests', async (req, res) => {
                     <thead>
                         <tr>
                             <th style="width: 50px;">ID</th>
-                            <th>👤 Username & Actions (ឈ្មោះ & ប៊ូតុង)</th>
+                            <th>👤 Username & Actions</th>
                             <th style="width: 100px;">Score</th>
                             <th style="width: 150px;">Date</th>
                         </tr>
@@ -363,12 +347,8 @@ app.get('/admin/requests', async (req, res) => {
                             <div class="name-cell">
                                 <span class="username-text">${row.username}</span>
                                 <div class="actions">
-                                    <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn btn-print" title="Print Certificate">
-                                        🖨️ Print
-                                    </a>
-                                    <button onclick="deleteRequest(${row.id})" class="btn btn-delete" title="Delete User">
-                                        🗑️ លុប
-                                    </button>
+                                    <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn btn-print">🖨️ Print</a>
+                                    <button onclick="deleteRequest(${row.id})" class="btn btn-delete">🗑️ លុប</button>
                                 </div>
                             </div>
                         </td>
@@ -386,16 +366,13 @@ app.get('/admin/requests', async (req, res) => {
             <script>
                 async function deleteRequest(id) {
                     if (!confirm("⚠️ តើអ្នកពិតជាចង់លុបឈ្មោះនេះមែនទេ?")) return;
-
                     try {
                         const response = await fetch('/admin/delete-request/' + id, { method: 'DELETE' });
                         const result = await response.json();
-
                         if (result.success) {
-                            // Highlight red before delete
                             const row = document.getElementById('row-' + id);
                             row.style.backgroundColor = "#fee2e2"; 
-                            setTimeout(() => row.remove(), 300); // Remove row from table
+                            setTimeout(() => row.remove(), 300);
                         } else {
                             alert("បរាជ័យ: " + result.message);
                         }
@@ -436,91 +413,49 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
 
 // --- 8. CERTIFICATE GENERATION LOGIC (IMGIX ENGINE) ---
 
-/**
- * Route: /admin/generate-cert/:id
- * Description: បង្កើត URL រូបភាពដោយប្រើ Imgix សម្រាប់លិខិតសរសើរ
- */
 app.get('/admin/generate-cert/:id', async (req, res) => {
     console.log(`... 🎨 Starting Certificate Generation for Request ID: ${req.params.id}`);
     
     try {
         const id = req.params.id;
-        
-        // 1. ទាញយកទិន្នន័យពី Database
         const client = await pool.connect();
         const result = await client.query('SELECT * FROM certificate_requests WHERE id = $1', [id]);
         client.release();
 
-        if (result.rows.length === 0) {
-            return res.status(404).send("Error: Request ID not found.");
-        }
+        if (result.rows.length === 0) return res.status(404).send("Error: Request ID not found.");
 
         const { username, score } = result.rows[0];
-
-        // 2. រៀបចំទិន្នន័យសម្រាប់បង្ហាញ (Formatting Data)
         const dateObj = new Date();
-        const formattedDate = dateObj.toLocaleDateString('en-US', { 
-            day: 'numeric', month: 'long', year: 'numeric' 
-        });
-
-        // សារជូនពរភាសាអង់គ្លេស (Professional Text)
+        const formattedDate = dateObj.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
         const formalMessage = `With immense pride and recognition of your intellectual brilliance, we bestow this award upon you. Your outstanding performance demonstrates a profound mastery of mathematics and a relentless spirit of excellence. May this achievement serve as a stepping stone to a future filled with boundless success and wisdom. Presented by: braintest.fun`;
 
-        // 3. ពិនិត្យមើល Environment Variable
         const BASE_IMGIX_URL = process.env.EXTERNAL_IMAGE_API;
-        if (!BASE_IMGIX_URL) {
-             console.error("❌ MISSING CONFIG: EXTERNAL_IMAGE_API is not set.");
-             return res.status(500).send("Server Config Error: Missing Image API URL.");
-        }
+        if (!BASE_IMGIX_URL) return res.status(500).send("Server Config Error: Missing Image API URL.");
 
-        // 4. ការសាងសង់ URL (Constructing the Final URL)
-        // A. ឈ្មោះអ្នកទទួល (Username) - ធំ, ពណ៌មាស, កណ្តាល
         const encodedUsername = encodeURIComponent(username.toUpperCase());
-
-        // B. ប្លុកបន្ទាប់បន្សំ (Score, Date, Message - ប្រើ Newline)
-        const secondaryBlock = 
-            `Score: ${score}%0A%0A` + 
-            `Date Issued: ${formattedDate}%0A%0A%0A` +
-            `${formalMessage}`;
+        const secondaryBlock = `Score: ${score}%0A%0A` + `Date Issued: ${formattedDate}%0A%0A%0A` + `${formalMessage}`;
         const encodedSecondaryBlock = encodeURIComponent(secondaryBlock);
 
-
-        // C. ផ្គុំ URL ទាំងមូល
         const finalUrl = BASE_IMGIX_URL + 
-            // Layer 1: ឈ្មោះ (Main Text Parameter)
             `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800` +
-            // Layer 2: ព័ត៌មានផ្សេងៗ (Watermark Parameter - Block តែមួយ)
             `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodedSecondaryBlock}&mark-w=1600&mark-fit=max`;
 
-        // 5. បញ្ជូនលទ្ធផល (Redirect)
-        console.log(`✅ Certificate Generated Successfully! Redirecting...`);
         res.redirect(finalUrl);
 
     } catch (err) {
         console.error("❌ Certificate Generation Error:", err.message);
-        res.status(500).send(`
-            <div style="text-align:center; padding:50px; font-family:sans-serif;">
-                <h1 style="color:red;">⚠️ Error Generating Certificate</h1>
-                <p>Internal Server Error. Please check server logs.</p>
-                <p><i>${err.message}</i></p>
-            </div>
-        `);
+        res.status(500).send(`Error Generating Certificate: ${err.message}`);
     }
 });
 
 // --- 9. START SERVER (ចាប់ផ្តើមដំណើរការ) ---
 
 async function startServer() {
-    // ពិនិត្យមើលការកំណត់ Database
     if (!process.env.DATABASE_URL) {
         console.error("🛑 CRITICAL ERROR: DATABASE_URL is missing in .env");
         return;
     }
-
-    // ចាប់ផ្តើម Database
     await initializeDatabase();
-
-    // បើក Server
     app.listen(port, () => {
         console.log(`\n===================================================`);
         console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING!`);
@@ -530,5 +465,4 @@ async function startServer() {
     });
 }
 
-// Execute Start Function
 startServer();
