@@ -1,11 +1,11 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.6.0 (Ultimate Fix: User-Specific Time Lock)
+ * VERSION: 3.7.0 (Final Fix: Database Transaction Lock)
  * DESCRIPTION: 
- * - បន្ថែមការត្រួតពិនិត្យពេលវេលា Database (Time Lock) ដ៏តឹងរឹងលើ API ដាក់ពិន្ទុ។
- * - ធានាថាអ្នកប្រើប្រាស់ម្នាក់អាចដាក់ពិន្ទុបានតែម្តងរៀងរាល់ 3 វិនាទីប៉ុណ្ណោះ។
- * - ជួសជុលបញ្ហា Over-scoring ទាំងស្រុង។
+ * - ប្រើ Database Transaction (BEGIN/COMMIT) ជាមួយ Row-Level Lock (FOR UPDATE) 
+ * ដើម្បីការពារការប្រណាំងសំណើ (Race Condition) ដែលបណ្តាលឱ្យបូកពិន្ទុលើស។
+ * - នេះធានាថាមានតែសំណើមួយប៉ុណ្ណោះដែលអាចបូកពិន្ទុសម្រាប់ Username មួយក្នុងពេលតែមួយ។
  * =========================================================================================
  */
 
@@ -128,7 +128,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.6 (Time Lock Activated)</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.7 (Transaction Lock Activated)</p>
         </div>
     `);
 });
@@ -169,7 +169,7 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     }
 });
 
-// B. ដាក់ពិន្ទុចូល Leaderboard (ULTIMATE FIX: TIME LOCK)
+// B. ដាក់ពិន្ទុចូល Leaderboard (FINAL FIX: TRANSACTION LOCK)
 app.post('/api/leaderboard/submit', scoreLimiter, async (req, res) => {
     const { username, difficulty } = req.body; 
     
@@ -197,33 +197,35 @@ app.post('/api/leaderboard/submit', scoreLimiter, async (req, res) => {
     // ២. សម្អាតឈ្មោះ
     const safeUsername = username.trim().substring(0, 50);
 
+    const client = await pool.connect();
+    
     try {
-        const client = await pool.connect();
-        
-        // ៣. ពិនិត្យមើលថាឈ្មោះនេះមានឬនៅ?
-        const checkUser = await client.query('SELECT created_at FROM leaderboard WHERE username = $1', [safeUsername]);
+        await client.query('BEGIN'); // 1. ចាប់ផ្តើម Transaction
+
+        // 2. ពិនិត្យមើល និង Lock ជួរដេកសម្រាប់ Username នេះ (FOR UPDATE)
+        const checkUser = await client.query(
+            'SELECT score, created_at FROM leaderboard WHERE username = $1 FOR UPDATE', 
+            [safeUsername]
+        );
 
         if (checkUser.rows.length > 0) {
             
-            // ----------------------------------------------------
-            // ⚠️ NEW LOGIC: USER-SPECIFIC TIME LOCK (ស្រទាប់ការពារទី២)
-            // ----------------------------------------------------
+            // 3. Time Lock Check
             const lastSubmissionTime = checkUser.rows[0].created_at;
             const currentTime = new Date();
             const timeDifference = currentTime.getTime() - lastSubmissionTime.getTime();
 
             if (timeDifference < MIN_TIME_BETWEEN_SUBMISSIONS) {
+                await client.query('ROLLBACK'); // Block: បោះបង់ Transaction
                 client.release();
-                console.log(`❌ BLOCK: ${safeUsername} tried to submit too soon (${timeDifference}ms)`);
-                // បញ្ជូន Response ជោគជ័យដើម្បីការពារ Client មិនឱ្យព្យាយាមម្ដងទៀត
+                console.log(`❌ BLOCK (Race): ${safeUsername} tried to submit too soon (${timeDifference}ms)`);
                 return res.status(200).json({ 
                     success: false, 
                     message: `✋ អ្នកមិនអាចដាក់ពិន្ទុញឹកញាប់ជាង 3 វិនាទីទេ។ សូមរង់ចាំ! (Score Blocked)` 
                 });
             }
 
-            // ករណីមានឈ្មោះហើយ: ធ្វើការ UPDATE (យកពិន្ទុចាស់ + pointsToAdd)
-            // created_at នឹងត្រូវបាន Update ទៅ NOW() សម្រាប់ Time Lock បន្ទាប់
+            // 4. Update Score
             await client.query(
                 'UPDATE leaderboard SET score = score + $1, difficulty = $2, created_at = NOW() WHERE username = $3', 
                 [pointsToAdd, difficulty, safeUsername]
@@ -231,19 +233,22 @@ app.post('/api/leaderboard/submit', scoreLimiter, async (req, res) => {
             console.log(`🔄 Score Updated for: ${safeUsername} (+${pointsToAdd})`);
 
         } else {
-            // ករណីឈ្មោះថ្មី: ធ្វើការ INSERT
+            // New user INSERT case 
             await client.query(
-                'INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
+                'INSERT INTO leaderboard(username, score, difficulty, created_at) VALUES($1, $2, $3, NOW())', 
                 [safeUsername, pointsToAdd, difficulty]
             );
             console.log(`🆕 New User Added: ${safeUsername} (${pointsToAdd})`);
         }
 
+        await client.query('COMMIT'); // 5. បញ្ចប់ Transaction ដោយជោគជ័យ
         client.release();
         res.status(200).json({ success: true, message: `បានបូកបន្ថែម ${pointsToAdd} ពិន្ទុ` });
 
     } catch (err) {
-        console.error("DB Error:", err);
+        await client.query('ROLLBACK'); // បោះបង់វិញ ប្រសិនបើមាន Error
+        client.release();
+        console.error("DB TRANSACTION Error:", err);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
