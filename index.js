@@ -1,29 +1,37 @@
 /**
  * =================================================================================================
- * PROJECT:      MATH QUIZ PRO - BACKEND API (ENTERPRISE EDITION v4.2.0)
+ * PROJECT:      BRAINTEST BACKEND API - ULTIMATE EDITION
+ * VERSION:      5.0.0 (STABLE PRODUCTION)
  * AUTHOR:       BRAINTEST TEAM
  * ENVIRONMENT:  Node.js / Express / PostgreSQL / MongoDB
- * DESCRIPTION:
- * នេះគឺជាប្រព័ន្ធ Backend ដ៏មានអានុភាពដែលត្រូវបានរចនាឡើងសម្រាប់ភាពធន់ និងការត្រួតពិនិត្យ (Monitoring)។
- * * * [SYSTEM ARCHITECTURE]
- * 1. Primary DB (PostgreSQL): សម្រាប់រក្សាទុកពិន្ទុ និងទិន្នន័យអ្នកប្រើប្រាស់ (Persistent).
- * 2. Secondary DB (MongoDB):  សម្រាប់ធ្វើ Global Caching លំហាត់ (Permanent Storage).
- * 3. AI Engine (Gemini):      សម្រាប់បង្កើតលំហាត់គណិតវិទ្យា។
- * * * [LOGIC FLOW]
- * - Generate: 25% MongoDB (Cache) / 75% AI (Gemini).
- * - Storage: AI results are saved to MongoDB instantly and kept FOREVER.
- * - Leaderboard: Uses Smart Merge to combine scores for duplicate usernames.
- * =================================================================================================
+ * * [DESCRIPTION]
+ * នេះគឺជាកូដ Backend កម្រិត Enterprise ដែលត្រូវបានរចនាឡើងដើម្បីដោះស្រាយបញ្ហាទាំងអស់របស់អ្នក។
+ * វាមានប្រព័ន្ធ "Self-Healing" សម្រាប់ Database និងប្រព័ន្ធតាមដាន IP ដ៏ច្បាស់លាស់។
+ * * [KEY FEATURES]
+ * 1. HYBRID DATABASE SYSTEM:
+ * - PostgreSQL: សម្រាប់ Leaderboard & Certificate (Persistent Data).
+ * - MongoDB: សម្រាប់ Global Caching (Permanent Storage).
+ * - AUTO-FIX: កូដនឹងជួសជុល MongoDB URL ដោយស្វ័យប្រវត្តិបើអ្នកភ្លេចដាក់ 'mongodb+srv://'.
+ * * 2. INTELLIGENT LOGIC (25/75):
+ * - 25% នៃសំណើនឹងត្រូវបានដកស្រង់ចេញពី Cache (MongoDB)។
+ * - 75% នឹងត្រូវបានបង្កើតថ្មីដោយ AI (Gemini) ហើយរក្សាទុកចូល Cache ភ្លាមៗ។
+ * * 3. ADVANCED IP TRACKING:
+ * - កត់ត្រា IP របស់អ្នកចូលទស្សនាទាំងអស់។
+ * - បង្ហាញ IP នៅក្នុង Console Logs និង Admin Dashboard។
+ * * 4. SMART MERGE LEADERBOARD:
+ * - បូកពិន្ទុបញ្ចូលគ្នាសម្រាប់ឈ្មោះដូចគ្នា។
+ * - លុប ID ស្ទួនចោលដោយស្វ័យប្រវត្តិ។
+ * * =================================================================================================
  */
 
 // =================================================================================================
-// SECTION 1: LIBRARY IMPORTS & SYSTEM CONFIGURATION
+// SECTION 1: LIBRARY IMPORTS & INITIALIZATION
 // =================================================================================================
 
 // 1.1 Load Environment Variables
 require('dotenv').config();
 
-// 1.2 Import Core Libraries
+// 1.2 Import Dependencies
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -32,16 +40,32 @@ const mongoose = require('mongoose');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 
-// 1.3 Global System Configuration Object
+// 1.3 Initialize Express App
+const app = express();
+
+// =================================================================================================
+// SECTION 2: SYSTEM CONFIGURATION & VALIDATION
+// =================================================================================================
+
+// 2.1 Configuration Object
 const CONFIG = {
     PORT: process.env.PORT || 3000,
     ENV: process.env.NODE_ENV || 'development',
+    
+    // Database Configs
     DB_URL: process.env.DATABASE_URL,
     MONGO_URI: process.env.MONGODB_URI,
+    
+    // API Keys
     AI_KEY: process.env.GEMINI_API_KEY,
     AI_MODEL: "gemini-2.5-flash",
-    OWNER_IP: process.env.OWNER_IP || '127.0.0.1',
     IMG_API: process.env.EXTERNAL_IMAGE_API,
+    
+    // Security
+    OWNER_IP: process.env.OWNER_IP || '127.0.0.1',
+    TRUST_PROXY: 1, // Required for Render to see real IPs
+    
+    // Game Rules
     ALLOWED_SCORES: {
         "Easy": 5,
         "Medium": 10,
@@ -50,83 +74,92 @@ const CONFIG = {
     }
 };
 
-// 1.4 System Health State (Live Monitoring Variables)
-const SYSTEM_HEALTH = {
-    postgres: false, 
-    mongo: false,    
+// 2.2 Global State & Statistics (In-Memory)
+const SYSTEM_STATE = {
     startTime: Date.now(),
+    postgresConnected: false,
+    mongoConnected: false,
     totalRequests: 0,
-    totalGamesPlayed: 0,
+    totalGamesGenerated: 0,
     cacheHits: 0,
     aiCalls: 0,
-    lastError: null
+    uniqueIPs: new Set(), // Store unique visitor IPs
+    recentLogs: [] // Store last 50 logs for dashboard
 };
 
 // =================================================================================================
-// SECTION 2: DATABASE CONNECTIONS & LISTENERS
+// SECTION 3: UTILITY FUNCTIONS & LOGGING
 // =================================================================================================
 
 /**
- * 2.1 PostgreSQL Setup (Leaderboard System)
+ * Custom Logger Function
+ * Logs to console and saves to memory for Dashboard viewing.
  */
-const pool = new Pool({
-    connectionString: CONFIG.DB_URL,
-    ssl: { rejectUnauthorized: false }, 
-    connectionTimeoutMillis: 5000,
-    max: 20 // Optimize pool size
-});
+function logSystem(type, message, details = '') {
+    const timestamp = new Date().toLocaleTimeString('km-KH', { hour12: false });
+    let icon = 'ℹ️';
+    
+    switch(type) {
+        case 'INFO': icon = 'ℹ️'; break;
+        case 'SUCCESS': icon = '✅'; break;
+        case 'WARN': icon = '⚠️'; break;
+        case 'ERROR': icon = '❌'; break;
+        case 'DB': icon = '🗄️'; break;
+        case 'AI': icon = '🤖'; break;
+        case 'TRAFFIC': icon = '📡'; break;
+    }
 
-// PostgreSQL Event Listeners
-pool.on('error', (err) => {
-    console.error('❌ PostgreSQL Pool Error:', err.message);
-    SYSTEM_HEALTH.postgres = false;
-    SYSTEM_HEALTH.lastError = `PG Error: ${err.message}`;
-});
+    const logString = `[${timestamp}] ${icon} ${message} ${details}`;
+    console.log(logString);
 
-pool.connect()
-    .then(client => {
-        console.log("✅ PostgreSQL: Connection Established (Leaderboard Ready)");
-        SYSTEM_HEALTH.postgres = true;
-        client.release();
-    })
-    .catch(err => {
-        console.error("❌ PostgreSQL: Initial Connection Failed", err.message);
-        SYSTEM_HEALTH.postgres = false;
-    });
-
-
-/**
- * 2.2 MongoDB Setup (Global Cache System)
- */
-if (CONFIG.MONGO_URI) {
-    mongoose.connect(CONFIG.MONGO_URI, {
-        serverSelectionTimeoutMS: 5000 
-    })
-    .then(() => {
-        console.log("✅ MongoDB: Connection Established (Permanent Cache Ready)");
-        SYSTEM_HEALTH.mongo = true; 
-    })
-    .catch(err => {
-        console.error("❌ MongoDB: Connection Failed", err.message);
-        SYSTEM_HEALTH.mongo = false;
-        SYSTEM_HEALTH.lastError = `Mongo Error: ${err.message}`;
-    });
-
-    // Mongoose Connection Events
-    mongoose.connection.on('connected', () => { SYSTEM_HEALTH.mongo = true; });
-    mongoose.connection.on('error', () => { SYSTEM_HEALTH.mongo = false; });
-    mongoose.connection.on('disconnected', () => { 
-        console.warn("⚠️ MongoDB: Disconnected");
-        SYSTEM_HEALTH.mongo = false; 
-    });
-} else {
-    console.warn("⚠️ WARNING: MONGODB_URI is missing. Caching feature disabled.");
+    // Save to memory (Keep only last 50)
+    SYSTEM_STATE.recentLogs.unshift({ time: timestamp, type, msg: message, det: details });
+    if (SYSTEM_STATE.recentLogs.length > 50) SYSTEM_STATE.recentLogs.pop();
 }
 
-// 2.3 Initialize Database Tables (Schema Migration)
-async function initializeDatabaseTables() {
+/**
+ * MongoDB URL Fixer
+ * Automatically prepends 'mongodb+srv://' if missing.
+ */
+function fixMongoURI(uri) {
+    if (!uri) return null;
+    let fixedURI = uri.trim();
+    if (!fixedURI.startsWith('mongodb://') && !fixedURI.startsWith('mongodb+srv://')) {
+        logSystem('WARN', 'MongoDB URI format incorrect. Auto-fixing...');
+        return `mongodb+srv://${fixedURI}`;
+    }
+    return fixedURI;
+}
+
+// =================================================================================================
+// SECTION 4: DATABASE CONNECTION MANAGERS
+// =================================================================================================
+
+// 4.1 PostgreSQL Manager (Leaderboard)
+const pool = new Pool({
+    connectionString: CONFIG.DB_URL,
+    ssl: { rejectUnauthorized: false },
+    connectionTimeoutMillis: 10000,
+    idleTimeoutMillis: 30000,
+    max: 20
+});
+
+pool.on('connect', () => {
+    // Connection event (silent to reduce noise)
+});
+
+pool.on('error', (err) => {
+    logSystem('ERROR', 'PostgreSQL Pool Error', err.message);
+    SYSTEM_STATE.postgresConnected = false;
+});
+
+async function initPostgres() {
     try {
         const client = await pool.connect();
+        logSystem('SUCCESS', 'PostgreSQL Connected', '(Leaderboard System Ready)');
+        SYSTEM_STATE.postgresConnected = true;
+        
+        // Auto-Create Tables
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -145,62 +178,102 @@ async function initializeDatabaseTables() {
                 request_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
+        logSystem('DB', 'Database Tables Verified/Created');
         client.release();
-        console.log("🛠️ Database Tables: Verified/Created");
     } catch (err) {
-        console.error("❌ DB Init Failed:", err.message);
+        logSystem('ERROR', 'PostgreSQL Init Failed', err.message);
     }
 }
 
+// 4.2 MongoDB Manager (Caching)
+async function initMongo() {
+    const cleanURI = fixMongoURI(CONFIG.MONGO_URI);
+    
+    if (!cleanURI) {
+        logSystem('WARN', 'MongoDB URI missing. Cache disabled.');
+        return;
+    }
+
+    try {
+        await mongoose.connect(cleanURI, {
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+        });
+        logSystem('SUCCESS', 'MongoDB Connected', '(Global Cache Ready)');
+        SYSTEM_STATE.mongoConnected = true;
+    } catch (err) {
+        logSystem('ERROR', 'MongoDB Connection Failed', err.message);
+        SYSTEM_STATE.mongoConnected = false;
+    }
+}
+
+// Mongoose Events
+mongoose.connection.on('connected', () => SYSTEM_STATE.mongoConnected = true);
+mongoose.connection.on('disconnected', () => {
+    if (SYSTEM_STATE.mongoConnected) logSystem('WARN', 'MongoDB Disconnected');
+    SYSTEM_STATE.mongoConnected = false;
+});
+
 // =================================================================================================
-// SECTION 3: MONGOOSE SCHEMAS (PERMANENT STORAGE)
+// SECTION 5: MONGOOSE MODELS (SCHEMA DEFINITIONS)
 // =================================================================================================
 
+// Problem Cache Schema (Permanent Storage - No Expiry)
 const problemCacheSchema = new mongoose.Schema({
     topic: { type: String, required: true, index: true },
     difficulty: { type: String, required: true, index: true },
     raw_text: { type: String, required: true },
-    // 🔥 UPDATED: Removed expires option. Data is now kept forever.
-    createdAt: { type: Date, default: Date.now } 
+    createdAt: { type: Date, default: Date.now }, // No expires option = Forever
+    source_ip: { type: String } // Track who generated this
 });
 
 const MathProblemCache = mongoose.model('MathProblemCache', problemCacheSchema);
 
 // =================================================================================================
-// SECTION 4: EXPRESS CONFIGURATION & MIDDLEWARE
+// SECTION 6: MIDDLEWARE SETUP
 // =================================================================================================
 
-const app = express();
-app.set('trust proxy', 1);
+// 6.1 Trust Proxy (Crucial for Render IP Tracking)
+app.set('trust proxy', CONFIG.TRUST_PROXY);
 
-// Middleware Stack
+// 6.2 CORS & Body Parsing
 app.use(cors());
-app.use(express.json({ limit: '50kb' }));
+app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// 6.3 Static Files
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Request Logger
+// 6.4 Advanced Traffic Logger & IP Tracker
 app.use((req, res, next) => {
-    SYSTEM_HEALTH.totalRequests++;
-    if (req.url.includes('/api/')) {
-        const time = new Date().toLocaleTimeString('km-KH');
-        console.log(`[${time}] 📡 ${req.method} ${req.url} - IP: ${req.ip}`);
+    SYSTEM_STATE.totalRequests++;
+    
+    // Capture Real IP
+    const realIP = req.ip || req.connection.remoteAddress;
+    SYSTEM_STATE.uniqueIPs.add(realIP);
+    
+    // Log API calls only (to keep logs clean)
+    if (req.url.startsWith('/api') || req.url.startsWith('/admin')) {
+        logSystem('TRAFFIC', `${req.method} ${req.url}`, `IP: ${realIP}`);
     }
+    
     next();
 });
 
-// Rate Limiter for AI Generation
+// 6.5 Rate Limiter (AI Endpoints Only)
 const aiLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
-    max: 20, 
-    message: { error: "Rate limit exceeded. Please wait." },
-    skip: (req) => req.ip === CONFIG.OWNER_IP
+    max: 20, // limit each IP to 20 requests per windowMs
+    message: { error: "Rate limit exceeded. Please wait 1 hour." },
+    standardHeaders: true,
+    legacyHeaders: false,
 });
 
 // =================================================================================================
-// SECTION 5: ROOT ROUTE - SYSTEM HEALTH DASHBOARD
+// SECTION 7: API ROUTES - SYSTEM HEALTH & DEBUG
 // =================================================================================================
 
+// 7.1 Root Dashboard (System Status)
 app.get('/', (req, res) => {
     // Calculate Uptime
     const uptime = process.uptime();
@@ -208,243 +281,269 @@ app.get('/', (req, res) => {
     const h = Math.floor(uptime % (3600*24) / 3600);
     const m = Math.floor(uptime % 3600 / 60);
 
-    // Status Indicators
-    const pgStatus = SYSTEM_HEALTH.postgres 
-        ? '<span class="status-indicator online">● CONNECTED</span>' 
-        : '<span class="status-indicator offline">● DISCONNECTED</span>';
-    
-    const mongoStatus = SYSTEM_HEALTH.mongo 
-        ? '<span class="status-indicator online">● CONNECTED</span>' 
-        : '<span class="status-indicator offline">● DISCONNECTED</span>';
-    
-    const aiStatus = CONFIG.AI_KEY 
-        ? '<span class="status-indicator online">● READY</span>' 
-        : '<span class="status-indicator warning">● MISSING KEY</span>';
-
-    // Modern Dashboard HTML
+    // Render HTML Dashboard
     res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>BrainTest System Status</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
-            <style>
-                :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #38bdf8; --green: #10b981; --red: #ef4444; }
-                body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
-                .dashboard { background: var(--card); padding: 40px; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); width: 100%; max-width: 480px; border: 1px solid #334155; }
-                .header { text-align: center; margin-bottom: 30px; }
-                h1 { margin: 0; color: var(--accent); font-size: 28px; font-weight: 800; letter-spacing: -1px; }
-                .subtitle { color: #64748b; font-size: 14px; margin-top: 5px; }
-                
-                .status-grid { display: flex; flex-direction: column; gap: 12px; margin-bottom: 30px; }
-                .status-item { display: flex; justify-content: space-between; align-items: center; padding: 16px; background: #020617; border-radius: 12px; border: 1px solid #1e293b; transition: transform 0.2s; }
-                .status-item:hover { border-color: #475569; transform: translateY(-2px); }
-                
-                .label { font-weight: 600; color: #94a3b8; font-size: 13px; letter-spacing: 0.5px; }
-                .status-indicator { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; }
-                .online { color: var(--green); text-shadow: 0 0 10px rgba(16, 185, 129, 0.3); }
-                .offline { color: var(--red); text-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
-                .warning { color: #f59e0b; }
-                
-                .stats-box { background: rgba(56, 189, 248, 0.1); border-radius: 12px; padding: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 25px; }
-                .stat { text-align: center; }
-                .stat-val { display: block; font-size: 18px; font-weight: 700; color: var(--accent); }
-                .stat-lbl { font-size: 11px; color: #94a3b8; text-transform: uppercase; }
+    <!DOCTYPE html>
+    <html lang="km">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>BrainTest Server Status</title>
+        <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+        <style>
+            :root { --bg: #0f172a; --surface: #1e293b; --primary: #3b82f6; --text: #f8fafc; --success: #10b981; --error: #ef4444; }
+            body { background-color: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; min-height: 100vh; display: flex; justify-content: center; }
+            .dashboard { width: 100%; max-width: 800px; display: grid; gap: 20px; }
+            
+            .card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid #334155; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+            
+            h1 { margin: 0; font-size: 24px; color: var(--primary); display: flex; align-items: center; gap: 10px; }
+            h2 { margin: 0 0 15px 0; font-size: 16px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+            
+            .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+            .status-item { background: #020617; padding: 15px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; }
+            .status-label { font-weight: 600; font-size: 14px; color: #cbd5e1; }
+            .status-badge { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; padding: 4px 8px; border-radius: 4px; }
+            .online { background: rgba(16, 185, 129, 0.2); color: var(--success); }
+            .offline { background: rgba(239, 68, 68, 0.2); color: var(--error); }
+            
+            .log-window { background: #000; font-family: 'JetBrains Mono', monospace; font-size: 12px; height: 300px; overflow-y: auto; padding: 15px; border-radius: 12px; color: #a5b4fc; }
+            .log-entry { margin-bottom: 5px; border-bottom: 1px solid #1e1e24; padding-bottom: 2px; }
+            
+            .btn { display: inline-block; background: var(--primary); color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; text-align: center; }
+            .btn:hover { filter: brightness(1.1); }
 
-                .btn { display: flex; justify-content: center; align-items: center; gap: 10px; width: 100%; padding: 16px; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: white; text-decoration: none; border-radius: 12px; font-weight: 700; transition: all 0.2s; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); }
-                .btn:hover { transform: scale(1.02); box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4); }
-                
-                .footer { margin-top: 20px; text-align: center; font-size: 11px; color: #475569; }
-            </style>
-        </head>
-        <body>
-            <div class="dashboard">
-                <div class="header">
-                    <h1>SYSTEM STATUS</h1>
-                    <div class="subtitle">v4.2.0 • Hybrid Database Engine</div>
-                </div>
-                
-                <div class="stats-box">
-                    <div class="stat">
-                        <span class="stat-val">${d}d ${h}h ${m}m</span>
-                        <span class="stat-lbl">Uptime</span>
-                    </div>
-                    <div class="stat">
-                        <span class="stat-val">${SYSTEM_HEALTH.totalRequests}</span>
-                        <span class="stat-lbl">Total Requests</span>
-                    </div>
-                </div>
-
-                <div class="status-grid">
-                    <div class="status-item">
-                        <span class="label">LEADERBOARD (PG)</span>
-                        ${pgStatus}
-                    </div>
-                    <div class="status-item">
-                        <span class="label">CACHE (MONGO)</span>
-                        ${mongoStatus}
-                    </div>
-                    <div class="status-item">
-                        <span class="label">AI ENGINE (GEMINI)</span>
-                        ${aiStatus}
-                    </div>
-                </div>
-                
-                <a href="/admin/requests" class="btn">
-                    <span>🔐</span> Access Admin Panel
-                </a>
-
-                <div class="footer">
-                    Auto-refreshing every 30s • Secure Connection
+            .stats-row { display: flex; justify-content: space-between; margin-top: 10px; font-size: 13px; color: #64748b; }
+        </style>
+    </head>
+    <body>
+        <div class="dashboard">
+            <div class="card">
+                <h1>🚀 BRAINTEST SERVER v5.0.0</h1>
+                <div class="stats-row">
+                    <span>Uptime: ${d}d ${h}h ${m}m</span>
+                    <span>Env: ${CONFIG.ENV}</span>
                 </div>
             </div>
-            
-            <script>
-                setTimeout(() => window.location.reload(), 30000);
-            </script>
-        </body>
-        </html>
+
+            <div class="card">
+                <h2>System Health</h2>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="status-label">PostgreSQL</span>
+                        <span class="status-badge ${SYSTEM_STATE.postgresConnected ? 'online' : 'offline'}">
+                            ${SYSTEM_STATE.postgresConnected ? 'CONNECTED' : 'FAILED'}
+                        </span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">MongoDB</span>
+                        <span class="status-badge ${SYSTEM_STATE.mongoConnected ? 'online' : 'offline'}">
+                            ${SYSTEM_STATE.mongoConnected ? 'CONNECTED' : 'FAILED'}
+                        </span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">AI Engine</span>
+                        <span class="status-badge ${CONFIG.AI_KEY ? 'online' : 'offline'}">
+                            ${CONFIG.AI_KEY ? 'READY' : 'MISSING KEY'}
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Live Statistics</h2>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="status-label">Unique Visitors</span>
+                        <span style="color:white; font-weight:bold;">${SYSTEM_STATE.uniqueIPs.size}</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Games Played</span>
+                        <span style="color:white; font-weight:bold;">${SYSTEM_STATE.totalGamesGenerated}</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Cache Hits</span>
+                        <span style="color:#38bdf8; font-weight:bold;">${SYSTEM_STATE.cacheHits}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Real-time Logs</h2>
+                <div class="log-window">
+                    ${SYSTEM_STATE.recentLogs.map(l => 
+                        `<div class="log-entry"><span style="color:#64748b">[${l.time}]</span> <span style="color:#e2e8f0">${l.msg}</span> <span style="color:#94a3b8">${l.det}</span></div>`
+                    ).join('')}
+                </div>
+            </div>
+
+            <a href="/admin/requests" class="btn">🔐 ACCESS ADMIN PANEL</a>
+        </div>
+        <script>
+            // Auto-refresh every 10 seconds
+            setTimeout(() => window.location.reload(), 10000);
+        </script>
+    </body>
+    </html>
     `);
 });
 
+// 7.2 Debug IP Route
+// Helps you see exactly what IP Render is forwarding
+app.get('/api/debug-ip', (req, res) => {
+    res.json({
+        ip: req.ip,
+        remoteAddress: req.connection.remoteAddress,
+        xForwardedFor: req.headers['x-forwarded-for'],
+        note: "This IP is what the server uses for Rate Limiting & Leaderboard."
+    });
+});
+
 // =================================================================================================
-// SECTION 6: API ROUTES - CORE LOGIC (25% CACHE / 75% AI)
+// SECTION 8: CORE GAME LOGIC (25% CACHE / 75% AI)
 // =================================================================================================
 
 app.post('/api/generate-problem', aiLimiter, async (req, res) => {
-    try {
-        const { prompt, topic, difficulty } = req.body;
+    const { prompt, topic, difficulty } = req.body;
 
-        // 6.1 Validation
-        if (!prompt || !topic || !difficulty) {
-            return res.status(400).json({ error: "Missing required fields." });
-        }
+    // 8.1 Validation
+    if (!prompt || !topic || !difficulty) {
+        return res.status(400).json({ error: "Missing prompt, topic, or difficulty" });
+    }
 
-        // 6.2 Stats Update
-        SYSTEM_HEALTH.totalGamesPlayed++;
+    // 8.2 Update Stats
+    SYSTEM_STATE.totalGamesGenerated++;
 
-        // 6.3 Hybrid Logic Decision
-        const CACHE_CHANCE = 0.25; // 25% Chance
-        const tryCache = Math.random() < CACHE_CHANCE;
+    // 8.3 Determine Strategy
+    const CACHE_CHANCE = 0.25; // 25% chance to use cache
+    const useCache = Math.random() < CACHE_CHANCE;
+    
+    let finalProblem = null;
+    let source = "ai";
+
+    // --- STRATEGY A: ATTEMPT CACHE (MongoDB) ---
+    if (useCache && SYSTEM_STATE.mongoConnected) {
+        logSystem('DB', `Strategy 25%: Checking MongoDB for ${topic}...`);
         
-        let problemData = null;
-        let source = "ai";
+        try {
+            const cachedDocs = await MathProblemCache.aggregate([
+                { $match: { topic: topic, difficulty: difficulty } },
+                { $sample: { size: 1 } }
+            ]);
 
-        // --- STRATEGY A: TRY MONGODB CACHE ---
-        if (tryCache && SYSTEM_HEALTH.mongo) {
-            console.log(`🎲 Strategy: Checking MongoDB (25%) for ${topic}...`);
-            try {
-                const cached = await MathProblemCache.aggregate([
-                    { $match: { topic: topic, difficulty: difficulty } },
-                    { $sample: { size: 1 } }
-                ]);
-
-                if (cached.length > 0) {
-                    problemData = cached[0].raw_text;
-                    source = "cache";
-                    SYSTEM_HEALTH.cacheHits++;
-                    console.log("✅ CACHE HIT: Served from MongoDB.");
-                } else {
-                    console.log("⚠️ CACHE MISS: Empty result.");
-                }
-            } catch (mongoErr) {
-                console.error("Cache Read Error:", mongoErr.message);
+            if (cachedDocs.length > 0) {
+                finalProblem = cachedDocs[0].raw_text;
+                source = "cache";
+                SYSTEM_STATE.cacheHits++;
+                logSystem('SUCCESS', 'Cache Hit', '(Served from MongoDB)');
+            } else {
+                logSystem('INFO', 'Cache Miss', '(MongoDB empty for this topic)');
             }
+        } catch (e) {
+            logSystem('WARN', 'Cache Read Error', e.message);
         }
+    }
 
-        // --- STRATEGY B: CALL AI API (Fallback) ---
-        if (!problemData) {
-            console.log("🤖 Strategy: Calling Gemini AI (75% or Fallback)...");
-            SYSTEM_HEALTH.aiCalls++;
+    // --- STRATEGY B: GENERATE NEW (AI) ---
+    if (!finalProblem) {
+        logSystem('AI', 'Generating with Gemini', '(75% or Fallback)');
+        SYSTEM_STATE.aiCalls++;
 
+        try {
             const genAI = new GoogleGenerativeAI(CONFIG.AI_KEY);
             const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
             
             const result = await model.generateContent(prompt);
             const response = await result.response;
-            problemData = response.text();
+            finalProblem = response.text();
 
             // --- STRATEGY C: SAVE TO CACHE (PERMANENT) ---
-            if (problemData && problemData.includes("[PROBLEM]") && SYSTEM_HEALTH.mongo) {
-                // Background save (no await)
+            if (finalProblem && finalProblem.includes("[PROBLEM]") && SYSTEM_STATE.mongoConnected) {
+                // Async save - don't wait
                 MathProblemCache.create({
-                    topic: topic,
-                    difficulty: difficulty,
-                    raw_text: problemData
-                }).catch(e => console.error("Cache Write Error:", e.message));
+                    topic,
+                    difficulty,
+                    raw_text: finalProblem,
+                    source_ip: req.ip
+                }).catch(err => logSystem('WARN', 'Cache Write Failed', err.message));
                 
-                console.log("💾 SAVED: Stored in MongoDB Forever.");
+                logSystem('DB', 'Saved new problem to MongoDB', '(Forever)');
             }
+
+        } catch (err) {
+            logSystem('ERROR', 'AI Generation Failed', err.message);
+            return res.status(500).json({ error: "Failed to generate problem" });
         }
-
-        res.json({ success: true, text: problemData, source: source });
-
-    } catch (error) {
-        console.error("❌ Generation Error:", error);
-        SYSTEM_HEALTH.lastError = error.message;
-        res.status(500).json({ error: "Failed to generate problem." });
     }
+
+    res.json({ text: finalProblem, source });
 });
 
 // =================================================================================================
-// SECTION 7: LEADERBOARD SYSTEM (POSTGRESQL)
+// SECTION 9: LEADERBOARD SYSTEM (POSTGRESQL - SMART MERGE)
 // =================================================================================================
 
+// 9.1 Submit Score
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
 
-    // 7.1 Input Validation
-    if (!username || typeof score !== 'number' || !difficulty) {
-        return res.status(400).json({ success: false, message: "Invalid Input" });
+    // Validate Input
+    if (!username || typeof score !== 'number' || !difficulty) return res.status(400).json({ message: "Bad Request" });
+
+    // Anti-Cheat
+    const maxScore = CONFIG.ALLOWED_SCORES[difficulty] || 0;
+    if (score > maxScore) {
+        logSystem('WARN', `Cheating attempt blocked: ${username} score ${score}`);
+        return res.status(403).json({ message: "Score rejected" });
     }
 
-    // 7.2 Anti-Cheat Validation
-    const limit = CONFIG.ALLOWED_SCORES[difficulty] || 0;
-    if (score > limit) {
-        return res.status(403).json({ success: false, message: "Score Rejected (Suspicious)" });
-    }
-
-    // 7.3 Smart Merge Logic
     try {
         const client = await pool.connect();
         
-        // Find existing records
-        const checkQuery = 'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC';
-        const { rows } = await client.query(checkQuery, [username, difficulty]);
+        // --- SMART MERGE LOGIC ---
+        // 1. Find all records for this user & difficulty
+        const checkRes = await client.query(
+            'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC',
+            [username, difficulty]
+        );
 
-        if (rows.length > 0) {
-            // MERGE: Sum all scores
-            const totalScore = rows.reduce((sum, r) => sum + r.score, 0) + score;
-            const targetId = rows[0].id;
-
-            // Update Primary Record
-            await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [totalScore, targetId]);
+        if (checkRes.rows.length > 0) {
+            // Existing User Found
+            const rows = checkRes.rows;
+            const targetId = rows[0].id; // Keep oldest ID
             
-            // Cleanup Duplicates
+            // Sum all scores (previous + new)
+            const oldTotal = rows.reduce((sum, r) => sum + r.score, 0);
+            const newTotal = oldTotal + score;
+
+            // Update Target Record
+            await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [newTotal, targetId]);
+            logSystem('DB', `Merged Score for ${username}`, `${oldTotal} + ${score} = ${newTotal}`);
+
+            // Cleanup Duplicates (if any)
             if (rows.length > 1) {
                 const duplicateIds = rows.slice(1).map(r => r.id);
                 await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [duplicateIds]);
             }
-            console.log(`🔄 Merged Score for ${username}: New Total ${totalScore}`);
         } else {
-            // INSERT NEW
+            // New User Insert
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
                 [username, score, difficulty, req.ip]
             );
-            console.log(`🆕 New Leaderboard Entry: ${username}`);
+            logSystem('DB', `New Leaderboard Entry: ${username}`);
         }
 
         client.release();
-        res.status(201).json({ success: true, message: "Score Saved" });
+        res.status(201).json({ success: true });
 
     } catch (err) {
-        console.error("Leaderboard Error:", err);
+        logSystem('ERROR', 'Leaderboard Submit Failed', err.message);
         res.status(500).json({ success: false });
     }
 });
 
+// 9.2 Get Top Scores
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -463,26 +562,24 @@ app.get('/api/leaderboard/top', async (req, res) => {
 });
 
 // =================================================================================================
-// SECTION 8: ADMIN & CERTIFICATE SYSTEM
+// SECTION 10: ADMIN PANEL & CERTIFICATES
 // =================================================================================================
 
-// 8.1 Submit Request
+// 10.1 Certificate Request
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
     try {
         const client = await pool.connect();
-        await client.query(
-            'INSERT INTO certificate_requests (username, score) VALUES ($1, $2)', 
-            [username, score]
-        );
+        await client.query('INSERT INTO certificate_requests (username, score) VALUES ($1, $2)', [username, score]);
         client.release();
-        res.json({ success: true, message: "Request Sent" });
+        logSystem('INFO', `Cert Request: ${username}`, `Score: ${score}`);
+        res.json({ success: true });
     } catch (err) {
         res.status(500).json({ success: false });
     }
 });
 
-// 8.2 Generate Certificate Image
+// 10.2 Generate Certificate Image
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -490,40 +587,50 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         client.release();
 
         if (result.rows.length === 0) return res.status(404).send("Not Found");
-        
+
         const { username, score } = result.rows[0];
         const dateStr = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-        const msg = `Score: ${score}%0A%0ADate Issued: ${dateStr}%0A%0AWith immense pride... Presented by: braintest.fun`;
+        const message = `Score: ${score}%0A%0ADate Issued: ${dateStr}%0A%0AWith immense pride... Presented by: braintest.fun`;
         
         const finalUrl = CONFIG.IMG_API + 
             `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodeURIComponent(username.toUpperCase())}&txt-fit=max&w=1800` +
-            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodeURIComponent(msg)}&mark-w=1600`;
-            
+            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodeURIComponent(message)}&mark-w=1600`;
+
         res.redirect(finalUrl);
-    } catch (err) { res.status(500).send("Gen Error"); }
+    } catch (err) {
+        res.status(500).send("Generation Error");
+    }
 });
 
-// 8.3 Admin Dashboard UI (Server-Side Rendered)
+// 10.3 Delete Request
+app.delete('/admin/delete-request/:id', async (req, res) => {
+    try {
+        const client = await pool.connect();
+        await client.query('DELETE FROM certificate_requests WHERE id = $1', [req.params.id]);
+        client.release();
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false });
+    }
+});
+
+// 10.4 ADMIN DASHBOARD HTML (Server Side Rendered)
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
         const result = await client.query('SELECT * FROM certificate_requests ORDER BY request_date DESC LIMIT 100');
         client.release();
 
-        let rows = result.rows.map(r => `
+        const rows = result.rows.map(r => `
             <tr id="row-${r.id}">
-                <td><span class="id-badge">#${r.id}</span></td>
-                <td>
-                    <div class="user-cell">
-                        <span class="uname">${r.username}</span>
-                    </div>
-                </td>
-                <td><span class="score-badge">${r.score}</span></td>
-                <td class="date-cell">${new Date(r.request_date).toLocaleDateString()}</td>
+                <td><span class="badge-id">#${r.id}</span></td>
+                <td><div class="user-row"><span class="uname">${r.username}</span></div></td>
+                <td><span class="badge-score">${r.score}</span></td>
+                <td>${new Date(r.request_date).toLocaleDateString()}</td>
                 <td>
                     <div class="actions">
-                        <a href="/admin/generate-cert/${r.id}" target="_blank" class="btn-icon print" title="Generate">🖨️</a>
-                        <button onclick="del(${r.id})" class="btn-icon del" title="Reject">🗑️</button>
+                        <a href="/admin/generate-cert/${r.id}" target="_blank" class="btn-icon print" title="Print">🖨️</a>
+                        <button onclick="del(${r.id})" class="btn-icon del" title="Delete">🗑️</button>
                     </div>
                 </td>
             </tr>
@@ -533,107 +640,70 @@ app.get('/admin/requests', async (req, res) => {
             <!DOCTYPE html>
             <html>
             <head>
-                <title>Admin Control</title>
+                <title>Admin Panel</title>
                 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
                 <style>
-                    body { font-family: 'Inter', sans-serif; background: #f8fafc; color: #1e293b; padding: 40px; margin: 0; }
-                    .container { max-width: 1000px; margin: 0 auto; background: white; padding: 0; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); overflow: hidden; }
-                    
-                    .header { background: #1e293b; color: white; padding: 24px 32px; display: flex; justify-content: space-between; align-items: center; }
-                    .header h1 { margin: 0; font-size: 20px; font-weight: 600; }
-                    .count { background: rgba(255,255,255,0.1); padding: 4px 12px; border-radius: 20px; font-size: 12px; }
-
+                    body { font-family: 'Inter', sans-serif; background: #f1f5f9; padding: 40px; margin: 0; color: #334155; }
+                    .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); overflow: hidden; }
+                    .header { background: #1e293b; color: white; padding: 24px; display: flex; justify-content: space-between; align-items: center; }
+                    .header h1 { margin: 0; font-size: 18px; }
                     table { width: 100%; border-collapse: collapse; }
-                    th { background: #f1f5f9; color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 16px 24px; text-align: left; border-bottom: 1px solid #e2e8f0; }
-                    td { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; font-size: 14px; vertical-align: middle; }
-                    tr:hover { background: #f8fafc; }
-
-                    .id-badge { font-family: monospace; color: #94a3b8; font-size: 12px; }
+                    th { background: #f8fafc; color: #64748b; font-size: 12px; text-transform: uppercase; padding: 16px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+                    td { padding: 16px; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
+                    .badge-id { font-family: monospace; color: #94a3b8; }
                     .uname { font-weight: 600; color: #0f172a; }
-                    .score-badge { background: #dbeafe; color: #1e40af; padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 12px; }
-                    
+                    .badge-score { background: #dbeafe; color: #1e40af; padding: 4px 8px; border-radius: 6px; font-weight: 600; font-size: 12px; }
                     .actions { display: flex; gap: 8px; }
-                    .btn-icon { width: 32px; height: 32px; display: flex; alignItems: center; justify-content: center; border-radius: 8px; border: none; cursor: pointer; text-decoration: none; font-size: 14px; transition: all 0.2s; }
-                    .print { background: #3b82f6; color: white; display: flex; align-items: center; justify-content: center;}
+                    .btn-icon { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; border: none; cursor: pointer; text-decoration: none; transition: 0.2s; }
+                    .print { background: #3b82f6; color: white; }
                     .del { background: #fee2e2; color: #ef4444; }
                     .del:hover { background: #ef4444; color: white; }
-
                 </style>
             </head>
             <body>
                 <div class="container">
                     <div class="header">
-                        <h1>🛡️ Admin Panel</h1>
-                        <span class="count">${result.rows.length} Requests</span>
+                        <h1>🛡️ Admin Dashboard</h1>
+                        <span style="background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; font-size:12px;">${result.rows.length} Pending</span>
                     </div>
                     <table>
-                        <thead>
-                            <tr>
-                                <th width="80">ID</th>
-                                <th>Candidate</th>
-                                <th width="100">Score</th>
-                                <th width="150">Date</th>
-                                <th width="120">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${rows || '<tr><td colspan="5" style="text-align:center; padding: 40px; color: #94a3b8;">No pending requests found.</td></tr>'}
-                        </tbody>
+                        <thead><tr><th>ID</th><th>User</th><th>Score</th><th>Date</th><th>Action</th></tr></thead>
+                        <tbody>${rows || '<tr><td colspan="5" style="text-align:center; padding:40px;">No Data</td></tr>'}</tbody>
                     </table>
                 </div>
                 <script>
                     async function del(id) {
-                        if(!confirm('⚠️ Are you sure you want to permanently delete Request #' + id + '?')) return;
-                        
-                        const row = document.getElementById('row-'+id);
-                        row.style.opacity = '0.5';
-                        
-                        try {
-                            const res = await fetch('/admin/delete-request/'+id, {method:'DELETE'});
-                            const data = await res.json();
-                            
-                            if(data.success) {
-                                row.remove();
-                            } else {
-                                alert('Error: ' + data.message);
-                                row.style.opacity = '1';
-                            }
-                        } catch (e) {
-                            alert('Network Error');
-                            row.style.opacity = '1';
-                        }
+                        if(!confirm('Delete Request #'+id+'?')) return;
+                        document.getElementById('row-'+id).style.opacity = 0.5;
+                        await fetch('/admin/delete-request/'+id, {method:'DELETE'});
+                        document.getElementById('row-'+id).remove();
                     }
                 </script>
             </body>
             </html>
         `);
-    } catch (err) { 
-        console.error(err);
-        res.status(500).send("Admin Panel Error"); 
-    }
-});
 
-app.delete('/admin/delete-request/:id', async (req, res) => {
-    try {
-        const client = await pool.connect();
-        await client.query('DELETE FROM certificate_requests WHERE id = $1', [req.params.id]);
-        client.release();
-        res.json({ success: true });
-    } catch (e) { res.status(500).json({ success: false }); }
+    } catch (e) { res.status(500).send("Error"); }
 });
 
 // =================================================================================================
-// SECTION 9: STARTUP
+// SECTION 11: SERVER STARTUP SEQUENCE
 // =================================================================================================
 
-async function start() {
+async function startServer() {
     console.clear();
-    console.log("🚀 STARTING BRAINTEST SERVER v4.2.0...");
-    await initializeDatabaseTables();
+    console.log("🚀 STARTING SERVER v5.0.0...");
+    
+    // Connect Databases
+    await initPostgres();
+    await initMongo();
+
+    // Start Listener
     app.listen(CONFIG.PORT, () => {
-        console.log(`✅ SERVER RUNNING ON PORT ${CONFIG.PORT}`);
-        console.log(`👉 CHECK STATUS: http://localhost:${CONFIG.PORT}`);
+        logSystem('SUCCESS', `Server Running on Port ${CONFIG.PORT}`);
+        logSystem('INFO', `Status Page: http://localhost:${CONFIG.PORT}`);
     });
 }
 
-start();
+// Start the engine
+startServer();
