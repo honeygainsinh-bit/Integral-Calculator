@@ -1,7 +1,7 @@
 {
   "name": "braintest-hybrid-backend",
   "version": "6.0.0",
-  "description": "Ultimate Hybrid Engine: PostgreSQL (Leaderboard) + MongoDB (Cache) + Gemini AI",
+  "description": "Hybrid Engine: PostgreSQL + MongoDB + Gemini AI",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
