@@ -1,73 +1,150 @@
 /**
- * =========================================================================================
- * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.4 (FINAL STABLE: Merge Scores & Auto-Cleanup)
- * DESCRIPTION: 
- * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
- * - ភ្ជាប់ជាមួយ PostgreSQL Database
- * - FIX: ដោះស្រាយបញ្ហាឈ្មោះស្ទួន ដោយធ្វើការបូកពិន្ទុបញ្ចូលគ្នា (Merge) មុននឹងលុបចោល
- * - ធានាថាពិន្ទុមិនបាត់បង់ និងមិនបូកខុស (No Score Inflation)
- * =========================================================================================
+ * =================================================================================================
+ * PROJECT:      MATH QUIZ PRO - ULTIMATE HYBRID BACKEND
+ * VERSION:      6.0.0 (PRODUCTION READY)
+ * AUTHOR:       BRAINTEST TEAM
+ * ENGINE:       Node.js + Express + PostgreSQL + MongoDB + Gemini AI
+ * * [SYSTEM ARCHITECTURE]
+ * 1. PRIMARY DB (PostgreSQL):
+ * - រក្សាទុក Leaderboard (ពិន្ទុអ្នកលេង)
+ * - រក្សាទុក Certificate Requests (សំណើលិខិតសរសើរ)
+ * - ប្រើប្រាស់ Smart Merge Logic ដើម្បីការពារឈ្មោះស្ទួន
+ * * 2. CACHE DB (MongoDB):
+ * - រក្សាទុកលំហាត់ដែល AI បង្កើតរួច (Permanent Cache)
+ * - ជួយកាត់បន្ថយការហៅទៅ Gemini API
+ * * 3. AI ENGINE (Google Gemini):
+ * - បង្កើតលំហាត់គណិតវិទ្យាថ្មីៗនៅពេល Cache រកមិនឃើញ
+ * =================================================================================================
  */
 
-// --- 1. LOAD DEPENDENCIES (នាំចូល Library ចាំបាច់) ---
+// =================================================================================================
+// SECTION 1: LIBRARY IMPORTS & CONFIGURATION
+// =================================================================================================
+
+// 1.1 Load Environment Variables
 require('dotenv').config();
+
+// 1.2 Import Dependencies
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const { Pool } = require('pg');           // សម្រាប់ PostgreSQL
+const mongoose = require('mongoose');     // សម្រាប់ MongoDB
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
-const { Pool } = require('pg');
 
-// --- 2. SERVER CONFIGURATION (កំណត់រចនាសម្ព័ន្ធ) ---
-const app = express();
-const port = process.env.PORT || 3000;
-const MODEL_NAME = "gemini-2.5-flash"; // AI Model
+// 1.3 System Configuration Object
+const CONFIG = {
+    PORT: process.env.PORT || 3000,
+    ENV: process.env.NODE_ENV || 'development',
+    
+    // Database Credentials
+    POSTGRES_URL: process.env.DATABASE_URL,
+    MONGO_URI: process.env.MONGODB_URI,
+    
+    // AI Configuration
+    GEMINI_KEY: process.env.GEMINI_API_KEY,
+    AI_MODEL: "gemini-2.5-flash",
+    
+    // Security & Logic
+    IMG_API: process.env.EXTERNAL_IMAGE_API,
+    OWNER_IP: process.env.OWNER_IP || '127.0.0.1',
+    CACHE_RATE: 0.25, // 25% Chance to use Cache, 75% use AI
+    
+    // Score Validation
+    ALLOWED_SCORES: {
+        "Easy": 5,
+        "Medium": 10,
+        "Hard": 15,
+        "Very Hard": 20
+    }
+};
 
-// សម្រាប់ការតាមដានស្ថិតិ (In-memory stats)
-let totalPlays = 0;
-const uniqueVisitors = new Set();
+// 1.4 System State Monitoring (Global Variables)
+const SYSTEM_STATE = {
+    startTime: Date.now(),
+    postgresConnected: false,
+    mongoConnected: false,
+    totalRequests: 0,
+    totalGamesGenerated: 0,
+    cacheHits: 0,
+    aiCalls: 0,
+    visitors: new Set(),
+    logs: [] // Stores recent 50 logs for dashboard
+};
 
-// Middleware Setup
-app.set('trust proxy', 1); // ចាំបាច់សម្រាប់ Render/Heroku
-app.use(cors()); // អនុញ្ញាតអោយ Web ផ្សេងៗហៅ API បាន
-app.use(express.json()); // អាចអាន JSON Body បាន
-
-// Logger Middleware (កត់ត្រារាល់ការហៅចូល)
-app.use((req, res, next) => {
-    const timestamp = new Date().toLocaleTimeString('km-KH');
-    console.log(`[${timestamp}] 📡 REQUEST: ${req.method} ${req.path} - IP: ${req.ip}`);
-    next();
-});
-
-// --- 3. DATABASE CONNECTION (ការភ្ជាប់ទិន្នន័យ) ---
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false } // សម្រាប់ Cloud Database
-});
+// =================================================================================================
+// SECTION 2: LOGGING & UTILITIES
+// =================================================================================================
 
 /**
- * មុខងារ: initializeDatabase
- * តួនាទី: បង្កើត Table ដោយស្វ័យប្រវត្តិប្រសិនបើវាមិនទាន់មាន
+ * មុខងារកត់ត្រា Log ចូលក្នុង Console និង Memory សម្រាប់ Dashboard
  */
-async function initializeDatabase() {
-    console.log("... ⚙️ កំពុងពិនិត្យ Database Tables ...");
-    try {
-        const client = await pool.connect();
+function logSystem(type, message, details = '') {
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    let icon = 'ℹ️';
 
-        // 1. បង្កើត Table Leaderboard (សម្រាប់ពិន្ទុទូទៅ)
+    switch(type) {
+        case 'DB': icon = '🗄️'; break;
+        case 'AI': icon = '🤖'; break;
+        case 'ERR': icon = '❌'; break;
+        case 'OK': icon = '✅'; break;
+        case 'NET': icon = '📡'; break;
+    }
+
+    // Print to Console
+    console.log(`[${time}] ${icon} [${type}] ${message} ${details ? '| ' + details : ''}`);
+
+    // Save to Memory (For Dashboard)
+    SYSTEM_STATE.logs.unshift({ time, type, msg: message, det: details });
+    if (SYSTEM_STATE.logs.length > 50) SYSTEM_STATE.logs.pop();
+}
+
+/**
+ * មុខងារសម្អាត MongoDB URI (ការពារកំហុស Protocol)
+ */
+function cleanMongoURI(uri) {
+    if (!uri) return null;
+    let clean = uri.trim();
+    if (!clean.startsWith('mongodb://') && !clean.startsWith('mongodb+srv://')) {
+        logSystem('WARN', 'Fixing MongoDB URI', 'Added mongodb+srv:// prefix');
+        return `mongodb+srv://${clean}`;
+    }
+    return clean;
+}
+
+// =================================================================================================
+// SECTION 3: DATABASE CONNECTIONS
+// =================================================================================================
+
+// 3.1 PostgreSQL Connection (Leaderboard & Certificates)
+const pgPool = new Pool({
+    connectionString: CONFIG.POSTGRES_URL,
+    ssl: { rejectUnauthorized: false }, // Required for Cloud DBs like Render/Neon
+    connectionTimeoutMillis: 5000
+});
+
+pgPool.on('error', (err) => {
+    SYSTEM_STATE.postgresConnected = false;
+    logSystem('ERR', 'PostgreSQL Error', err.message);
+});
+
+async function initPostgres() {
+    try {
+        const client = await pgPool.connect();
+        SYSTEM_STATE.postgresConnected = true;
+        
+        // Auto-Create Tables
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(50) NOT NULL,
                 score INTEGER NOT NULL,
                 difficulty VARCHAR(20) NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                ip_address VARCHAR(45),
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
-        `);
-
-        // 2. បង្កើត Table Certificate Requests (សម្រាប់សំណើលិខិតសរសើរ)
-        await client.query(`
             CREATE TABLE IF NOT EXISTS certificate_requests (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(100) NOT NULL,
@@ -76,168 +153,318 @@ async function initializeDatabase() {
                 request_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
-
-        console.log("✅ Database System: Online & Ready.");
+        logSystem('OK', 'PostgreSQL Ready', 'Tables Verified');
         client.release();
     } catch (err) {
-        console.error("❌ Database Initialization Failed:", err.message);
+        logSystem('ERR', 'PostgreSQL Failed', err.message);
     }
 }
 
-// --- 4. SECURITY: RATE LIMITER (កំណត់ចំនួនប្រើប្រាស់) ---
-const aiLimiter = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, // 8 ម៉ោង
-    max: 10, // អនុញ្ញាត ១០ ដង
-    message: { 
-        error: "Rate limit exceeded", 
-        message: "⚠️ សូមអភ័យទោស! អ្នកបានប្រើប្រាស់សិទ្ធិបង្កើតលំហាត់អស់ហើយសម្រាប់ថ្ងៃនេះ។" 
-    },
-    keyGenerator: (req) => req.ip, // កំណត់តាម IP
-    skip: (req) => req.ip === process.env.OWNER_IP // លើកលែងអោយម្ចាស់ Server
+// 3.2 MongoDB Connection (Caching Only)
+async function initMongo() {
+    const uri = cleanMongoURI(CONFIG.MONGO_URI);
+    if (!uri) {
+        logSystem('WARN', 'MongoDB URI Missing', 'Caching Disabled');
+        return;
+    }
+
+    try {
+        await mongoose.connect(uri, {
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+        });
+        SYSTEM_STATE.mongoConnected = true;
+        logSystem('OK', 'MongoDB Connected', 'Cache System Ready');
+    } catch (err) {
+        SYSTEM_STATE.mongoConnected = false;
+        logSystem('ERR', 'MongoDB Failed', err.message);
+    }
+}
+
+// MongoDB Event Listeners
+mongoose.connection.on('connected', () => SYSTEM_STATE.mongoConnected = true);
+mongoose.connection.on('disconnected', () => SYSTEM_STATE.mongoConnected = false);
+
+// =================================================================================================
+// SECTION 4: MONGODB MODELS (SCHEMA)
+// =================================================================================================
+
+const problemSchema = new mongoose.Schema({
+    topic: { type: String, required: true, index: true },
+    difficulty: { type: String, required: true, index: true },
+    raw_text: { type: String, required: true }, // JSON String from AI
+    source_ip: String,
+    createdAt: { type: Date, default: Date.now }
 });
 
-// Static Files (រូបភាព/HTML ក្នុង Folder public)
+const MathCache = mongoose.model('MathProblemCache', problemSchema);
+
+// =================================================================================================
+// SECTION 5: MIDDLEWARE CONFIGURATION
+// =================================================================================================
+
+const app = express();
+
+// Trust Proxy for Render
+app.set('trust proxy', 1);
+
+// Standard Middleware
+app.use(cors());
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- 5. ROUTES: GENERAL (ផ្លូវទូទៅ) ---
-
-// Home Route
-app.get('/', (req, res) => {
-    res.status(200).send(`
-        <div style="font-family: 'Hanuman', sans-serif; text-align: center; padding-top: 50px; background-color: #f8fafc; height: 100vh;">
-            <h1 style="color: #16a34a; font-size: 3rem;">Math Quiz API 🟢</h1>
-            <p style="font-size: 1.2rem; color: #64748b;">ប្រព័ន្ធគ្រប់គ្រងទិន្នន័យ និងបង្កើតវិញ្ញាបនបត្រស្វ័យប្រវត្តិ</p>
-            <div style="margin-top: 30px;">
-                <a href="/admin/requests" style="background: #0284c7; color: white; padding: 15px 30px; text-decoration: none; border-radius: 50px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                    👮‍♂️ ចូលទៅកាន់ Admin Panel
-                </a>
-            </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2.4 (Score Merge Active)</p>
-        </div>
-    `);
-});
-
-// Stats Route
-app.get('/stats', (req, res) => {
-    res.json({ 
-        status: "active",
-        total_plays: totalPlays, 
-        unique_visitors: uniqueVisitors.size,
-        uptime: process.uptime()
-    });
-});
-
-// --- 6. ROUTES: API FUNCTIONALITY (មុខងារស្នូល) ---
-
-// A. បង្កើតលំហាត់ដោយប្រើ AI (Gemini)
-app.post('/api/generate-problem', aiLimiter, async (req, res) => {
-    try {
-        const { prompt } = req.body;
-        if (!prompt) return res.status(400).json({ error: "ត្រូវការ Prompt ជាចាំបាច់" });
-
-        // Update Stats
-        totalPlays++;
-        uniqueVisitors.add(req.ip);
-
-        // Call Gemini API
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: MODEL_NAME });
-        const result = await model.generateContent(prompt);
-        
-        console.log(`🤖 AI Generated Problem for IP: ${req.ip}`);
-        res.json({ text: result.response.text() });
-
-    } catch (error) {
-        console.error("❌ Gemini API Error:", error.message);
-        res.status(500).json({ error: "បរាជ័យក្នុងការបង្កើតលំហាត់។ សូមព្យាយាមម្តងទៀត។" });
+// Traffic Logging Middleware
+app.use((req, res, next) => {
+    SYSTEM_STATE.totalRequests++;
+    const ip = req.ip || req.connection.remoteAddress;
+    SYSTEM_STATE.visitors.add(ip);
+    
+    // Log essential routes
+    if (req.path.includes('/api') || req.path.includes('/admin')) {
+        logSystem('NET', `${req.method} ${req.path}`, `IP: ${ip}`);
     }
+    next();
 });
 
-// =========================================================================
-// B. ដាក់ពិន្ទុចូល Leaderboard (SMART MERGE & CLEANUP)
-// =========================================================================
+// AI Rate Limiter (Prevent Abuse)
+const aiLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 20, // Limit each IP to 20 requests per windowMs
+    message: { error: "Rate limit exceeded" },
+    skip: (req) => req.ip === CONFIG.OWNER_IP
+});
+
+// =================================================================================================
+// SECTION 6: DASHBOARD UI (ROOT ROUTE)
+// =================================================================================================
+
+app.get('/', (req, res) => {
+    const uptime = process.uptime();
+    const d = Math.floor(uptime / 86400);
+    const h = Math.floor((uptime % 86400) / 3600);
+    const m = Math.floor((uptime % 3600) / 60);
+
+    const pgStatus = SYSTEM_STATE.postgresConnected ? 
+        '<span style="color:#10b981">● CONNECTED</span>' : '<span style="color:#ef4444">● FAILED</span>';
+    
+    const mgStatus = SYSTEM_STATE.mongoConnected ? 
+        '<span style="color:#10b981">● CONNECTED</span>' : '<span style="color:#ef4444">● FAILED</span>';
+
+    const html = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>BrainTest Hybrid Server v6.0</title>
+        <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;700&display=swap" rel="stylesheet">
+        <style>
+            :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; }
+            body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; padding: 20px; display: flex; justify-content: center; }
+            .container { max-width: 700px; width: 100%; display: grid; gap: 20px; }
+            .card { background: var(--card); padding: 20px; border-radius: 12px; border: 1px solid #334155; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+            h1 { font-size: 1.5rem; color: var(--accent); margin: 0 0 5px 0; }
+            .sub { font-size: 0.8rem; color: #94a3b8; font-family: 'JetBrains Mono', monospace; }
+            
+            .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
+            .stat { background: #020617; padding: 15px; border-radius: 8px; border: 1px solid #1e293b; }
+            .stat-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: #64748b; font-weight: bold; }
+            .stat-val { font-size: 1rem; font-weight: bold; margin-top: 5px; font-family: 'JetBrains Mono', monospace; }
+            
+            .log-box { height: 300px; overflow-y: auto; background: #000; border-radius: 8px; padding: 15px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; border: 1px solid #334155; }
+            .log-item { margin-bottom: 6px; border-bottom: 1px solid #1e1e1e; padding-bottom: 4px; display: flex; gap: 10px; }
+            .time { color: #64748b; min-width: 65px; }
+            .msg { color: #e2e8f0; }
+            .det { color: #475569; }
+            
+            .btn { display: block; width: 100%; background: var(--accent); color: white; text-align: center; padding: 12px; border-radius: 8px; text-decoration: none; font-weight: bold; margin-top: 10px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="card">
+                <h1>🚀 BRAINTEST ENGINE v6.0</h1>
+                <div class="sub">Uptime: ${d}d ${h}h ${m}m | Env: ${CONFIG.ENV.toUpperCase()}</div>
+                
+                <div class="stats-grid">
+                    <div class="stat"><div class="stat-label">PostgreSQL</div><div class="stat-val">${pgStatus}</div></div>
+                    <div class="stat"><div class="stat-label">MongoDB Cache</div><div class="stat-val">${mgStatus}</div></div>
+                    <div class="stat"><div class="stat-label">Total Requests</div><div class="stat-val">${SYSTEM_STATE.totalRequests}</div></div>
+                    <div class="stat"><div class="stat-label">Unique Visitors</div><div class="stat-val">${SYSTEM_STATE.visitors.size}</div></div>
+                    <div class="stat"><div class="stat-label">AI Calls</div><div class="stat-val">${SYSTEM_STATE.aiCalls}</div></div>
+                    <div class="stat"><div class="stat-label">Cache Hits</div><div class="stat-val">${SYSTEM_STATE.cacheHits}</div></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="stat-label" style="margin-bottom:10px">SYSTEM LOGS</div>
+                <div class="log-box">
+                    ${SYSTEM_STATE.logs.map(l => `
+                        <div class="log-item">
+                            <span class="time">${l.time}</span>
+                            <span class="msg">${l.msg}</span>
+                            <span class="det">${l.det}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            
+            <a href="/admin/requests" class="btn">🔐 OPEN ADMIN PANEL</a>
+        </div>
+        <script>setTimeout(() => location.reload(), 10000);</script>
+    </body>
+    </html>
+    `;
+    res.send(html);
+});
+
+// =================================================================================================
+// SECTION 7: CORE HYBRID LOGIC (AI + CACHE)
+// =================================================================================================
+
+app.post('/api/generate-problem', aiLimiter, async (req, res) => {
+    // 1. Extract Data
+    const { prompt, topic, difficulty } = req.body;
+    
+    // 2. Validate Input
+    if (!prompt) return res.status(400).json({ error: "Missing Prompt" });
+
+    SYSTEM_STATE.totalGamesGenerated++;
+
+    // 3. CACHE STRATEGY: Try MongoDB First?
+    // We use Math.random() < 0.25 to try cache 25% of the time.
+    // This saves AI costs but keeps content fresh.
+    let problemContent = null;
+    let source = "ai";
+
+    if (SYSTEM_STATE.mongoConnected && topic && difficulty && Math.random() < CONFIG.CACHE_RATE) {
+        logSystem('DB', `Checking Cache for ${topic}...`);
+        try {
+            // Find 1 random problem matching criteria
+            const cached = await MathCache.aggregate([
+                { $match: { topic, difficulty } },
+                { $sample: { size: 1 } }
+            ]);
+
+            if (cached.length > 0) {
+                problemContent = cached[0].raw_text;
+                source = "cache";
+                SYSTEM_STATE.cacheHits++;
+                logSystem('OK', 'Cache Hit', 'Served from MongoDB');
+            }
+        } catch (e) {
+            logSystem('ERR', 'Cache Read Failed', e.message);
+        }
+    }
+
+    // 4. AI FALLBACK: If Cache missed or skipped, call Gemini
+    if (!problemContent) {
+        logSystem('AI', 'Calling Gemini API', 'Generating New Problem...');
+        SYSTEM_STATE.aiCalls++;
+        
+        try {
+            // --- CRITICAL: DO NOT TOUCH THIS GEMINI LOGIC ---
+            const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
+            const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
+            
+            const result = await model.generateContent(prompt);
+            const response = await result.response;
+            problemContent = response.text();
+            // ------------------------------------------------
+
+            // 5. SAVE TO CACHE (If successful)
+            if (problemContent && SYSTEM_STATE.mongoConnected && topic && difficulty) {
+                // Async save (don't wait)
+                MathCache.create({
+                    topic,
+                    difficulty,
+                    raw_text: problemContent,
+                    source_ip: req.ip
+                }).catch(e => logSystem('WARN', 'Cache Write Failed', e.message));
+            }
+
+        } catch (err) {
+            logSystem('ERR', 'AI Generation Failed', err.message);
+            return res.status(500).json({ error: "Failed to generate problem" });
+        }
+    }
+
+    // 6. Return Result
+    res.json({ text: problemContent, source });
+});
+
+// =================================================================================================
+// SECTION 8: LEADERBOARD SYSTEM (POSTGRES SMART MERGE)
+// =================================================================================================
+
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
-    
-    // 1. Validation ធម្មតា
+
+    // 8.1 Basic Validation
     if (!username || typeof score !== 'number' || !difficulty) {
-        return res.status(400).json({ success: false, message: "ទិន្នន័យមិនត្រឹមត្រូវ" });
+        return res.status(400).json({ success: false, message: "Invalid Data" });
     }
 
-    // 2. SECURITY CHECK: កំណត់ពិន្ទុតាមកម្រិត (Anti-Cheat)
-    const ALLOWED_SCORES = {
-        "Easy": 5, "Medium": 10, "Hard": 15, "Very Hard": 20
-    };
-
-    if (!ALLOWED_SCORES[difficulty] || score > ALLOWED_SCORES[difficulty]) {
-        console.warn(`🚨 SECURITY ALERT: IP ${req.ip} tried to cheat! User: ${username}, Score: ${score}, Mode: ${difficulty}`);
-        return res.status(403).json({ success: false, message: "🚫 ការដាក់ពិន្ទុត្រូវបានបដិសេធ! ពិន្ទុមិនត្រឹមត្រូវ។" });
+    // 8.2 Anti-Cheat Validation
+    const maxAllowed = CONFIG.ALLOWED_SCORES[difficulty] || 0;
+    if (score > maxAllowed) {
+        logSystem('WARN', `Suspicious Score: ${username}`, `Points: ${score}`);
+        return res.status(403).json({ success: false, message: "Score Rejected" });
     }
 
     try {
-        const client = await pool.connect();
-        
-        // 3. ស្វែងរកមើលថាតើឈ្មោះនេះមានប៉ុន្មាន row (យកទាំង ID និង Score)
-        const checkUser = await client.query(
+        const client = await pgPool.connect();
+
+        // 8.3 SMART MERGE LOGIC
+        // Step 1: Check existing records
+        const check = await client.query(
             'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC',
-            [username.substring(0, 50), difficulty]
+            [username, difficulty]
         );
 
-        if (checkUser.rows.length > 0) {
-            // === LOGIC ថ្មី: បូកបញ្ចូលគ្នា (Merge) ===
+        if (check.rows.length > 0) {
+            // MERGE MODE
+            const rows = check.rows;
+            const targetId = rows[0].id; // Keep oldest ID
             
-            const targetId = checkUser.rows[0].id; // ទុក ID ចាស់គេ
-            
-            // ជំហានទី 1: បូកពិន្ទុដែលមានស្រាប់ទាំងអស់បញ្ចូលគ្នា (ការពារការបាត់ពិន្ទុ)
-            let totalExistingScore = 0;
-            checkUser.rows.forEach(row => {
-                totalExistingScore += row.score;
-            });
+            // Calculate total existing score + new score
+            const currentTotal = rows.reduce((acc, row) => acc + row.score, 0);
+            const finalScore = currentTotal + score;
 
-            // ជំហានទី 2: បូកពិន្ទុថ្មីដែលទើបលេងបាន
-            const finalScore = totalExistingScore + score;
+            // Update Target
+            await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [finalScore, targetId]);
+            logSystem('DB', `Merged Score: ${username}`, `Total: ${finalScore}`);
 
-            // ជំហានទី 3: Update ពិន្ទុសរុបចូលទៅក្នុង ID តែមួយ
-            await client.query(
-                'UPDATE leaderboard SET score = $1 WHERE id = $2',
-                [finalScore, targetId]
-            );
-            console.log(`🔄 Merged & Updated: ${username} (ID: ${targetId}) -> Total: ${finalScore}`);
-
-            // ជំហានទី 4: លុប ID ផ្សេងៗចោល (Cleanup) ព្រោះពិន្ទុបានបូកចូល targetId អស់ហើយ
-            if (checkUser.rows.length > 1) {
-                const duplicateIds = checkUser.rows.slice(1).map(row => row.id);
-                await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [duplicateIds]);
-                console.log(`🧹 Cleaned up duplicates: IDs [${duplicateIds.join(', ')}] deleted.`);
+            // Delete Duplicates (If any)
+            if (rows.length > 1) {
+                const idsToDelete = rows.slice(1).map(r => r.id);
+                await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
             }
 
         } else {
-            // ករណីទី ២: មិនទាន់មានឈ្មោះ => បង្កើតថ្មី (INSERT)
+            // INSERT MODE (New User)
             await client.query(
-                'INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
-                [username.substring(0, 50), score, difficulty]
+                'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
+                [username, score, difficulty, req.ip]
             );
-            console.log(`🆕 New User Added: ${username} with ${score}`);
+            logSystem('DB', `New Leaderboard Entry`, `${username}: ${score}`);
         }
 
         client.release();
-        res.status(201).json({ success: true, message: "ពិន្ទុត្រូវបានរក្សាទុក/បូកបន្ថែម" });
+        res.status(201).json({ success: true });
+
     } catch (err) {
-        console.error("DB Error:", err);
-        res.status(500).json({ success: false, message: "Server Error" });
+        logSystem('ERR', 'Submit Failed', err.message);
+        res.status(500).json({ success: false });
     }
 });
 
-// C. ទាញយកពិន្ទុពី Leaderboard
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
-        const client = await pool.connect();
-        // ប្រើ SUM(score) ដើម្បីប្រាកដ (ទោះជាយើងបាន Merge ក៏ដោយ ក៏ការពារមួយតង់ទៀត)
+        const client = await pgPool.connect();
         const result = await client.query(`
-            SELECT 
-                username, 
-                SUM(score) AS score,
-                COUNT(difficulty) AS total_games_played
+            SELECT username, SUM(score) as score, COUNT(difficulty) as games_played 
             FROM leaderboard 
             GROUP BY username 
             ORDER BY score DESC 
@@ -246,223 +473,115 @@ app.get('/api/leaderboard/top', async (req, res) => {
         client.release();
         res.json(result.rows);
     } catch (err) {
-        console.error("Leaderboard GET Error:", err);
-        res.status(500).json({ success: false, message: "មិនអាចទាញយកទិន្នន័យបាន" });
+        res.status(500).json([]);
     }
 });
 
-// D. ស្នើសុំ Certificate (Submit Request)
+// =================================================================================================
+// SECTION 9: ADMIN & CERTIFICATE PANEL
+// =================================================================================================
+
+// 9.1 Submit Request
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
-    
-    if (!username || score === undefined) {
-        return res.status(400).json({ success: false, message: "ខ្វះឈ្មោះ ឬ ពិន្ទុ" });
-    }
-
     try {
-        const client = await pool.connect();
-        await client.query(
-            'INSERT INTO certificate_requests (username, score, request_date) VALUES ($1, $2, NOW())', 
-            [username, score]
-        );
+        const client = await pgPool.connect();
+        await client.query('INSERT INTO certificate_requests (username, score) VALUES ($1, $2)', [username, score]);
         client.release();
-        console.log(`📩 New Certificate Request: ${username} - ${score}`);
-        res.json({ success: true, message: "សំណើត្រូវបានផ្ញើទៅ Admin" });
-    } catch (err) {
-        console.error("Submit Request Error:", err.message);
-        res.status(500).json({ success: false, message: "Server Error" });
-    }
+        logSystem('OK', 'Certificate Requested', username);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ success: false }); }
 });
 
-// --- 7. ROUTES: ADMIN PANEL (ផ្ទាំងគ្រប់គ្រង) ---
+// 9.2 Generate Image (Redirect to Imgix)
+app.get('/admin/generate-cert/:id', async (req, res) => {
+    try {
+        const client = await pgPool.connect();
+        const result = await client.query('SELECT * FROM certificate_requests WHERE id = $1', [req.params.id]);
+        client.release();
 
+        if (result.rows.length === 0) return res.status(404).send("Not Found");
+
+        const { username, score } = result.rows[0];
+        const dateStr = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+        const msg = `Score: ${score}%0A%0ADate Issued: ${dateStr}%0A%0APresented by: braintest.fun`;
+
+        // Construct Image URL
+        const finalUrl = CONFIG.IMG_API + 
+            `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodeURIComponent(username.toUpperCase())}&txt-fit=max&w=1800` +
+            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodeURIComponent(msg)}&mark-w=1600`;
+
+        res.redirect(finalUrl);
+    } catch (e) { res.status(500).send("Error generating certificate"); }
+});
+
+// 9.3 Delete Request
+app.delete('/admin/delete-request/:id', async (req, res) => {
+    try {
+        const client = await pgPool.connect();
+        await client.query('DELETE FROM certificate_requests WHERE id = $1', [req.params.id]);
+        client.release();
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ success: false }); }
+});
+
+// 9.4 Admin UI
 app.get('/admin/requests', async (req, res) => {
     try {
-        const client = await pool.connect();
+        const client = await pgPool.connect();
         const result = await client.query('SELECT * FROM certificate_requests ORDER BY request_date DESC LIMIT 50');
         client.release();
 
-        let html = `
-        <!DOCTYPE html>
-        <html lang="km">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Admin Dashboard</title>
+        const rows = result.rows.map(r => `
+            <tr id="row-${r.id}">
+                <td>#${r.id}</td>
+                <td><b>${r.username}</b></td>
+                <td><span class="badge">${r.score}</span></td>
+                <td>${new Date(r.request_date).toLocaleDateString()}</td>
+                <td>
+                    <a href="/admin/generate-cert/${r.id}" target="_blank">🖨️</a>
+                    <span class="del" onclick="del(${r.id})">🗑️</span>
+                </td>
+            </tr>
+        `).join('');
+
+        res.send(`
+            <!DOCTYPE html><html><head><title>Admin Panel</title>
             <style>
-                @import url('https://fonts.googleapis.com/css2?family=Hanuman:wght@400;700&family=Poppins:wght@400;600&display=swap');
-                body { font-family: 'Poppins', 'Hanuman', sans-serif; background: #f3f4f6; padding: 20px; margin: 0; }
-                .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); overflow: hidden; }
-                .header { background: #1e293b; color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center; }
-                .header h1 { margin: 0; font-size: 1.5rem; }
-                
-                table { width: 100%; border-collapse: collapse; }
-                th { background: #3b82f6; color: white; padding: 15px; text-align: left; font-size: 0.85rem; text-transform: uppercase; }
-                td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; color: #334155; vertical-align: middle; }
-                tr:hover { background: #f8fafc; }
-                
-                .name-cell { display: flex; justify-content: space-between; align-items: center; gap: 15px; }
-                .username-text { font-weight: 700; color: #1e293b; font-size: 1rem; }
-                
-                .actions { display: flex; gap: 5px; }
-                .btn {
-                    border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer;
-                    font-size: 0.8rem; font-weight: bold; color: white; text-decoration: none;
-                    transition: all 0.2s; display: flex; align-items: center;
-                }
-                .btn:hover { transform: scale(1.05); }
-                .btn-print { background: #3b82f6; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3); }
-                .btn-delete { background: #ef4444; box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3); }
-
-                .score-high { color: #16a34a; font-weight: bold; }
-                .score-low { color: #dc2626; font-weight: bold; }
+                body{font-family:sans-serif;background:#f1f5f9;padding:20px;max-width:900px;margin:0 auto;} 
+                h2{color:#1e293b;}
+                table{width:100%;border-collapse:collapse;background:white;border-radius:8px;overflow:hidden;box-shadow:0 2px 5px rgba(0,0,0,0.05);} 
+                th,td{padding:15px;text-align:left;border-bottom:1px solid #e2e8f0;} 
+                th{background:#f8fafc;font-weight:bold;color:#64748b;text-transform:uppercase;font-size:0.8rem;}
+                .badge{background:#e0f2fe;color:#0369a1;padding:4px 8px;border-radius:4px;font-weight:bold;font-size:0.9rem;}
+                a, .del{cursor:pointer;font-size:1.2rem;margin-right:10px;text-decoration:none;}
             </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>👮‍♂️ Admin Control</h1>
-                    <span>Total: ${result.rows.length}</span>
-                </div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th style="width: 50px;">ID</th>
-                            <th>👤 Username & Actions</th>
-                            <th style="width: 100px;">Score</th>
-                            <th style="width: 150px;">Date</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
-
-        if (result.rows.length === 0) {
-            html += `<tr><td colspan="4" style="text-align:center; padding:30px;">🚫 មិនទាន់មានសំណើ។</td></tr>`;
-        } else {
-            result.rows.forEach(row => {
-                const scoreClass = row.score >= 500 ? 'score-high' : 'score-low';
-                html += `
-                    <tr id="row-${row.id}">
-                        <td>#${row.id}</td>
-                        <td>
-                            <div class="name-cell">
-                                <span class="username-text">${row.username}</span>
-                                <div class="actions">
-                                    <a href="/admin/generate-cert/${row.id}" target="_blank" class="btn btn-print">🖨️ Print</a>
-                                    <button onclick="deleteRequest(${row.id})" class="btn btn-delete">🗑️ លុប</button>
-                                </div>
-                            </div>
-                        </td>
-                        <td class="${scoreClass}">${row.score}</td>
-                        <td>${new Date(row.request_date).toLocaleDateString('en-GB')}</td>
-                    </tr>`;
-            });
-        }
-        
-        html += `
-                    </tbody>
-                </table>
-            </div>
-
-            <script>
-                async function deleteRequest(id) {
-                    if (!confirm("⚠️ តើអ្នកពិតជាចង់លុបឈ្មោះនេះមែនទេ?")) return;
-                    try {
-                        const response = await fetch('/admin/delete-request/' + id, { method: 'DELETE' });
-                        const result = await response.json();
-                        if (result.success) {
-                            const row = document.getElementById('row-' + id);
-                            row.style.backgroundColor = "#fee2e2"; 
-                            setTimeout(() => row.remove(), 300);
-                        } else {
-                            alert("បរាជ័យ: " + result.message);
-                        }
-                    } catch (err) {
-                        alert("Error communicating with server.");
-                    }
-                }
-            </script>
-        </body>
-        </html>`;
-        
-        res.send(html);
-    } catch (err) {
-        console.error("Admin Panel Error:", err);
-        res.status(500).send("Server Error");
-    }
+            </head><body>
+            <h2>🛡️ Certificate Requests (${result.rows.length})</h2>
+            <table><thead><tr><th>ID</th><th>User</th><th>Score</th><th>Date</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
+            <script>async function del(id){if(confirm('Delete this request?')){await fetch('/admin/delete-request/'+id,{method:'DELETE'});document.getElementById('row-'+id).remove();}}</script>
+            </body></html>
+        `);
+    } catch (e) { res.status(500).send("Server Error"); }
 });
 
-// --- NEW ROUTE: DELETE REQUEST (លុបសំណើ) ---
-app.delete('/admin/delete-request/:id', async (req, res) => {
-    const id = req.params.id;
-    try {
-        const client = await pool.connect();
-        const result = await client.query('DELETE FROM certificate_requests WHERE id = $1', [id]);
-        client.release();
+// =================================================================================================
+// SECTION 10: SERVER STARTUP
+// =================================================================================================
 
-        if (result.rowCount === 0) {
-            return res.status(404).json({ success: false, message: "រកមិនឃើញ ID នេះទេ" });
-        }
+async function startSystem() {
+    console.clear();
+    logSystem('OK', `Starting BrainTest Engine v6.0`);
 
-        console.log(`🗑️ Deleted Request ID: ${id}`);
-        res.json({ success: true, message: "លុបបានជោគជ័យ" });
-    } catch (err) {
-        console.error("Delete Error:", err);
-        res.status(500).json({ success: false, message: "Server Error" });
-    }
-});
+    // 1. Init Databases
+    await initPostgres(); // Leaderboard
+    await initMongo();    // Caching
 
-// --- 8. CERTIFICATE GENERATION LOGIC (IMGIX ENGINE) ---
-
-app.get('/admin/generate-cert/:id', async (req, res) => {
-    console.log(`... 🎨 Starting Certificate Generation for Request ID: ${req.params.id}`);
-    
-    try {
-        const id = req.params.id;
-        const client = await pool.connect();
-        const result = await client.query('SELECT * FROM certificate_requests WHERE id = $1', [id]);
-        client.release();
-
-        if (result.rows.length === 0) return res.status(404).send("Error: Request ID not found.");
-
-        const { username, score } = result.rows[0];
-        const dateObj = new Date();
-        const formattedDate = dateObj.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-        const formalMessage = `With immense pride and recognition of your intellectual brilliance, we bestow this award upon you. Your outstanding performance demonstrates a profound mastery of mathematics and a relentless spirit of excellence. May this achievement serve as a stepping stone to a future filled with boundless success and wisdom. Presented by: braintest.fun`;
-
-        const BASE_IMGIX_URL = process.env.EXTERNAL_IMAGE_API;
-        if (!BASE_IMGIX_URL) return res.status(500).send("Server Config Error: Missing Image API URL.");
-
-        const encodedUsername = encodeURIComponent(username.toUpperCase());
-        const secondaryBlock = `Score: ${score}%0A%0A` + `Date Issued: ${formattedDate}%0A%0A%0A` + `${formalMessage}`;
-        const encodedSecondaryBlock = encodeURIComponent(secondaryBlock);
-
-        const finalUrl = BASE_IMGIX_URL + 
-            `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800` +
-            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodedSecondaryBlock}&mark-w=1600&mark-fit=max`;
-
-        res.redirect(finalUrl);
-
-    } catch (err) {
-        console.error("❌ Certificate Generation Error:", err.message);
-        res.status(500).send(`Error Generating Certificate: ${err.message}`);
-    }
-});
-
-// --- 9. START SERVER (ចាប់ផ្តើមដំណើរការ) ---
-
-async function startServer() {
-    if (!process.env.DATABASE_URL) {
-        console.error("🛑 CRITICAL ERROR: DATABASE_URL is missing in .env");
-        return;
-    }
-    await initializeDatabase();
-    app.listen(port, () => {
-        console.log(`\n===================================================`);
-        console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING!`);
-        console.log(`👉 PORT: ${port}`);
-        console.log(`👉 ADMIN PANEL: http://localhost:${port}/admin/requests`);
-        console.log(`===================================================\n`);
+    // 2. Start Express
+    app.listen(CONFIG.PORT, () => {
+        logSystem('OK', `Server Listening on Port ${CONFIG.PORT}`);
+        logSystem('INFO', `Dashboard: http://localhost:${CONFIG.PORT}`);
     });
 }
 
-startServer();
+startSystem();
