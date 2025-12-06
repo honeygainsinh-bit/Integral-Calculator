@@ -1,9 +1,10 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 6.2.1 (Aggregation Logic Confirmed)
+ * VERSION: 7.1.0 (FINAL FIX: Server-Side Score Calculation)
  * DESCRIPTION: 
- * - កូដពេញលេញ រឹងមាំ និងមាន Logic បូកពិន្ទុត្រឹមត្រូវ។
+ * - ជួសជុលបញ្ហាបូកពិន្ទុខុសដោយមិនពឹងផ្អែកលើ Input Score របស់ Frontend ទៀតទេ។
+ * - Server គណនាពិន្ទុដោយផ្អែកលើ Difficulty តែប៉ុណ្ណោះ។
  * - ធានារក្សាមុខងារ Admin Panel (View & Delete)។
  * =========================================================================================
  */
@@ -26,6 +27,14 @@ const MODEL_NAME = "gemini-2.5-flash";
 
 let totalPlays = 0;
 const uniqueVisitors = new Set();
+
+// --- MAP សម្រាប់គណនាពិន្ទុត្រឹមត្រូវ (Server-Side Score Validation) ---
+const DIFFICULTY_POINTS = {
+    'Easy': 5,
+    'Medium': 10,
+    'Hard': 15,
+    'Very Hard': 20
+};
 
 // --- MIDDLEWARE SETUP ---
 app.set('trust proxy', 1); 
@@ -67,6 +76,7 @@ async function initializeDatabase() {
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(100) NOT NULL,
                 score INTEGER NOT NULL,
+                user_ip VARCHAR(45),
                 status VARCHAR(20) DEFAULT 'Pending',
                 request_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
@@ -124,12 +134,15 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     }
 });
 
-// B. SUBMIT SCORE (AGGREGATION LOGIC CONFIRMED)
+// B. SUBMIT SCORE (SERVER-SIDE CALCULATION FIXED)
 app.post('/api/leaderboard/submit', async (req, res) => {
-    const { username, score, difficulty } = req.body;
+    const { username, difficulty } = req.body; // ⭐️ លុប score ចេញពី Destructuring
     
-    if (!username || typeof score !== 'number' || !difficulty) {
-        return res.status(400).json({ success: false, message: "Invalid Data" });
+    // 1. Server គណនាពិន្ទុត្រឹមត្រូវ
+    const pointsToAdd = DIFFICULTY_POINTS[difficulty] || 0;
+
+    if (pointsToAdd === 0 || !username) { // ពិនិត្យថា Difficulty ត្រឹមត្រូវ
+        return res.status(400).json({ success: false, message: "Invalid Difficulty or Data." });
     }
 
     const cleanUsername = username.trim().substring(0, 50);
@@ -137,29 +150,28 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     try {
         const client = await pool.connect();
 
-        // ជំហានទី ១: ស្វែងរកឈ្មោះនេះក្នុង Database
         const checkRes = await client.query(
             'SELECT * FROM leaderboard WHERE username = $1', 
             [cleanUsername]
         );
 
         if (checkRes.rows.length > 0) {
-            // ✅ ករណីមានឈ្មោះហើយ: ធ្វើការ Update (បូកពិន្ទុបន្ថែម)
-            const currentTotal = checkRes.rows[0].score;
-            const newTotal = currentTotal + score;
+            // ✅ ករណីមានឈ្មោះហើយ: ធ្វើការ Update
+            const currentTotal = parseInt(checkRes.rows[0].score); 
+            const newTotal = currentTotal + pointsToAdd; // ប្រើ pointsToAdd ដែលគណនាពី Server
             
             await client.query(
                 'UPDATE leaderboard SET score = $1, difficulty = $2 WHERE username = $3',
                 [newTotal, difficulty, cleanUsername]
             );
-             console.log(`🔄 UPDATED Score for ${cleanUsername}: ${newTotal}`);
+             console.log(`🔄 UPDATED Score for ${cleanUsername}: ${newTotal} (+${pointsToAdd})`);
         } else {
-            // ✅ ករណីឈ្មោះថ្មី: បង្កើតថ្មី (Insert)
+            // ✅ ករណីឈ្មោះថ្មី: Insert
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
-                [cleanUsername, score, difficulty]
+                [cleanUsername, pointsToAdd, difficulty] // ប្រើ pointsToAdd
             );
-             console.log(`✨ NEW User Added: ${cleanUsername} with score ${score}`);
+             console.log(`✨ NEW User Added: ${cleanUsername} with score ${pointsToAdd}`);
         }
 
         client.release();
@@ -186,6 +198,7 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // D. SUBMIT CERTIFICATE REQUEST
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
+    const userIP = req.ip; 
     
     if (!username || score === undefined) {
         return res.status(400).json({ success: false, message: "Invalid data" });
@@ -194,8 +207,8 @@ app.post('/api/submit-request', async (req, res) => {
     try {
         const client = await pool.connect();
         await client.query(
-            'INSERT INTO certificate_requests (username, score, request_date) VALUES ($1, $2, NOW())', 
-            [username, score]
+            'INSERT INTO certificate_requests (username, score, user_ip, request_date) VALUES ($1, $2, $3, NOW())', 
+            [username, score, userIP]
         );
         client.release();
         res.json({ success: true, message: "Request Sent" });
@@ -205,13 +218,13 @@ app.post('/api/submit-request', async (req, res) => {
 });
 
 // #########################################################################################
-// 4. ADMIN PANEL FUNCTIONALITY (VIEW & DELETE)
+// 4. ADMIN PANEL FUNCTIONALITY (VIEW IP & DELETE)
 // #########################################################################################
 
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
-        const result = await client.query('SELECT * FROM certificate_requests ORDER BY request_date DESC LIMIT 50');
+        const result = await client.query('SELECT *, user_ip FROM certificate_requests ORDER BY request_date DESC LIMIT 50');
         client.release();
 
         let html = `
@@ -223,7 +236,7 @@ app.get('/admin/requests', async (req, res) => {
             <title>Admin Dashboard</title>
             <style>
                 body { font-family: sans-serif; background: #f3f4f6; padding: 20px; margin: 0; }
-                .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); overflow: hidden; }
+                .container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); overflow: hidden; }
                 .header { background: #1e293b; color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center; }
                 .header h1 { margin: 0; font-size: 1.5rem; }
                 
@@ -232,7 +245,6 @@ app.get('/admin/requests', async (req, res) => {
                 td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; color: #334155; vertical-align: middle; }
                 tr:hover { background: #f8fafc; }
                 
-                .name-cell { display: flex; justify-content: space-between; align-items: center; gap: 15px; }
                 .username-text { font-weight: 700; color: #1e293b; font-size: 1rem; }
                 
                 .btn-delete { 
@@ -264,14 +276,15 @@ app.get('/admin/requests', async (req, res) => {
                         <tr>
                             <th style="width: 50px;">ID</th>
                             <th>👤 Username</th>
-                            <th style="width: 100px;">Score</th>
+                            <th style="width: 80px;">Score</th>
+                            <th style="width: 120px;">🌐 User IP</th>
                             <th style="width: 150px;">Date & Action</th>
                         </tr>
                     </thead>
                     <tbody>`;
 
         if (result.rows.length === 0) {
-            html += `<tr><td colspan="4" style="text-align:center; padding:30px;">🚫 មិនទាន់មានសំណើ។</td></tr>`;
+            html += `<tr><td colspan="5" style="text-align:center; padding:30px;">🚫 មិនទាន់មានសំណើ។</td></tr>`;
         } else {
             result.rows.forEach(row => {
                 const scoreClass = row.score >= 500 ? 'score-high' : 'score-low';
@@ -280,19 +293,14 @@ app.get('/admin/requests', async (req, res) => {
                 html += `
                     <tr id="row-${row.id}">
                         <td>#${row.id}</td>
-                        <td>
-                            <div class="name-cell">
-                                <span class="username-text">${row.username}</span>
-                            </div>
-                        </td>
+                        <td><span class="username-text">${row.username}</span></td>
                         <td class="${scoreClass}">${row.score}</td>
+                        <td>${row.user_ip || 'N/A'}</td> 
                         <td>
-                            <div class="actions">
-                                <span>${formattedDate}</span>
-                                <button onclick="deleteRequest(${row.id})" class="btn-delete" title="Delete Request">
-                                    🗑️ លុប
-                                </button>
-                            </div>
+                            <span>${formattedDate}</span>
+                            <button onclick="deleteRequest(${row.id})" class="btn-delete" title="Delete Request">
+                                🗑️ លុប
+                            </button>
                         </td>
                     </tr>`;
             });
@@ -304,7 +312,6 @@ app.get('/admin/requests', async (req, res) => {
             </div>
 
             <script>
-                // This JS runs on the Admin HTML page
                 async function deleteRequest(id) {
                     if (!confirm("⚠️ តើអ្នកពិតជាចង់លុបសំណើនេះមែនទេ?")) return;
 
@@ -365,7 +372,7 @@ async function startServer() {
     // 2. បើក Server 
     app.listen(port, () => {
         console.log(`\n===================================================`);
-        console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING! (v6.2)`);
+        console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING! (v7.1)`);
         console.log(`👉 PORT: ${port}`);
         console.log(`👉 ADMIN PANEL: http://localhost:${port}/admin/requests`);
         console.log(`===================================================\n`);
