@@ -1,19 +1,18 @@
 /**
  * =================================================================================================
- * PROJECT:      MATH QUIZ PRO - BACKEND API (ENTERPRISE EDITION v4.1.0)
+ * PROJECT:      MATH QUIZ PRO - BACKEND API (ENTERPRISE EDITION v4.2.0)
  * AUTHOR:       BRAINTEST TEAM
  * ENVIRONMENT:  Node.js / Express / PostgreSQL / MongoDB
  * DESCRIPTION:
  * នេះគឺជាប្រព័ន្ធ Backend ដ៏មានអានុភាពដែលត្រូវបានរចនាឡើងសម្រាប់ភាពធន់ និងការត្រួតពិនិត្យ (Monitoring)។
- * កូដនេះរួមបញ្ចូលទាំង Real-time Status Dashboard នៅលើទំព័រដើម។
- * * [SYSTEM ARCHITECTURE]
+ * * * [SYSTEM ARCHITECTURE]
  * 1. Primary DB (PostgreSQL): សម្រាប់រក្សាទុកពិន្ទុ និងទិន្នន័យអ្នកប្រើប្រាស់ (Persistent).
- * 2. Secondary DB (MongoDB):  សម្រាប់ធ្វើ Global Caching លំហាត់ (Ephemeral/Performance).
+ * 2. Secondary DB (MongoDB):  សម្រាប់ធ្វើ Global Caching លំហាត់ (Permanent Storage).
  * 3. AI Engine (Gemini):      សម្រាប់បង្កើតលំហាត់គណិតវិទ្យា។
- * * [CHANGE LOG v4.1.0]
- * - Added: Real-time Connection Status Indicators on Root Route (/).
- * - Added: Connection State Listeners for both databases.
- * - Refactored: Expanded error handling and logging structure.
+ * * * [LOGIC FLOW]
+ * - Generate: 25% MongoDB (Cache) / 75% AI (Gemini).
+ * - Storage: AI results are saved to MongoDB instantly and kept FOREVER.
+ * - Leaderboard: Uses Smart Merge to combine scores for duplicate usernames.
  * =================================================================================================
  */
 
@@ -43,7 +42,6 @@ const CONFIG = {
     AI_MODEL: "gemini-2.5-flash",
     OWNER_IP: process.env.OWNER_IP || '127.0.0.1',
     IMG_API: process.env.EXTERNAL_IMAGE_API,
-    CACHE_EXPIRY: '30d', // 30 Days expiry for MongoDB cache
     ALLOWED_SCORES: {
         "Easy": 5,
         "Medium": 10,
@@ -53,10 +51,9 @@ const CONFIG = {
 };
 
 // 1.4 System Health State (Live Monitoring Variables)
-// នេះជាអថេរសម្រាប់តាមដានស្ថានភាព Database ភ្លាមៗ
 const SYSTEM_HEALTH = {
-    postgres: false, // នឹងប្តូរទៅ true ពេលភ្ជាប់បាន
-    mongo: false,    // នឹងប្តូរទៅ true ពេលភ្ជាប់បាន
+    postgres: false, 
+    mongo: false,    
     startTime: Date.now(),
     totalRequests: 0,
     totalGamesPlayed: 0,
@@ -71,31 +68,25 @@ const SYSTEM_HEALTH = {
 
 /**
  * 2.1 PostgreSQL Setup (Leaderboard System)
- * យើងប្រើ Connection Pool ដើម្បីប្រសិទ្ធភាពខ្ពស់
  */
 const pool = new Pool({
     connectionString: CONFIG.DB_URL,
-    ssl: { rejectUnauthorized: false }, // Required for Render/Neon
-    connectionTimeoutMillis: 5000
+    ssl: { rejectUnauthorized: false }, 
+    connectionTimeoutMillis: 5000,
+    max: 20 // Optimize pool size
 });
 
-// PostgreSQL Event Listeners for Status Tracking
-pool.on('connect', () => {
-    // ព្រឹត្តិការណ៍នេះកើតឡើងរាល់ពេល Client ថ្មីត្រូវបានបង្កើតក្នុង Pool
-    // ប៉ុន្តែសម្រាប់ការតាមដាន Global Status យើងនឹង Check ពេល Init
-});
-
+// PostgreSQL Event Listeners
 pool.on('error', (err) => {
     console.error('❌ PostgreSQL Pool Error:', err.message);
     SYSTEM_HEALTH.postgres = false;
     SYSTEM_HEALTH.lastError = `PG Error: ${err.message}`;
 });
 
-// Initial Connection Check for Postgres
 pool.connect()
     .then(client => {
         console.log("✅ PostgreSQL: Connection Established (Leaderboard Ready)");
-        SYSTEM_HEALTH.postgres = true; // Update Status
+        SYSTEM_HEALTH.postgres = true;
         client.release();
     })
     .catch(err => {
@@ -106,15 +97,14 @@ pool.connect()
 
 /**
  * 2.2 MongoDB Setup (Global Cache System)
- * យើងប្រើ Mongoose ដើម្បីគ្រប់គ្រង Connection State
  */
 if (CONFIG.MONGO_URI) {
     mongoose.connect(CONFIG.MONGO_URI, {
-        serverSelectionTimeoutMS: 5000 // ឈប់ព្យាយាមបើភ្ជាប់មិនបានក្នុង 5 វិ
+        serverSelectionTimeoutMS: 5000 
     })
     .then(() => {
-        console.log("✅ MongoDB: Connection Established (Caching Ready)");
-        SYSTEM_HEALTH.mongo = true; // Update Status
+        console.log("✅ MongoDB: Connection Established (Permanent Cache Ready)");
+        SYSTEM_HEALTH.mongo = true; 
     })
     .catch(err => {
         console.error("❌ MongoDB: Connection Failed", err.message);
@@ -122,7 +112,7 @@ if (CONFIG.MONGO_URI) {
         SYSTEM_HEALTH.lastError = `Mongo Error: ${err.message}`;
     });
 
-    // Mongoose Connection Events for Real-time Monitoring
+    // Mongoose Connection Events
     mongoose.connection.on('connected', () => { SYSTEM_HEALTH.mongo = true; });
     mongoose.connection.on('error', () => { SYSTEM_HEALTH.mongo = false; });
     mongoose.connection.on('disconnected', () => { 
@@ -163,14 +153,15 @@ async function initializeDatabaseTables() {
 }
 
 // =================================================================================================
-// SECTION 3: MONGOOSE SCHEMAS
+// SECTION 3: MONGOOSE SCHEMAS (PERMANENT STORAGE)
 // =================================================================================================
 
 const problemCacheSchema = new mongoose.Schema({
     topic: { type: String, required: true, index: true },
     difficulty: { type: String, required: true, index: true },
     raw_text: { type: String, required: true },
-    createdAt: { type: Date, default: Date.now, expires: CONFIG.CACHE_EXPIRY }
+    // 🔥 UPDATED: Removed expires option. Data is now kept forever.
+    createdAt: { type: Date, default: Date.now } 
 });
 
 const MathProblemCache = mongoose.model('MathProblemCache', problemCacheSchema);
@@ -191,7 +182,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Request Logger
 app.use((req, res, next) => {
     SYSTEM_HEALTH.totalRequests++;
-    // Log only significant requests to keep logs clean
     if (req.url.includes('/api/')) {
         const time = new Date().toLocaleTimeString('km-KH');
         console.log(`[${time}] 📡 ${req.method} ${req.url} - IP: ${req.ip}`);
@@ -202,13 +192,13 @@ app.use((req, res, next) => {
 // Rate Limiter for AI Generation
 const aiLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
-    max: 20, // 20 requests per hour
+    max: 20, 
     message: { error: "Rate limit exceeded. Please wait." },
     skip: (req) => req.ip === CONFIG.OWNER_IP
 });
 
 // =================================================================================================
-// SECTION 5: ROOT ROUTE - SYSTEM HEALTH DASHBOARD (NEW FEATURE!)
+// SECTION 5: ROOT ROUTE - SYSTEM HEALTH DASHBOARD
 // =================================================================================================
 
 app.get('/', (req, res) => {
@@ -218,60 +208,99 @@ app.get('/', (req, res) => {
     const h = Math.floor(uptime % (3600*24) / 3600);
     const m = Math.floor(uptime % 3600 / 60);
 
-    // Determine Status Colors
-    const pgStatus = SYSTEM_HEALTH.postgres ? '<span style="color:#10b981">● CONNECTED</span>' : '<span style="color:#ef4444">● DISCONNECTED</span>';
-    const mongoStatus = SYSTEM_HEALTH.mongo ? '<span style="color:#10b981">● CONNECTED</span>' : '<span style="color:#ef4444">● DISCONNECTED</span>';
-    const aiStatus = CONFIG.AI_KEY ? '<span style="color:#10b981">● READY</span>' : '<span style="color:#f59e0b">● MISSING KEY</span>';
+    // Status Indicators
+    const pgStatus = SYSTEM_HEALTH.postgres 
+        ? '<span class="status-indicator online">● CONNECTED</span>' 
+        : '<span class="status-indicator offline">● DISCONNECTED</span>';
+    
+    const mongoStatus = SYSTEM_HEALTH.mongo 
+        ? '<span class="status-indicator online">● CONNECTED</span>' 
+        : '<span class="status-indicator offline">● DISCONNECTED</span>';
+    
+    const aiStatus = CONFIG.AI_KEY 
+        ? '<span class="status-indicator online">● READY</span>' 
+        : '<span class="status-indicator warning">● MISSING KEY</span>';
 
-    // HTML Response
+    // Modern Dashboard HTML
     res.send(`
         <!DOCTYPE html>
         <html>
         <head>
-            <title>BrainTest API Status</title>
+            <title>BrainTest System Status</title>
             <meta name="viewport" content="width=device-width, initial-scale=1">
+            <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
             <style>
-                body { background: #0f172a; color: #f8fafc; font-family: sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-                .dashboard { background: #1e293b; padding: 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 100%; max-width: 450px; border: 1px solid #334155; }
-                h1 { margin: 0 0 20px 0; color: #38bdf8; font-size: 24px; text-align: center; text-transform: uppercase; letter-spacing: 2px; }
-                .status-grid { display: flex; flex-direction: column; gap: 15px; margin-bottom: 30px; }
-                .status-item { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: #0f172a; border-radius: 10px; border: 1px solid #334155; }
-                .label { font-weight: bold; color: #94a3b8; font-size: 14px; }
-                .value { font-weight: bold; font-size: 14px; font-family: monospace; }
-                .stats-row { display: flex; justify-content: space-between; margin-top: 10px; font-size: 12px; color: #64748b; }
-                .btn { display: block; width: 100%; padding: 15px; background: #2563eb; color: white; text-align: center; text-decoration: none; border-radius: 10px; font-weight: bold; margin-top: 20px; transition: 0.2s; }
-                .btn:hover { background: #1d4ed8; }
+                :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #38bdf8; --green: #10b981; --red: #ef4444; }
+                body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+                .dashboard { background: var(--card); padding: 40px; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); width: 100%; max-width: 480px; border: 1px solid #334155; }
+                .header { text-align: center; margin-bottom: 30px; }
+                h1 { margin: 0; color: var(--accent); font-size: 28px; font-weight: 800; letter-spacing: -1px; }
+                .subtitle { color: #64748b; font-size: 14px; margin-top: 5px; }
+                
+                .status-grid { display: flex; flex-direction: column; gap: 12px; margin-bottom: 30px; }
+                .status-item { display: flex; justify-content: space-between; align-items: center; padding: 16px; background: #020617; border-radius: 12px; border: 1px solid #1e293b; transition: transform 0.2s; }
+                .status-item:hover { border-color: #475569; transform: translateY(-2px); }
+                
+                .label { font-weight: 600; color: #94a3b8; font-size: 13px; letter-spacing: 0.5px; }
+                .status-indicator { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; }
+                .online { color: var(--green); text-shadow: 0 0 10px rgba(16, 185, 129, 0.3); }
+                .offline { color: var(--red); text-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
+                .warning { color: #f59e0b; }
+                
+                .stats-box { background: rgba(56, 189, 248, 0.1); border-radius: 12px; padding: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 25px; }
+                .stat { text-align: center; }
+                .stat-val { display: block; font-size: 18px; font-weight: 700; color: var(--accent); }
+                .stat-lbl { font-size: 11px; color: #94a3b8; text-transform: uppercase; }
+
+                .btn { display: flex; justify-content: center; align-items: center; gap: 10px; width: 100%; padding: 16px; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: white; text-decoration: none; border-radius: 12px; font-weight: 700; transition: all 0.2s; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3); }
+                .btn:hover { transform: scale(1.02); box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4); }
+                
+                .footer { margin-top: 20px; text-align: center; font-size: 11px; color: #475569; }
             </style>
         </head>
         <body>
             <div class="dashboard">
-                <h1>System Health</h1>
+                <div class="header">
+                    <h1>SYSTEM STATUS</h1>
+                    <div class="subtitle">v4.2.0 • Hybrid Database Engine</div>
+                </div>
                 
-                <div class="status-grid">
-                    <div class="status-item">
-                        <span class="label">LEADERBOARD DB (PG)</span>
-                        <span class="value">${pgStatus}</span>
+                <div class="stats-box">
+                    <div class="stat">
+                        <span class="stat-val">${d}d ${h}h ${m}m</span>
+                        <span class="stat-lbl">Uptime</span>
                     </div>
-                    <div class="status-item">
-                        <span class="label">CACHE DB (MONGO)</span>
-                        <span class="value">${mongoStatus}</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="label">AI ENGINE</span>
-                        <span class="value">${aiStatus}</span>
+                    <div class="stat">
+                        <span class="stat-val">${SYSTEM_HEALTH.totalRequests}</span>
+                        <span class="stat-lbl">Total Requests</span>
                     </div>
                 </div>
 
-                <div class="stats-row">
-                    <span>Uptime: ${d}d ${h}h ${m}m</span>
-                    <span>Requests: ${SYSTEM_HEALTH.totalRequests}</span>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="label">LEADERBOARD (PG)</span>
+                        ${pgStatus}
+                    </div>
+                    <div class="status-item">
+                        <span class="label">CACHE (MONGO)</span>
+                        ${mongoStatus}
+                    </div>
+                    <div class="status-item">
+                        <span class="label">AI ENGINE (GEMINI)</span>
+                        ${aiStatus}
+                    </div>
                 </div>
                 
-                <a href="/admin/requests" class="btn">🔐 Access Admin Panel</a>
+                <a href="/admin/requests" class="btn">
+                    <span>🔐</span> Access Admin Panel
+                </a>
+
+                <div class="footer">
+                    Auto-refreshing every 30s • Secure Connection
+                </div>
             </div>
             
             <script>
-                // Auto-refresh page every 30 seconds to update status
                 setTimeout(() => window.location.reload(), 30000);
             </script>
         </body>
@@ -280,7 +309,7 @@ app.get('/', (req, res) => {
 });
 
 // =================================================================================================
-// SECTION 6: API ROUTES - LOGIC (25% CACHE / 75% AI)
+// SECTION 6: API ROUTES - CORE LOGIC (25% CACHE / 75% AI)
 // =================================================================================================
 
 app.post('/api/generate-problem', aiLimiter, async (req, res) => {
@@ -294,9 +323,8 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
 
         // 6.2 Stats Update
         SYSTEM_HEALTH.totalGamesPlayed++;
-        SYSTEM_HEALTH.uniqueVisitors.add(req.ip);
 
-        // 6.3 Logic Decision
+        // 6.3 Hybrid Logic Decision
         const CACHE_CHANCE = 0.25; // 25% Chance
         const tryCache = Math.random() < CACHE_CHANCE;
         
@@ -305,7 +333,7 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
 
         // --- STRATEGY A: TRY MONGODB CACHE ---
         if (tryCache && SYSTEM_HEALTH.mongo) {
-            console.log(`🎲 Strategy: Checking Cache (25%) for ${topic}...`);
+            console.log(`🎲 Strategy: Checking MongoDB (25%) for ${topic}...`);
             try {
                 const cached = await MathProblemCache.aggregate([
                     { $match: { topic: topic, difficulty: difficulty } },
@@ -322,11 +350,10 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
                 }
             } catch (mongoErr) {
                 console.error("Cache Read Error:", mongoErr.message);
-                // Fail silently and fall back to AI
             }
         }
 
-        // --- STRATEGY B: CALL AI API ---
+        // --- STRATEGY B: CALL AI API (Fallback) ---
         if (!problemData) {
             console.log("🤖 Strategy: Calling Gemini AI (75% or Fallback)...");
             SYSTEM_HEALTH.aiCalls++;
@@ -338,17 +365,16 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
             const response = await result.response;
             problemData = response.text();
 
-            // --- STRATEGY C: SAVE TO CACHE ---
-            // Only save if valid problem and MongoDB is online
+            // --- STRATEGY C: SAVE TO CACHE (PERMANENT) ---
             if (problemData && problemData.includes("[PROBLEM]") && SYSTEM_HEALTH.mongo) {
-                // Run in background (don't await) to speed up response
+                // Background save (no await)
                 MathProblemCache.create({
                     topic: topic,
                     difficulty: difficulty,
                     raw_text: problemData
                 }).catch(e => console.error("Cache Write Error:", e.message));
                 
-                console.log("💾 SAVED: Stored in MongoDB for future use.");
+                console.log("💾 SAVED: Stored in MongoDB Forever.");
             }
         }
 
@@ -379,7 +405,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
         return res.status(403).json({ success: false, message: "Score Rejected (Suspicious)" });
     }
 
-    // 7.3 Database Operation (Merge Logic)
+    // 7.3 Smart Merge Logic
     try {
         const client = await pool.connect();
         
@@ -395,7 +421,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
             // Update Primary Record
             await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [totalScore, targetId]);
             
-            // Delete Duplicates if any
+            // Cleanup Duplicates
             if (rows.length > 1) {
                 const duplicateIds = rows.slice(1).map(r => r.id);
                 await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [duplicateIds]);
@@ -477,7 +503,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
     } catch (err) { res.status(500).send("Gen Error"); }
 });
 
-// 8.3 Admin Dashboard UI
+// 8.3 Admin Dashboard UI (Server-Side Rendered)
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -486,13 +512,19 @@ app.get('/admin/requests', async (req, res) => {
 
         let rows = result.rows.map(r => `
             <tr id="row-${r.id}">
-                <td>#${r.id}</td>
-                <td><b>${r.username}</b></td>
-                <td>${r.score}</td>
-                <td>${new Date(r.request_date).toLocaleDateString()}</td>
+                <td><span class="id-badge">#${r.id}</span></td>
                 <td>
-                    <a href="/admin/generate-cert/${r.id}" target="_blank" class="btn-sm print">🖨️</a>
-                    <button onclick="del(${r.id})" class="btn-sm del">🗑️</button>
+                    <div class="user-cell">
+                        <span class="uname">${r.username}</span>
+                    </div>
+                </td>
+                <td><span class="score-badge">${r.score}</span></td>
+                <td class="date-cell">${new Date(r.request_date).toLocaleDateString()}</td>
+                <td>
+                    <div class="actions">
+                        <a href="/admin/generate-cert/${r.id}" target="_blank" class="btn-icon print" title="Generate">🖨️</a>
+                        <button onclick="del(${r.id})" class="btn-icon del" title="Reject">🗑️</button>
+                    </div>
                 </td>
             </tr>
         `).join('');
@@ -501,34 +533,84 @@ app.get('/admin/requests', async (req, res) => {
             <!DOCTYPE html>
             <html>
             <head>
-                <title>Admin</title>
+                <title>Admin Control</title>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
                 <style>
-                    body { font-family: sans-serif; background: #f1f5f9; padding: 20px; }
-                    .container { max-width: 900px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-                    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
-                    th { background: #3b82f6; color: white; }
-                    .btn-sm { padding: 5px 10px; border: none; border-radius: 5px; cursor: pointer; text-decoration: none; display: inline-block; }
-                    .print { background: #3b82f6; color: white; }
-                    .del { background: #ef4444; color: white; }
+                    body { font-family: 'Inter', sans-serif; background: #f8fafc; color: #1e293b; padding: 40px; margin: 0; }
+                    .container { max-width: 1000px; margin: 0 auto; background: white; padding: 0; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); overflow: hidden; }
+                    
+                    .header { background: #1e293b; color: white; padding: 24px 32px; display: flex; justify-content: space-between; align-items: center; }
+                    .header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+                    .count { background: rgba(255,255,255,0.1); padding: 4px 12px; border-radius: 20px; font-size: 12px; }
+
+                    table { width: 100%; border-collapse: collapse; }
+                    th { background: #f1f5f9; color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 16px 24px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+                    td { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; font-size: 14px; vertical-align: middle; }
+                    tr:hover { background: #f8fafc; }
+
+                    .id-badge { font-family: monospace; color: #94a3b8; font-size: 12px; }
+                    .uname { font-weight: 600; color: #0f172a; }
+                    .score-badge { background: #dbeafe; color: #1e40af; padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 12px; }
+                    
+                    .actions { display: flex; gap: 8px; }
+                    .btn-icon { width: 32px; height: 32px; display: flex; alignItems: center; justify-content: center; border-radius: 8px; border: none; cursor: pointer; text-decoration: none; font-size: 14px; transition: all 0.2s; }
+                    .print { background: #3b82f6; color: white; display: flex; align-items: center; justify-content: center;}
+                    .del { background: #fee2e2; color: #ef4444; }
+                    .del:hover { background: #ef4444; color: white; }
+
                 </style>
             </head>
             <body>
                 <div class="container">
-                    <h1>👮‍♂️ Admin Panel</h1>
-                    <table><thead><tr><th>ID</th><th>User</th><th>Score</th><th>Date</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="5">No data</td></tr>'}</tbody></table>
+                    <div class="header">
+                        <h1>🛡️ Admin Panel</h1>
+                        <span class="count">${result.rows.length} Requests</span>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th width="80">ID</th>
+                                <th>Candidate</th>
+                                <th width="100">Score</th>
+                                <th width="150">Date</th>
+                                <th width="120">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows || '<tr><td colspan="5" style="text-align:center; padding: 40px; color: #94a3b8;">No pending requests found.</td></tr>'}
+                        </tbody>
+                    </table>
                 </div>
                 <script>
                     async function del(id) {
-                        if(!confirm('Delete?')) return;
-                        await fetch('/admin/delete-request/'+id, {method:'DELETE'});
-                        document.getElementById('row-'+id).remove();
+                        if(!confirm('⚠️ Are you sure you want to permanently delete Request #' + id + '?')) return;
+                        
+                        const row = document.getElementById('row-'+id);
+                        row.style.opacity = '0.5';
+                        
+                        try {
+                            const res = await fetch('/admin/delete-request/'+id, {method:'DELETE'});
+                            const data = await res.json();
+                            
+                            if(data.success) {
+                                row.remove();
+                            } else {
+                                alert('Error: ' + data.message);
+                                row.style.opacity = '1';
+                            }
+                        } catch (e) {
+                            alert('Network Error');
+                            row.style.opacity = '1';
+                        }
                     }
                 </script>
             </body>
             </html>
         `);
-    } catch (err) { res.status(500).send("Error"); }
+    } catch (err) { 
+        console.error(err);
+        res.status(500).send("Admin Panel Error"); 
+    }
 });
 
 app.delete('/admin/delete-request/:id', async (req, res) => {
@@ -546,7 +628,7 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
 
 async function start() {
     console.clear();
-    console.log("🚀 STARTING BRAINTEST SERVER v4.1.0...");
+    console.log("🚀 STARTING BRAINTEST SERVER v4.2.0...");
     await initializeDatabaseTables();
     app.listen(CONFIG.PORT, () => {
         console.log(`✅ SERVER RUNNING ON PORT ${CONFIG.PORT}`);
