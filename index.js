@@ -1,31 +1,23 @@
 /**
  * =================================================================================================
- * PROJECT:      BRAINTEST BACKEND API - ULTIMATE EDITION
- * VERSION:      5.0.0 (STABLE PRODUCTION)
+ * PROJECT:      BRAINTEST API PRO - ULTIMATE HYBRID EDITION
+ * VERSION:      5.5.0 (STABLE PRODUCTION)
  * AUTHOR:       BRAINTEST TEAM
  * ENVIRONMENT:  Node.js / Express / PostgreSQL / MongoDB
- * * [DESCRIPTION]
- * នេះគឺជាកូដ Backend កម្រិត Enterprise ដែលត្រូវបានរចនាឡើងដើម្បីដោះស្រាយបញ្ហាទាំងអស់របស់អ្នក។
- * វាមានប្រព័ន្ធ "Self-Healing" សម្រាប់ Database និងប្រព័ន្ធតាមដាន IP ដ៏ច្បាស់លាស់។
+ * * [SYSTEM OVERVIEW]
+ * នេះគឺជាប្រព័ន្ធ Backend កម្រិត Enterprise ដែលភ្ជាប់ Database ពីរប្រភេទចូលគ្នា៖
+ * 1. PostgreSQL: រក្សាទុកទិន្នន័យសំខាន់ៗ (User Scores, Certificates) ដែលមិនអាចបាត់បង់បាន។
+ * 2. MongoDB:    ប្រើជា "Permanent Cache" សម្រាប់រក្សាទុកលំហាត់ដែល AI បង្កើតហើយ។
  * * [KEY FEATURES]
- * 1. HYBRID DATABASE SYSTEM:
- * - PostgreSQL: សម្រាប់ Leaderboard & Certificate (Persistent Data).
- * - MongoDB: សម្រាប់ Global Caching (Permanent Storage).
- * - AUTO-FIX: កូដនឹងជួសជុល MongoDB URL ដោយស្វ័យប្រវត្តិបើអ្នកភ្លេចដាក់ 'mongodb+srv://'.
- * * 2. INTELLIGENT LOGIC (25/75):
- * - 25% នៃសំណើនឹងត្រូវបានដកស្រង់ចេញពី Cache (MongoDB)។
- * - 75% នឹងត្រូវបានបង្កើតថ្មីដោយ AI (Gemini) ហើយរក្សាទុកចូល Cache ភ្លាមៗ។
- * * 3. ADVANCED IP TRACKING:
- * - កត់ត្រា IP របស់អ្នកចូលទស្សនាទាំងអស់។
- * - បង្ហាញ IP នៅក្នុង Console Logs និង Admin Dashboard។
- * * 4. SMART MERGE LEADERBOARD:
- * - បូកពិន្ទុបញ្ចូលគ្នាសម្រាប់ឈ្មោះដូចគ្នា។
- * - លុប ID ស្ទួនចោលដោយស្វ័យប្រវត្តិ។
- * * =================================================================================================
+ * - 🛡️ Smart Leaderboard: បូកពិន្ទុបញ្ចូលគ្នា និងលុប ID ស្ទួនដោយស្វ័យប្រវត្តិ។
+ * - 🤖 AI + Cache Hybrid: ប្រើរូបមន្ត 25% Cache / 75% AI ដើម្បីសន្សំសំចៃ Cost និងបង្កើនល្បឿន។
+ * - 📊 Live Dashboard: បង្ហាញ Status នៃ Database ទាំងពីរ និង Traffic ផ្ទាល់នៅលើ Root URL។
+ * - 🔌 Auto-Fix Connection: ប្រព័ន្ធព្យាយាមកែតម្រូវ MongoDB URI ដោយខ្លួនឯង។
+ * =================================================================================================
  */
 
 // =================================================================================================
-// SECTION 1: LIBRARY IMPORTS & INITIALIZATION
+// SECTION 1: LIBRARY IMPORTS & SYSTEM CONFIGURATION
 // =================================================================================================
 
 // 1.1 Load Environment Variables
@@ -40,32 +32,24 @@ const mongoose = require('mongoose');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 
-// 1.3 Initialize Express App
-const app = express();
-
-// =================================================================================================
-// SECTION 2: SYSTEM CONFIGURATION & VALIDATION
-// =================================================================================================
-
-// 2.1 Configuration Object
+// 1.3 System Configuration Object
 const CONFIG = {
     PORT: process.env.PORT || 3000,
     ENV: process.env.NODE_ENV || 'development',
     
     // Database Configs
-    DB_URL: process.env.DATABASE_URL,
-    MONGO_URI: process.env.MONGODB_URI,
+    DB_URL: process.env.DATABASE_URL,    // PostgreSQL
+    MONGO_URI: process.env.MONGODB_URI,  // MongoDB
     
-    // API Keys
+    // AI Config
     AI_KEY: process.env.GEMINI_API_KEY,
     AI_MODEL: "gemini-2.5-flash",
+    
+    // External Services
     IMG_API: process.env.EXTERNAL_IMAGE_API,
-    
-    // Security
     OWNER_IP: process.env.OWNER_IP || '127.0.0.1',
-    TRUST_PROXY: 1, // Required for Render to see real IPs
     
-    // Game Rules
+    // Anti-Cheat Rules
     ALLOWED_SCORES: {
         "Easy": 5,
         "Medium": 10,
@@ -74,7 +58,7 @@ const CONFIG = {
     }
 };
 
-// 2.2 Global State & Statistics (In-Memory)
+// 1.4 Global State (For Dashboard Monitoring)
 const SYSTEM_STATE = {
     startTime: Date.now(),
     postgresConnected: false,
@@ -83,24 +67,23 @@ const SYSTEM_STATE = {
     totalGamesGenerated: 0,
     cacheHits: 0,
     aiCalls: 0,
-    uniqueIPs: new Set(), // Store unique visitor IPs
-    recentLogs: [] // Store last 50 logs for dashboard
+    activeVisitors: new Set(),
+    recentLogs: [] // Stores last 50 logs
 };
 
 // =================================================================================================
-// SECTION 3: UTILITY FUNCTIONS & LOGGING
+// SECTION 2: UTILITY FUNCTIONS & LOGGING SYSTEM
 // =================================================================================================
 
 /**
- * Custom Logger Function
- * Logs to console and saves to memory for Dashboard viewing.
+ * Custom Logger: Logs to console AND memory for the dashboard
  */
 function logSystem(type, message, details = '') {
-    const timestamp = new Date().toLocaleTimeString('km-KH', { hour12: false });
+    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
     let icon = 'ℹ️';
     
     switch(type) {
-        case 'INFO': icon = 'ℹ️'; break;
+        case 'INFO': icon = '🔹'; break;
         case 'SUCCESS': icon = '✅'; break;
         case 'WARN': icon = '⚠️'; break;
         case 'ERROR': icon = '❌'; break;
@@ -109,57 +92,55 @@ function logSystem(type, message, details = '') {
         case 'TRAFFIC': icon = '📡'; break;
     }
 
-    const logString = `[${timestamp}] ${icon} ${message} ${details}`;
-    console.log(logString);
+    // Console Output
+    console.log(`[${timestamp}] ${icon} ${message} ${details ? '| ' + details : ''}`);
 
-    // Save to memory (Keep only last 50)
+    // Dashboard Memory Storage (FIFO)
     SYSTEM_STATE.recentLogs.unshift({ time: timestamp, type, msg: message, det: details });
     if (SYSTEM_STATE.recentLogs.length > 50) SYSTEM_STATE.recentLogs.pop();
 }
 
 /**
- * MongoDB URL Fixer
- * Automatically prepends 'mongodb+srv://' if missing.
+ * MongoDB URI Cleaner
+ * Fixes missing prefixes/protocols automatically.
  */
-function fixMongoURI(uri) {
+function sanitizeMongoURI(uri) {
     if (!uri) return null;
-    let fixedURI = uri.trim();
-    if (!fixedURI.startsWith('mongodb://') && !fixedURI.startsWith('mongodb+srv://')) {
-        logSystem('WARN', 'MongoDB URI format incorrect. Auto-fixing...');
-        return `mongodb+srv://${fixedURI}`;
+    let clean = uri.trim();
+    // If user forgot protocol, assume SRV
+    if (!clean.startsWith('mongodb://') && !clean.startsWith('mongodb+srv://')) {
+        logSystem('WARN', 'Auto-fixing MongoDB URI', '(Adding mongodb+srv:// prefix)');
+        return `mongodb+srv://${clean}`;
     }
-    return fixedURI;
+    return clean;
 }
 
 // =================================================================================================
-// SECTION 4: DATABASE CONNECTION MANAGERS
+// SECTION 3: DATABASE CONNECTION MANAGERS
 // =================================================================================================
 
-// 4.1 PostgreSQL Manager (Leaderboard)
+/**
+ * 3.1 PostgreSQL Connection (Primary DB)
+ */
 const pool = new Pool({
     connectionString: CONFIG.DB_URL,
-    ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 10000,
-    idleTimeoutMillis: 30000,
+    ssl: { rejectUnauthorized: false }, // Necessary for Render/Neon
+    connectionTimeoutMillis: 5000,
     max: 20
 });
 
-pool.on('connect', () => {
-    // Connection event (silent to reduce noise)
-});
-
+// Postgres Event Listeners
 pool.on('error', (err) => {
-    logSystem('ERROR', 'PostgreSQL Pool Error', err.message);
     SYSTEM_STATE.postgresConnected = false;
+    logSystem('ERROR', 'PostgreSQL Pool Error', err.message);
 });
 
 async function initPostgres() {
     try {
         const client = await pool.connect();
-        logSystem('SUCCESS', 'PostgreSQL Connected', '(Leaderboard System Ready)');
         SYSTEM_STATE.postgresConnected = true;
         
-        // Auto-Create Tables
+        // Auto-Create Tables (Schema Migration)
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -178,36 +159,38 @@ async function initPostgres() {
                 request_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        logSystem('DB', 'Database Tables Verified/Created');
+        logSystem('SUCCESS', 'PostgreSQL Connected', '(Tables Verified)');
         client.release();
     } catch (err) {
         logSystem('ERROR', 'PostgreSQL Init Failed', err.message);
     }
 }
 
-// 4.2 MongoDB Manager (Caching)
+/**
+ * 3.2 MongoDB Connection (Cache DB)
+ */
 async function initMongo() {
-    const cleanURI = fixMongoURI(CONFIG.MONGO_URI);
+    const validURI = sanitizeMongoURI(CONFIG.MONGO_URI);
     
-    if (!cleanURI) {
-        logSystem('WARN', 'MongoDB URI missing. Cache disabled.');
+    if (!validURI) {
+        logSystem('WARN', 'MongoDB URI Missing', 'Caching Disabled');
         return;
     }
 
     try {
-        await mongoose.connect(cleanURI, {
-            serverSelectionTimeoutMS: 5000,
+        await mongoose.connect(validURI, {
+            serverSelectionTimeoutMS: 5000, // Fail fast if network bad
             socketTimeoutMS: 45000,
         });
-        logSystem('SUCCESS', 'MongoDB Connected', '(Global Cache Ready)');
         SYSTEM_STATE.mongoConnected = true;
+        logSystem('SUCCESS', 'MongoDB Connected', '(Cache System Ready)');
     } catch (err) {
-        logSystem('ERROR', 'MongoDB Connection Failed', err.message);
         SYSTEM_STATE.mongoConnected = false;
+        logSystem('ERROR', 'MongoDB Failed', err.message);
     }
 }
 
-// Mongoose Events
+// Mongoose Event Listeners
 mongoose.connection.on('connected', () => SYSTEM_STATE.mongoConnected = true);
 mongoose.connection.on('disconnected', () => {
     if (SYSTEM_STATE.mongoConnected) logSystem('WARN', 'MongoDB Disconnected');
@@ -215,237 +198,203 @@ mongoose.connection.on('disconnected', () => {
 });
 
 // =================================================================================================
-// SECTION 5: MONGOOSE MODELS (SCHEMA DEFINITIONS)
+// SECTION 4: MONGOOSE SCHEMAS (CACHE MODELS)
 // =================================================================================================
 
-// Problem Cache Schema (Permanent Storage - No Expiry)
-const problemCacheSchema = new mongoose.Schema({
+// Schema for storing math problems permanently
+const problemSchema = new mongoose.Schema({
     topic: { type: String, required: true, index: true },
     difficulty: { type: String, required: true, index: true },
     raw_text: { type: String, required: true },
-    createdAt: { type: Date, default: Date.now }, // No expires option = Forever
-    source_ip: { type: String } // Track who generated this
+    source_ip: { type: String },
+    createdAt: { type: Date, default: Date.now } // No Expiry = Permanent
 });
 
-const MathProblemCache = mongoose.model('MathProblemCache', problemCacheSchema);
+const MathCache = mongoose.model('MathProblemCache', problemSchema);
 
 // =================================================================================================
-// SECTION 6: MIDDLEWARE SETUP
+// SECTION 5: MIDDLEWARE & SERVER SETUP
 // =================================================================================================
 
-// 6.1 Trust Proxy (Crucial for Render IP Tracking)
-app.set('trust proxy', CONFIG.TRUST_PROXY);
+const app = express();
 
-// 6.2 CORS & Body Parsing
+// 5.1 Trust Proxy (For Render IP Tracking)
+app.set('trust proxy', 1);
+
+// 5.2 Core Middleware
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
-
-// 6.3 Static Files
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 6.4 Advanced Traffic Logger & IP Tracker
+// 5.3 Advanced Traffic Tracker
 app.use((req, res, next) => {
     SYSTEM_STATE.totalRequests++;
+    const userIP = req.ip || req.connection.remoteAddress;
+    SYSTEM_STATE.activeVisitors.add(userIP);
     
-    // Capture Real IP
-    const realIP = req.ip || req.connection.remoteAddress;
-    SYSTEM_STATE.uniqueIPs.add(realIP);
-    
-    // Log API calls only (to keep logs clean)
+    // Log meaningful API hits only
     if (req.url.startsWith('/api') || req.url.startsWith('/admin')) {
-        logSystem('TRAFFIC', `${req.method} ${req.url}`, `IP: ${realIP}`);
+        logSystem('TRAFFIC', `${req.method} ${req.url}`, `IP: ${userIP}`);
     }
-    
     next();
 });
 
-// 6.5 Rate Limiter (AI Endpoints Only)
-const aiLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000, // 1 hour
-    max: 20, // limit each IP to 20 requests per windowMs
-    message: { error: "Rate limit exceeded. Please wait 1 hour." },
-    standardHeaders: true,
-    legacyHeaders: false,
+// 5.4 AI Rate Limiter
+const aiRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 Hour
+    max: 20, // 20 Requests
+    message: { error: "Rate limit exceeded. Please wait." },
+    skip: (req) => req.ip === CONFIG.OWNER_IP
 });
 
 // =================================================================================================
-// SECTION 7: API ROUTES - SYSTEM HEALTH & DEBUG
+// SECTION 6: SYSTEM DASHBOARD (ROOT ROUTE)
 // =================================================================================================
 
-// 7.1 Root Dashboard (System Status)
 app.get('/', (req, res) => {
-    // Calculate Uptime
+    // Uptime Calculation
     const uptime = process.uptime();
-    const d = Math.floor(uptime / (3600*24));
-    const h = Math.floor(uptime % (3600*24) / 3600);
-    const m = Math.floor(uptime % 3600 / 60);
+    const d = Math.floor(uptime / 86400);
+    const h = Math.floor((uptime % 86400) / 3600);
+    const m = Math.floor((uptime % 3600) / 60);
 
-    // Render HTML Dashboard
-    res.send(`
+    // Dynamic Status Colors
+    const pgClass = SYSTEM_STATE.postgresConnected ? 'status-ok' : 'status-fail';
+    const pgText = SYSTEM_STATE.postgresConnected ? 'CONNECTED' : 'FAILED';
+    const mgClass = SYSTEM_STATE.mongoConnected ? 'status-ok' : 'status-fail';
+    const mgText = SYSTEM_STATE.mongoConnected ? 'CONNECTED' : 'FAILED';
+
+    const html = `
     <!DOCTYPE html>
-    <html lang="km">
+    <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>BrainTest Server Status</title>
+        <title>BrainTest Hybrid Server</title>
         <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
         <style>
-            :root { --bg: #0f172a; --surface: #1e293b; --primary: #3b82f6; --text: #f8fafc; --success: #10b981; --error: #ef4444; }
-            body { background-color: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; min-height: 100vh; display: flex; justify-content: center; }
-            .dashboard { width: 100%; max-width: 800px; display: grid; gap: 20px; }
+            :root { --bg: #0f172a; --card: #1e293b; --text: #f1f5f9; --green: #10b981; --red: #ef4444; --blue: #3b82f6; }
+            body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; min-height: 100vh; display: flex; justify-content: center; align-items: center; }
+            .container { width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 20px; }
             
-            .card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid #334155; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+            .card { background: var(--card); border-radius: 16px; padding: 25px; border: 1px solid #334155; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
             
-            h1 { margin: 0; font-size: 24px; color: var(--primary); display: flex; align-items: center; gap: 10px; }
-            h2 { margin: 0 0 15px 0; font-size: 16px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
-            
-            .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
-            .status-item { background: #020617; padding: 15px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; }
-            .status-label { font-weight: 600; font-size: 14px; color: #cbd5e1; }
-            .status-badge { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; padding: 4px 8px; border-radius: 4px; }
-            .online { background: rgba(16, 185, 129, 0.2); color: var(--success); }
-            .offline { background: rgba(239, 68, 68, 0.2); color: var(--error); }
-            
-            .log-window { background: #000; font-family: 'JetBrains Mono', monospace; font-size: 12px; height: 300px; overflow-y: auto; padding: 15px; border-radius: 12px; color: #a5b4fc; }
-            .log-entry { margin-bottom: 5px; border-bottom: 1px solid #1e1e24; padding-bottom: 2px; }
-            
-            .btn { display: inline-block; background: var(--primary); color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; text-align: center; }
-            .btn:hover { filter: brightness(1.1); }
+            h1 { margin: 0; font-size: 22px; color: var(--blue); letter-spacing: -0.5px; display: flex; align-items: center; gap: 10px; }
+            .subtitle { font-size: 12px; color: #94a3b8; margin-top: 5px; font-family: 'JetBrains Mono', monospace; }
 
-            .stats-row { display: flex; justify-content: space-between; margin-top: 10px; font-size: 13px; color: #64748b; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
+            .stat-box { background: #020617; padding: 15px; border-radius: 12px; border: 1px solid #1e293b; }
+            .label { font-size: 11px; color: #64748b; font-weight: 700; text-transform: uppercase; }
+            .val { font-size: 14px; font-weight: 700; margin-top: 5px; font-family: 'JetBrains Mono', monospace; }
+            
+            .status-ok { color: var(--green); text-shadow: 0 0 10px rgba(16, 185, 129, 0.3); }
+            .status-fail { color: var(--red); text-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
+
+            .log-viewer { height: 250px; overflow-y: auto; background: #000; border-radius: 12px; padding: 15px; font-family: 'JetBrains Mono', monospace; font-size: 11px; border: 1px solid #334155; }
+            .log-line { margin-bottom: 6px; border-bottom: 1px solid #1e1e1e; padding-bottom: 4px; display: flex; gap: 10px; }
+            .log-time { color: #64748b; min-width: 60px; }
+            .log-msg { color: #e2e8f0; }
+            .log-det { color: #475569; }
+
+            .btn { display: block; width: 100%; padding: 15px; background: var(--blue); color: white; text-align: center; text-decoration: none; border-radius: 12px; font-weight: 700; margin-top: 10px; transition: 0.2s; }
+            .btn:hover { background: #2563eb; }
         </style>
     </head>
     <body>
-        <div class="dashboard">
+        <div class="container">
             <div class="card">
-                <h1>🚀 BRAINTEST SERVER v5.0.0</h1>
-                <div class="stats-row">
-                    <span>Uptime: ${d}d ${h}h ${m}m</span>
-                    <span>Env: ${CONFIG.ENV}</span>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2>System Health</h2>
-                <div class="status-grid">
-                    <div class="status-item">
-                        <span class="status-label">PostgreSQL</span>
-                        <span class="status-badge ${SYSTEM_STATE.postgresConnected ? 'online' : 'offline'}">
-                            ${SYSTEM_STATE.postgresConnected ? 'CONNECTED' : 'FAILED'}
-                        </span>
+                <h1>🚀 BRAINTEST SERVER v5.5.0</h1>
+                <div class="subtitle">Environment: ${CONFIG.ENV.toUpperCase()} | Uptime: ${d}d ${h}h ${m}m</div>
+                
+                <div class="grid">
+                    <div class="stat-box">
+                        <div class="label">PostgreSQL</div>
+                        <div class="val ${pgClass}">● ${pgText}</div>
                     </div>
-                    <div class="status-item">
-                        <span class="status-label">MongoDB</span>
-                        <span class="status-badge ${SYSTEM_STATE.mongoConnected ? 'online' : 'offline'}">
-                            ${SYSTEM_STATE.mongoConnected ? 'CONNECTED' : 'FAILED'}
-                        </span>
+                    <div class="stat-box">
+                        <div class="label">MongoDB</div>
+                        <div class="val ${mgClass}">● ${mgText}</div>
                     </div>
-                    <div class="status-item">
-                        <span class="status-label">AI Engine</span>
-                        <span class="status-badge ${CONFIG.AI_KEY ? 'online' : 'offline'}">
-                            ${CONFIG.AI_KEY ? 'READY' : 'MISSING KEY'}
-                        </span>
+                    <div class="stat-box">
+                        <div class="label">Total Traffic</div>
+                        <div class="val">${SYSTEM_STATE.totalRequests} Reqs</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="label">Unique IPs</div>
+                        <div class="val">${SYSTEM_STATE.activeVisitors.size}</div>
                     </div>
                 </div>
             </div>
 
             <div class="card">
-                <h2>Live Statistics</h2>
-                <div class="status-grid">
-                    <div class="status-item">
-                        <span class="status-label">Unique Visitors</span>
-                        <span style="color:white; font-weight:bold;">${SYSTEM_STATE.uniqueIPs.size}</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-label">Games Played</span>
-                        <span style="color:white; font-weight:bold;">${SYSTEM_STATE.totalGamesGenerated}</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-label">Cache Hits</span>
-                        <span style="color:#38bdf8; font-weight:bold;">${SYSTEM_STATE.cacheHits}</span>
-                    </div>
+                <div class="label" style="margin-bottom:10px;">SYSTEM LOGS (REAL-TIME)</div>
+                <div class="log-viewer">
+                    ${SYSTEM_STATE.recentLogs.map(l => `
+                        <div class="log-line">
+                            <span class="log-time">${l.time}</span>
+                            <span class="log-msg">${l.msg}</span>
+                            <span class="log-det">${l.det}</span>
+                        </div>
+                    `).join('')}
                 </div>
             </div>
 
-            <div class="card">
-                <h2>Real-time Logs</h2>
-                <div class="log-window">
-                    ${SYSTEM_STATE.recentLogs.map(l => 
-                        `<div class="log-entry"><span style="color:#64748b">[${l.time}]</span> <span style="color:#e2e8f0">${l.msg}</span> <span style="color:#94a3b8">${l.det}</span></div>`
-                    ).join('')}
-                </div>
-            </div>
-
-            <a href="/admin/requests" class="btn">🔐 ACCESS ADMIN PANEL</a>
+            <a href="/admin/requests" class="btn">🔐 Access Admin Panel</a>
         </div>
-        <script>
-            // Auto-refresh every 10 seconds
-            setTimeout(() => window.location.reload(), 10000);
-        </script>
+        <script>setTimeout(() => window.location.reload(), 15000);</script>
     </body>
     </html>
-    `);
-});
-
-// 7.2 Debug IP Route
-// Helps you see exactly what IP Render is forwarding
-app.get('/api/debug-ip', (req, res) => {
-    res.json({
-        ip: req.ip,
-        remoteAddress: req.connection.remoteAddress,
-        xForwardedFor: req.headers['x-forwarded-for'],
-        note: "This IP is what the server uses for Rate Limiting & Leaderboard."
-    });
+    `;
+    res.send(html);
 });
 
 // =================================================================================================
-// SECTION 8: CORE GAME LOGIC (25% CACHE / 75% AI)
+// SECTION 7: HYBRID AI & CACHE LOGIC (The Core Feature)
 // =================================================================================================
 
-app.post('/api/generate-problem', aiLimiter, async (req, res) => {
+app.post('/api/generate-problem', aiRateLimit, async (req, res) => {
     const { prompt, topic, difficulty } = req.body;
 
-    // 8.1 Validation
+    // 7.1 Input Validation
     if (!prompt || !topic || !difficulty) {
-        return res.status(400).json({ error: "Missing prompt, topic, or difficulty" });
+        return res.status(400).json({ error: "Missing required fields." });
     }
 
-    // 8.2 Update Stats
     SYSTEM_STATE.totalGamesGenerated++;
 
-    // 8.3 Determine Strategy
-    const CACHE_CHANCE = 0.25; // 25% chance to use cache
-    const useCache = Math.random() < CACHE_CHANCE;
+    // 7.2 Strategy Decision (25% Cache / 75% AI)
+    const CACHE_CHANCE = 0.25; 
+    const tryCache = Math.random() < CACHE_CHANCE;
     
-    let finalProblem = null;
+    let problemData = null;
     let source = "ai";
 
-    // --- STRATEGY A: ATTEMPT CACHE (MongoDB) ---
-    if (useCache && SYSTEM_STATE.mongoConnected) {
-        logSystem('DB', `Strategy 25%: Checking MongoDB for ${topic}...`);
-        
+    // --- STRATEGY A: TRY MONGODB CACHE ---
+    if (tryCache && SYSTEM_STATE.mongoConnected) {
+        logSystem('DB', `Strategy 25%: Searching Cache for ${topic}...`);
         try {
-            const cachedDocs = await MathProblemCache.aggregate([
+            // Retrieve 1 random problem matching criteria
+            const cachedDocs = await MathCache.aggregate([
                 { $match: { topic: topic, difficulty: difficulty } },
                 { $sample: { size: 1 } }
             ]);
 
             if (cachedDocs.length > 0) {
-                finalProblem = cachedDocs[0].raw_text;
+                problemData = cachedDocs[0].raw_text;
                 source = "cache";
                 SYSTEM_STATE.cacheHits++;
                 logSystem('SUCCESS', 'Cache Hit', '(Served from MongoDB)');
             } else {
-                logSystem('INFO', 'Cache Miss', '(MongoDB empty for this topic)');
+                logSystem('INFO', 'Cache Miss', '(Topic empty in DB)');
             }
         } catch (e) {
             logSystem('WARN', 'Cache Read Error', e.message);
         }
     }
 
-    // --- STRATEGY B: GENERATE NEW (AI) ---
-    if (!finalProblem) {
+    // --- STRATEGY B: FALLBACK TO GEMINI AI ---
+    if (!problemData) {
         logSystem('AI', 'Generating with Gemini', '(75% or Fallback)');
         SYSTEM_STATE.aiCalls++;
 
@@ -455,83 +404,80 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
             
             const result = await model.generateContent(prompt);
             const response = await result.response;
-            finalProblem = response.text();
+            problemData = response.text();
 
             // --- STRATEGY C: SAVE TO CACHE (PERMANENT) ---
-            if (finalProblem && finalProblem.includes("[PROBLEM]") && SYSTEM_STATE.mongoConnected) {
-                // Async save - don't wait
-                MathProblemCache.create({
+            if (problemData && SYSTEM_STATE.mongoConnected) {
+                // Async Save: Don't wait for it to finish, just log it
+                MathCache.create({
                     topic,
                     difficulty,
-                    raw_text: finalProblem,
+                    raw_text: problemData,
                     source_ip: req.ip
-                }).catch(err => logSystem('WARN', 'Cache Write Failed', err.message));
-                
-                logSystem('DB', 'Saved new problem to MongoDB', '(Forever)');
+                }).then(() => logSystem('DB', 'Saved to Cache', '(Permanent)'))
+                  .catch(e => logSystem('WARN', 'Cache Write Failed', e.message));
             }
-
         } catch (err) {
-            logSystem('ERROR', 'AI Generation Failed', err.message);
-            return res.status(500).json({ error: "Failed to generate problem" });
+            logSystem('ERROR', 'AI Gen Failed', err.message);
+            return res.status(500).json({ error: "AI Service Unavailable" });
         }
     }
 
-    res.json({ text: finalProblem, source });
+    res.json({ text: problemData, source });
 });
 
 // =================================================================================================
-// SECTION 9: LEADERBOARD SYSTEM (POSTGRESQL - SMART MERGE)
+// SECTION 8: LEADERBOARD LOGIC (POSTGRESQL SMART MERGE)
 // =================================================================================================
 
-// 9.1 Submit Score
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
 
-    // Validate Input
-    if (!username || typeof score !== 'number' || !difficulty) return res.status(400).json({ message: "Bad Request" });
+    // 8.1 Validation
+    if (!username || typeof score !== 'number' || !difficulty) return res.status(400).json({ error: "Invalid Data" });
 
-    // Anti-Cheat
+    // 8.2 Anti-Cheat
     const maxScore = CONFIG.ALLOWED_SCORES[difficulty] || 0;
     if (score > maxScore) {
-        logSystem('WARN', `Cheating attempt blocked: ${username} score ${score}`);
-        return res.status(403).json({ message: "Score rejected" });
+        logSystem('WARN', `Cheat Attempt: ${username}`, `Score: ${score}`);
+        return res.status(403).json({ error: "Score Rejected" });
     }
 
     try {
         const client = await pool.connect();
         
-        // --- SMART MERGE LOGIC ---
-        // 1. Find all records for this user & difficulty
+        // --- SMART MERGE ALGORITHM ---
+        // 1. Find existing rows
         const checkRes = await client.query(
             'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC',
             [username, difficulty]
         );
 
         if (checkRes.rows.length > 0) {
-            // Existing User Found
+            // MERGE: Keep Oldest ID (Target), Sum Scores, Delete others
             const rows = checkRes.rows;
-            const targetId = rows[0].id; // Keep oldest ID
+            const targetId = rows[0].id;
             
-            // Sum all scores (previous + new)
-            const oldTotal = rows.reduce((sum, r) => sum + r.score, 0);
-            const newTotal = oldTotal + score;
+            // Calculate Total
+            const currentTotal = rows.reduce((acc, row) => acc + row.score, 0);
+            const newTotal = currentTotal + score;
 
-            // Update Target Record
+            // Update Target
             await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [newTotal, targetId]);
-            logSystem('DB', `Merged Score for ${username}`, `${oldTotal} + ${score} = ${newTotal}`);
+            logSystem('DB', `Merged Score: ${username}`, `Total: ${newTotal}`);
 
-            // Cleanup Duplicates (if any)
+            // Cleanup Duplicates
             if (rows.length > 1) {
-                const duplicateIds = rows.slice(1).map(r => r.id);
-                await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [duplicateIds]);
+                const dupIds = rows.slice(1).map(r => r.id);
+                await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [dupIds]);
             }
         } else {
-            // New User Insert
+            // INSERT NEW
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
                 [username, score, difficulty, req.ip]
             );
-            logSystem('DB', `New Leaderboard Entry: ${username}`);
+            logSystem('DB', `New Entry: ${username}`, `Score: ${score}`);
         }
 
         client.release();
@@ -543,7 +489,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     }
 });
 
-// 9.2 Get Top Scores
+// Get Top 100
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -562,24 +508,20 @@ app.get('/api/leaderboard/top', async (req, res) => {
 });
 
 // =================================================================================================
-// SECTION 10: ADMIN PANEL & CERTIFICATES
+// SECTION 9: ADMIN PANEL & CERTIFICATES
 // =================================================================================================
 
-// 10.1 Certificate Request
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
     try {
         const client = await pool.connect();
         await client.query('INSERT INTO certificate_requests (username, score) VALUES ($1, $2)', [username, score]);
         client.release();
-        logSystem('INFO', `Cert Request: ${username}`, `Score: ${score}`);
+        logSystem('INFO', `Cert Request: ${username}`, `${score} pts`);
         res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ success: false });
-    }
+    } catch (e) { res.status(500).json({ success: false }); }
 });
 
-// 10.2 Generate Certificate Image
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -587,34 +529,28 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         client.release();
 
         if (result.rows.length === 0) return res.status(404).send("Not Found");
-
+        
         const { username, score } = result.rows[0];
         const dateStr = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-        const message = `Score: ${score}%0A%0ADate Issued: ${dateStr}%0A%0AWith immense pride... Presented by: braintest.fun`;
+        const msg = `Score: ${score}%0A%0ADate Issued: ${dateStr}%0A%0AWith immense pride... Presented by: braintest.fun`;
         
         const finalUrl = CONFIG.IMG_API + 
             `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodeURIComponent(username.toUpperCase())}&txt-fit=max&w=1800` +
-            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodeURIComponent(message)}&mark-w=1600`;
-
+            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodeURIComponent(msg)}&mark-w=1600`;
+            
         res.redirect(finalUrl);
-    } catch (err) {
-        res.status(500).send("Generation Error");
-    }
+    } catch (e) { res.status(500).send("Error"); }
 });
 
-// 10.3 Delete Request
 app.delete('/admin/delete-request/:id', async (req, res) => {
     try {
         const client = await pool.connect();
         await client.query('DELETE FROM certificate_requests WHERE id = $1', [req.params.id]);
         client.release();
         res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ success: false });
-    }
+    } catch (e) { res.status(500).json({ success: false }); }
 });
 
-// 10.4 ADMIN DASHBOARD HTML (Server Side Rendered)
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -623,87 +559,45 @@ app.get('/admin/requests', async (req, res) => {
 
         const rows = result.rows.map(r => `
             <tr id="row-${r.id}">
-                <td><span class="badge-id">#${r.id}</span></td>
-                <td><div class="user-row"><span class="uname">${r.username}</span></div></td>
-                <td><span class="badge-score">${r.score}</span></td>
+                <td>#${r.id}</td>
+                <td><b>${r.username}</b></td>
+                <td><span style="background:#e0f2fe; color:#0369a1; padding:2px 6px; border-radius:4px;">${r.score}</span></td>
                 <td>${new Date(r.request_date).toLocaleDateString()}</td>
                 <td>
-                    <div class="actions">
-                        <a href="/admin/generate-cert/${r.id}" target="_blank" class="btn-icon print" title="Print">🖨️</a>
-                        <button onclick="del(${r.id})" class="btn-icon del" title="Delete">🗑️</button>
-                    </div>
+                    <a href="/admin/generate-cert/${r.id}" target="_blank" style="text-decoration:none;">🖨️</a>
+                    <span onclick="del(${r.id})" style="cursor:pointer; margin-left:10px;">🗑️</span>
                 </td>
             </tr>
         `).join('');
 
         res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Admin Panel</title>
-                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
-                <style>
-                    body { font-family: 'Inter', sans-serif; background: #f1f5f9; padding: 40px; margin: 0; color: #334155; }
-                    .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); overflow: hidden; }
-                    .header { background: #1e293b; color: white; padding: 24px; display: flex; justify-content: space-between; align-items: center; }
-                    .header h1 { margin: 0; font-size: 18px; }
-                    table { width: 100%; border-collapse: collapse; }
-                    th { background: #f8fafc; color: #64748b; font-size: 12px; text-transform: uppercase; padding: 16px; text-align: left; border-bottom: 1px solid #e2e8f0; }
-                    td { padding: 16px; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
-                    .badge-id { font-family: monospace; color: #94a3b8; }
-                    .uname { font-weight: 600; color: #0f172a; }
-                    .badge-score { background: #dbeafe; color: #1e40af; padding: 4px 8px; border-radius: 6px; font-weight: 600; font-size: 12px; }
-                    .actions { display: flex; gap: 8px; }
-                    .btn-icon { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; border: none; cursor: pointer; text-decoration: none; transition: 0.2s; }
-                    .print { background: #3b82f6; color: white; }
-                    .del { background: #fee2e2; color: #ef4444; }
-                    .del:hover { background: #ef4444; color: white; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <h1>🛡️ Admin Dashboard</h1>
-                        <span style="background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; font-size:12px;">${result.rows.length} Pending</span>
-                    </div>
-                    <table>
-                        <thead><tr><th>ID</th><th>User</th><th>Score</th><th>Date</th><th>Action</th></tr></thead>
-                        <tbody>${rows || '<tr><td colspan="5" style="text-align:center; padding:40px;">No Data</td></tr>'}</tbody>
-                    </table>
-                </div>
-                <script>
-                    async function del(id) {
-                        if(!confirm('Delete Request #'+id+'?')) return;
-                        document.getElementById('row-'+id).style.opacity = 0.5;
-                        await fetch('/admin/delete-request/'+id, {method:'DELETE'});
-                        document.getElementById('row-'+id).remove();
-                    }
-                </script>
-            </body>
-            </html>
+            <!DOCTYPE html><html><head><title>Admin</title>
+            <style>body{font-family:sans-serif;padding:30px;background:#f8fafc;} table{width:100%;border-collapse:collapse;background:white;box-shadow:0 1px 3px rgba(0,0,0,0.1);} th,td{padding:12px;border-bottom:1px solid #e2e8f0;text-align:left;} th{background:#f1f5f9;}</style>
+            </head><body><h2>🛡️ Admin Panel (${result.rows.length})</h2>
+            <table><thead><tr><th>ID</th><th>User</th><th>Score</th><th>Date</th><th>Act</th></tr></thead><tbody>${rows}</tbody></table>
+            <script>async function del(id){if(confirm('Del?')){await fetch('/admin/delete-request/'+id,{method:'DELETE'});document.getElementById('row-'+id).remove();}}</script>
+            </body></html>
         `);
-
     } catch (e) { res.status(500).send("Error"); }
 });
 
 // =================================================================================================
-// SECTION 11: SERVER STARTUP SEQUENCE
+// SECTION 10: SYSTEM STARTUP SEQUENCE
 // =================================================================================================
 
 async function startServer() {
     console.clear();
-    console.log("🚀 STARTING SERVER v5.0.0...");
+    logSystem('INFO', `Starting BrainTest Server v5.5.0`);
     
-    // Connect Databases
+    // Initialize Databases
     await initPostgres();
     await initMongo();
 
-    // Start Listener
+    // Start Express
     app.listen(CONFIG.PORT, () => {
         logSystem('SUCCESS', `Server Running on Port ${CONFIG.PORT}`);
-        logSystem('INFO', `Status Page: http://localhost:${CONFIG.PORT}`);
+        logSystem('INFO', `Dashboard Access: http://localhost:${CONFIG.PORT}`);
     });
 }
 
-// Start the engine
 startServer();
