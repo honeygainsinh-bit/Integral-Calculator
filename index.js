@@ -1,12 +1,12 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.0 (Fix Scoring Logic & Leaderboard Merging)
+ * VERSION: 3.1.0 (Enterprise Stable - With Delete Feature)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
- * - LOGIC UPDATE: បូកបញ្ចូលពិន្ទុសម្រាប់ឈ្មោះដដែល (Accumulated Score)
- * - LOGIC UPDATE: ការពារឈ្មោះស្ទួនក្នុង Leaderboard
+ * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
+ * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation (Stable)
  * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ (បន្ថែមមុខងារលុប)
  * =========================================================================================
  */
@@ -23,7 +23,7 @@ const { Pool } = require('pg');
 // --- 2. SERVER CONFIGURATION (កំណត់រចនាសម្ព័ន្ធ) ---
 const app = express();
 const port = process.env.PORT || 3000;
-const MODEL_NAME = "gemini-1.5-flash"; // AI Model Update
+const MODEL_NAME = "gemini-2.5-flash"; // AI Model
 
 // សម្រាប់ការតាមដានស្ថិតិ (In-memory stats)
 let totalPlays = 0;
@@ -49,7 +49,7 @@ const pool = new Pool({
 
 /**
  * មុខងារ: initializeDatabase
- * តួនាទី: បង្កើត Table ដោយស្វ័យប្រវត្តិ និងធានាថា Username អាចស្វែងរកបានលឿន
+ * តួនាទី: បង្កើត Table ដោយស្វ័យប្រវត្តិប្រសិនបើវាមិនទាន់មាន
  */
 async function initializeDatabase() {
     console.log("... ⚙️ កំពុងពិនិត្យ Database Tables ...");
@@ -67,11 +67,6 @@ async function initializeDatabase() {
             );
         `);
 
-        // បន្ថែម Index លើ Username ដើម្បីឱ្យការស្វែងរកឈ្មោះមកបូកពិន្ទុលឿនជាងមុន
-        await client.query(`
-            CREATE INDEX IF NOT EXISTS idx_leaderboard_username ON leaderboard(username);
-        `);
-
         // 2. បង្កើត Table Certificate Requests (សម្រាប់សំណើលិខិតសរសើរ)
         await client.query(`
             CREATE TABLE IF NOT EXISTS certificate_requests (
@@ -83,7 +78,7 @@ async function initializeDatabase() {
             );
         `);
 
-        console.log("✅ Database System: Online & Ready (Logic Updated).");
+        console.log("✅ Database System: Online & Ready.");
         client.release();
     } catch (err) {
         console.error("❌ Database Initialization Failed:", err.message);
@@ -118,7 +113,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2 (Score Fixed)</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.1</p>
         </div>
     `);
 });
@@ -133,7 +128,7 @@ app.get('/stats', (req, res) => {
     });
 });
 
-// --- 6. ROUTES: API FUNCTIONALITY (មុខងារស្នូល - កែសម្រួលថ្មី) ---
+// --- 6. ROUTES: API FUNCTIONALITY (មុខងារស្នូល) ---
 
 // A. បង្កើតលំហាត់ដោយប្រើ AI (Gemini)
 app.post('/api/generate-problem', aiLimiter, async (req, res) => {
@@ -159,10 +154,7 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     }
 });
 
-/**
- * B. ដាក់ពិន្ទុចូល Leaderboard (FIXED: ACCUMULATE SCORE)
- * កែប្រែ៖ ពិនិត្យឈ្មោះមុន បើមានហើយបូកពិន្ទុថែម បើអត់ទាន់មានបង្កើតថ្មី
- */
+// B. ដាក់ពិន្ទុចូល Leaderboard
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
     
@@ -171,73 +163,28 @@ app.post('/api/leaderboard/submit', async (req, res) => {
         return res.status(400).json({ success: false, message: "ទិន្នន័យមិនត្រឹមត្រូវ" });
     }
 
-    // សម្អាតឈ្មោះ (លុប Space ឆ្វេងស្តាំ)
-    const cleanUsername = username.trim();
-
     try {
         const client = await pool.connect();
-        
-        // ជំហានទី ១៖ ពិនិត្យមើលថាតើឈ្មោះនេះមានក្នុងតារាងឬនៅ?
-        const checkUser = await client.query(
-            'SELECT * FROM leaderboard WHERE username = $1', 
-            [cleanUsername]
+        await client.query(
+            'INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
+            [username.substring(0, 50), score, difficulty]
         );
-
-        if (checkUser.rows.length > 0) {
-            // ករណីឈ្មោះមានហើយ => ធ្វើការ UPDATE (បូកពិន្ទុចាស់ + ពិន្ទុថ្មី)
-            // យើងក៏ update difficulty ទៅកម្រិតចុងក្រោយដែលគាត់លេងផងដែរ
-            await client.query(
-                'UPDATE leaderboard SET score = score + $1, difficulty = $2 WHERE username = $3',
-                [score, difficulty, cleanUsername]
-            );
-            console.log(`🔄 Updated score for: ${cleanUsername} (Added ${score})`);
-        } else {
-            // ករណីឈ្មោះថ្មីសុទ្ធ => ធ្វើការ INSERT
-            await client.query(
-                'INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
-                [cleanUsername, score, difficulty]
-            );
-            console.log(`🆕 New user added: ${cleanUsername}`);
-        }
-
         client.release();
-        res.status(201).json({ success: true, message: "ពិន្ទុត្រូវបានរក្សាទុក និងបូកបញ្ចូលគ្នា" });
+        res.status(201).json({ success: true, message: "ពិន្ទុត្រូវបានរក្សាទុក" });
     } catch (err) {
-        console.error("DB Error on Submit:", err);
+        console.error("DB Error:", err);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
 
-/**
- * C. ទាញយកពិន្ទុពី Leaderboard (FIXED: GROUP DUPLICATES)
- * កែប្រែ៖ ប្រើ SUM() និង GROUP BY ដើម្បីការពារការចេញឈ្មោះស្ទួន
- * ទោះបីជា Database ចាស់មានឈ្មោះស្ទួន ក៏កូដនេះនឹងបូកបង្ហាញតែមួយដែរ
- */
+// C. ទាញយកពិន្ទុពី Leaderboard
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
-        
-        // Query នេះនឹងបូកពិន្ទុទាំងអស់របស់ឈ្មោះដូចគ្នា មកបង្ហាញតែមួយជួរ
-        const query = `
-            SELECT 
-                username, 
-                SUM(score) as score, 
-                MAX(difficulty) as difficulty 
-            FROM leaderboard 
-            GROUP BY username 
-            ORDER BY score DESC 
-            LIMIT 100
-        `;
-        
-        const result = await client.query(query);
+        const result = await client.query('SELECT username, score, difficulty FROM leaderboard ORDER BY score DESC LIMIT 100');
         client.release();
-        
-        // ជូនដំណឹងថាទិន្នន័យត្រូវបានទាញយក
-        // console.log(`📊 Leaderboard fetched: ${result.rows.length} records`);
-        
         res.json(result.rows);
     } catch (err) {
-        console.error("Leaderboard Fetch Error:", err);
         res.status(500).json({ success: false, message: "មិនអាចទាញយកទិន្នន័យបាន" });
     }
 });
