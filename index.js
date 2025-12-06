@@ -1,10 +1,9 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 7.1.0 (FINAL FIX: Server-Side Score Calculation)
+ * VERSION: 8.0.0 (FINAL FIX: Atomic SQL Aggregation)
  * DESCRIPTION: 
- * - ជួសជុលបញ្ហាបូកពិន្ទុខុសដោយមិនពឹងផ្អែកលើ Input Score របស់ Frontend ទៀតទេ។
- * - Server គណនាពិន្ទុដោយផ្អែកលើ Difficulty តែប៉ុណ្ណោះ។
+ * - ប្រើ Atomic SQL Command សម្រាប់បូកពិន្ទុដើម្បីលុបបំបាត់កំហុស Data Type/Concatenation។
  * - ធានារក្សាមុខងារ Admin Panel (View & Delete)។
  * =========================================================================================
  */
@@ -134,14 +133,14 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     }
 });
 
-// B. SUBMIT SCORE (SERVER-SIDE CALCULATION FIXED)
+// B. SUBMIT SCORE (ATOMIC SQL AGGREGATION FIX)
 app.post('/api/leaderboard/submit', async (req, res) => {
-    const { username, difficulty } = req.body; // ⭐️ លុប score ចេញពី Destructuring
+    const { username, difficulty } = req.body; 
     
     // 1. Server គណនាពិន្ទុត្រឹមត្រូវ
     const pointsToAdd = DIFFICULTY_POINTS[difficulty] || 0;
 
-    if (pointsToAdd === 0 || !username) { // ពិនិត្យថា Difficulty ត្រឹមត្រូវ
+    if (pointsToAdd === 0 || !username) { 
         return res.status(400).json({ success: false, message: "Invalid Difficulty or Data." });
     }
 
@@ -150,26 +149,20 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     try {
         const client = await pool.connect();
 
-        const checkRes = await client.query(
-            'SELECT * FROM leaderboard WHERE username = $1', 
-            [cleanUsername]
+        // ជំហានទី ១: ព្យាយាម UPDATE ជួរដែលមានស្រាប់ (Atomic Addition)
+        const updateRes = await client.query(
+            'UPDATE leaderboard SET score = score + $1, difficulty = $2 WHERE username = $3 RETURNING id',
+            [pointsToAdd, difficulty, cleanUsername]
         );
 
-        if (checkRes.rows.length > 0) {
-            // ✅ ករណីមានឈ្មោះហើយ: ធ្វើការ Update
-            const currentTotal = parseInt(checkRes.rows[0].score); 
-            const newTotal = currentTotal + pointsToAdd; // ប្រើ pointsToAdd ដែលគណនាពី Server
-            
-            await client.query(
-                'UPDATE leaderboard SET score = $1, difficulty = $2 WHERE username = $3',
-                [newTotal, difficulty, cleanUsername]
-            );
-             console.log(`🔄 UPDATED Score for ${cleanUsername}: ${newTotal} (+${pointsToAdd})`);
+        if (updateRes.rows.length > 0) {
+            // ✅ ករណីមានឈ្មោះហើយ: UPDATE បានជោគជ័យ
+             console.log(`🔄 ATOMIC UPDATE Score for ${cleanUsername}: +${pointsToAdd}`);
         } else {
-            // ✅ ករណីឈ្មោះថ្មី: Insert
+            // ✅ ករណីឈ្មោះថ្មី: មិនមានជួរដេកត្រឡប់មកវិញទេ ដូច្នេះត្រូវ INSERT
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
-                [cleanUsername, pointsToAdd, difficulty] // ប្រើ pointsToAdd
+                [cleanUsername, pointsToAdd, difficulty]
             );
              console.log(`✨ NEW User Added: ${cleanUsername} with score ${pointsToAdd}`);
         }
@@ -372,7 +365,7 @@ async function startServer() {
     // 2. បើក Server 
     app.listen(port, () => {
         console.log(`\n===================================================`);
-        console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING! (v7.1)`);
+        console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING! (v8.0)`);
         console.log(`👉 PORT: ${port}`);
         console.log(`👉 ADMIN PANEL: http://localhost:${port}/admin/requests`);
         console.log(`===================================================\n`);
