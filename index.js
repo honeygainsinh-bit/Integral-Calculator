@@ -1,12 +1,14 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.2.0 (Stable - Score Accumulation & Fixes)
+ * VERSION: 3.2.0 (Security Patch & Accumulate Score)
  * DESCRIPTION: 
  * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
  * - ភ្ជាប់ជាមួយ PostgreSQL Database
- * - Leaderboard: បូកពិន្ទុបន្ត (Accumulate Score)
- * - Security: ការពារការលួចបន្លំពិន្ទុ
+ * - ប្រើប្រាស់ Google Gemini AI សម្រាប់បង្កើតលំហាត់
+ * - បង្កើត Certificate តាមរយៈ Imgix URL Transformation (Stable)
+ * - Admin Panel សម្រាប់គ្រប់គ្រងសំណើ (បន្ថែមមុខងារលុប)
+ * - UPDATE: ការពារការលួចបន្លំពិន្ទុ និង បូកពិន្ទុឈ្មោះចាស់
  * =========================================================================================
  */
 
@@ -22,7 +24,7 @@ const { Pool } = require('pg');
 // --- 2. SERVER CONFIGURATION (កំណត់រចនាសម្ព័ន្ធ) ---
 const app = express();
 const port = process.env.PORT || 3000;
-const MODEL_NAME = "gemini-1.5-flash"; // AI Model Update
+const MODEL_NAME = "gemini-2.5-flash"; // AI Model
 
 // សម្រាប់ការតាមដានស្ថិតិ (In-memory stats)
 let totalPlays = 0;
@@ -56,12 +58,11 @@ async function initializeDatabase() {
         const client = await pool.connect();
 
         // 1. បង្កើត Table Leaderboard (សម្រាប់ពិន្ទុទូទៅ)
-        // សម្គាល់: យើងប្រើ username ជា unique key ដើម្បីងាយស្រួល update
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(50) NOT NULL,
-                score INTEGER NOT NULL DEFAULT 0,
+                score INTEGER NOT NULL,
                 difficulty VARCHAR(20) NOT NULL,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
@@ -113,7 +114,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2 (Accumulate Score)</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.2 (Secure Score)</p>
         </div>
     `);
 });
@@ -154,60 +155,57 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     }
 });
 
-// B. ដាក់ពិន្ទុចូល Leaderboard (UPDATED: Accumulate Logic)
+// B. ដាក់ពិន្ទុចូល Leaderboard (UPDATED: SECURITY CHECK & ACCUMULATION)
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
     
-    // 1. Validation: ទិន្នន័យមូលដ្ឋាន
-    if (!username || score === undefined || !difficulty) {
+    // 1. Validation ធម្មតា
+    if (!username || typeof score !== 'number' || !difficulty) {
         return res.status(400).json({ success: false, message: "ទិន្នន័យមិនត្រឹមត្រូវ" });
     }
 
-    // 2. Validation: កំណត់ពិន្ទុតាមកម្រិត (Security Check)
-    const POINTS_SYSTEM = {
-        'Easy': 5,
-        'Medium': 10,
-        'Hard': 15,
-        'Very Hard': 20
+    // 2. SECURITY CHECK: កំណត់ពិន្ទុតាមកម្រិត (Anti-Cheat)
+    const ALLOWED_SCORES = {
+        "Easy": 5,
+        "Medium": 10,
+        "Hard": 15,
+        "Very Hard": 20
     };
 
-    // រកពិន្ទុដែលអនុញ្ញាតអោយខ្ពស់បំផុតសម្រាប់កម្រិតនោះ
-    const allowedScore = POINTS_SYSTEM[difficulty];
-
-    // បើគ្មានក្នុងបញ្ជី ឬ ពិន្ទុបោះមកធំជាងពិន្ទុដែលកំណត់ => បដិសេធចោល (Anti-Cheat)
-    if (!allowedScore || score > allowedScore) {
-        console.warn(`⚠️ CHEATING ATTEMPT: ${username} tried to submit ${score} for ${difficulty}`);
-        return res.status(400).json({ 
-            success: false, 
-            message: "ពិន្ទុមិនត្រឹមត្រូវតាមកម្រិតវិញ្ញាសា (Score exceeds limit)" 
-        });
+    // ប្រសិនបើ Difficulty មិនត្រឹមត្រូវ ឬ ពិន្ទុដែលផ្ញើមកលើសពីការកំណត់
+    // ឧទាហរណ៍: លេង Easy តែផ្ញើមក 100 ពិន្ទុ => Block ភ្លាម
+    if (!ALLOWED_SCORES[difficulty] || score > ALLOWED_SCORES[difficulty]) {
+        console.warn(`🚨 SECURITY ALERT: IP ${req.ip} tried to cheat! User: ${username}, Score: ${score}, Mode: ${difficulty}`);
+        return res.status(403).json({ success: false, message: "🚫 ការដាក់ពិន្ទុត្រូវបានបដិសេធ! ពិន្ទុមិនត្រឹមត្រូវ។" });
     }
 
     try {
         const client = await pool.connect();
-
-        // 3. ពិនិត្យមើលថាតើឈ្មោះនេះមានក្នុង Database ហើយឬនៅ?
-        const checkUser = await client.query('SELECT * FROM leaderboard WHERE username = $1', [username]);
+        
+        // 3. ពិនិត្យមើលថាតើឈ្មោះនេះមានក្នុង Difficulty នេះហើយឬនៅ?
+        const checkUser = await client.query(
+            'SELECT * FROM leaderboard WHERE username = $1 AND difficulty = $2',
+            [username.substring(0, 50), difficulty]
+        );
 
         if (checkUser.rows.length > 0) {
-            // ករណីទី១: មានឈ្មោះរួចហើយ => ធ្វើការ UPDATE (បូកពិន្ទុថែម)
+            // ករណីទី ១: មានឈ្មោះហើយ => ធ្វើការបូកពិន្ទុបន្ថែម (UPDATE)
             await client.query(
-                'UPDATE leaderboard SET score = score + $1, difficulty = $2 WHERE username = $3',
-                [score, difficulty, username]
+                'UPDATE leaderboard SET score = score + $1 WHERE username = $2 AND difficulty = $3',
+                [score, username.substring(0, 50), difficulty]
             );
             console.log(`🔄 Updated Score for ${username}: +${score}`);
         } else {
-            // ករណីទី២: មិនទាន់មានឈ្មោះ => ធ្វើការ INSERT ថ្មី
+            // ករណីទី ២: មិនទាន់មានឈ្មោះ => បង្កើតថ្មី (INSERT)
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty) VALUES($1, $2, $3)', 
                 [username.substring(0, 50), score, difficulty]
             );
-            console.log(`✅ New User Added: ${username} with ${score}`);
+            console.log(`🆕 New User Added: ${username} with ${score}`);
         }
 
         client.release();
-        res.status(201).json({ success: true, message: "ពិន្ទុត្រូវបានបូកបញ្ចូលជោគជ័យ" });
-
+        res.status(201).json({ success: true, message: "ពិន្ទុត្រូវបានរក្សាទុក/បូកបន្ថែម" });
     } catch (err) {
         console.error("DB Error:", err);
         res.status(500).json({ success: false, message: "Server Error" });
@@ -218,7 +216,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
-        // ទាញយកអ្នកពិន្ទុខ្ពស់បំផុត ១០០ នាក់
+        // ទាញយកពិន្ទុដែលបានបូករួច
         const result = await client.query('SELECT username, score, difficulty FROM leaderboard ORDER BY score DESC LIMIT 100');
         client.release();
         res.json(result.rows);
@@ -250,7 +248,7 @@ app.post('/api/submit-request', async (req, res) => {
     }
 });
 
-// --- 7. ROUTES: ADMIN PANEL (ផ្ទាំងគ្រប់គ្រង - UPDATED) ---
+// --- 7. ROUTES: ADMIN PANEL (ផ្ទាំងគ្រប់គ្រង) ---
 
 app.get('/admin/requests', async (req, res) => {
     try {
@@ -365,9 +363,10 @@ app.get('/admin/requests', async (req, res) => {
                         const result = await response.json();
 
                         if (result.success) {
+                            // Highlight red before delete
                             const row = document.getElementById('row-' + id);
                             row.style.backgroundColor = "#fee2e2"; 
-                            setTimeout(() => row.remove(), 300);
+                            setTimeout(() => row.remove(), 300); // Remove row from table
                         } else {
                             alert("បរាជ័យ: " + result.message);
                         }
@@ -407,12 +406,18 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
 });
 
 // --- 8. CERTIFICATE GENERATION LOGIC (IMGIX ENGINE) ---
+
+/**
+ * Route: /admin/generate-cert/:id
+ * Description: បង្កើត URL រូបភាពដោយប្រើ Imgix សម្រាប់លិខិតសរសើរ
+ */
 app.get('/admin/generate-cert/:id', async (req, res) => {
     console.log(`... 🎨 Starting Certificate Generation for Request ID: ${req.params.id}`);
     
     try {
         const id = req.params.id;
         
+        // 1. ទាញយកទិន្នន័យពី Database
         const client = await pool.connect();
         const result = await client.query('SELECT * FROM certificate_requests WHERE id = $1', [id]);
         client.release();
@@ -423,52 +428,82 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
 
         const { username, score } = result.rows[0];
 
+        // 2. រៀបចំទិន្នន័យសម្រាប់បង្ហាញ (Formatting Data)
         const dateObj = new Date();
         const formattedDate = dateObj.toLocaleDateString('en-US', { 
             day: 'numeric', month: 'long', year: 'numeric' 
         });
 
+        // សារជូនពរភាសាអង់គ្លេស (Professional Text)
         const formalMessage = `With immense pride and recognition of your intellectual brilliance, we bestow this award upon you. Your outstanding performance demonstrates a profound mastery of mathematics and a relentless spirit of excellence. May this achievement serve as a stepping stone to a future filled with boundless success and wisdom. Presented by: braintest.fun`;
 
+        // 3. ពិនិត្យមើល Environment Variable
         const BASE_IMGIX_URL = process.env.EXTERNAL_IMAGE_API;
         if (!BASE_IMGIX_URL) {
              console.error("❌ MISSING CONFIG: EXTERNAL_IMAGE_API is not set.");
              return res.status(500).send("Server Config Error: Missing Image API URL.");
         }
 
+        // 4. ការសាងសង់ URL (Constructing the Final URL)
+        // A. ឈ្មោះអ្នកទទួល (Username) - ធំ, ពណ៌មាស, កណ្តាល
         const encodedUsername = encodeURIComponent(username.toUpperCase());
+
+        // B. ប្លុកបន្ទាប់បន្សំ (Score, Date, Message - ប្រើ Newline)
         const secondaryBlock = 
             `Score: ${score}%0A%0A` + 
             `Date Issued: ${formattedDate}%0A%0A%0A` +
             `${formalMessage}`;
         const encodedSecondaryBlock = encodeURIComponent(secondaryBlock);
 
+
+        // C. ផ្គុំ URL ទាំងមូល
         const finalUrl = BASE_IMGIX_URL + 
+            // Layer 1: ឈ្មោះ (Main Text Parameter)
             `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodedUsername}&txt-fit=max&w=1800` +
+            // Layer 2: ព័ត៌មានផ្សេងៗ (Watermark Parameter - Block តែមួយ)
             `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodedSecondaryBlock}&mark-w=1600&mark-fit=max`;
 
+        // 5. បញ្ជូនលទ្ធផល (Redirect)
+        console.log(`✅ Certificate Generated Successfully! Redirecting...`);
         res.redirect(finalUrl);
 
     } catch (err) {
         console.error("❌ Certificate Generation Error:", err.message);
-        res.status(500).send(`Error: ${err.message}`);
+        res.status(500).send(`
+            <div style="text-align:center; padding:50px; font-family:sans-serif;">
+                <h1 style="color:red;">⚠️ Error Generating Certificate</h1>
+                <p>Internal Server Error. Please check server logs.</p>
+                <p><i>${err.message}</i></p>
+            </div>
+        `);
     }
 });
 
 // --- 9. START SERVER (ចាប់ផ្តើមដំណើរការ) ---
+
 async function startServer() {
+    // ពិនិត្យមើលការកំណត់ Database
     if (!process.env.DATABASE_URL) {
         console.error("🛑 CRITICAL ERROR: DATABASE_URL is missing in .env");
         return;
     }
+
+    // ចាប់ផ្តើម Database
     await initializeDatabase();
+
+    // បើក Server
     app.listen(port, () => {
         console.log(`\n===================================================`);
         console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING!`);
         console.log(`👉 PORT: ${port}`);
-        console.log(`👉 LEADERBOARD LOGIC: ACCUMULATIVE`);
+        console.log(`👉 ADMIN PANEL: http://localhost:${port}/admin/requests`);
         console.log(`===================================================\n`);
     });
 }
 
+// Execute Start Function
 startServer();
+
+// =========================================================================================
+// END OF FILE 
+// =========================================================================================
