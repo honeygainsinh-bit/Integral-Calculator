@@ -1,7 +1,7 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 6.2.0 (FINAL STRUCTURE CONFIRMED)
+ * VERSION: 6.2.1 (Aggregation Logic Confirmed)
  * DESCRIPTION: 
  * - កូដពេញលេញ រឹងមាំ និងមាន Logic បូកពិន្ទុត្រឹមត្រូវ។
  * - ធានារក្សាមុខងារ Admin Panel (View & Delete)។
@@ -124,7 +124,7 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     }
 });
 
-// B. SUBMIT SCORE (AGGREGATION LOGIC FIXED)
+// B. SUBMIT SCORE (AGGREGATION LOGIC CONFIRMED)
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
     
@@ -304,6 +304,7 @@ app.get('/admin/requests', async (req, res) => {
             </div>
 
             <script>
+                // This JS runs on the Admin HTML page
                 async function deleteRequest(id) {
                     if (!confirm("⚠️ តើអ្នកពិតជាចង់លុបសំណើនេះមែនទេ?")) return;
 
@@ -349,7 +350,7 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
         res.json({ success: true, message: "លុបបានជោគជ័យ" });
     } catch (err) {
         console.error("Delete Error:", err);
-        res.status(500).json({ success: false, message: "Server Error" });
+        res.status(500).json({ success: false, message: "Server deletion failed" });
     }
 });
 
