@@ -1,11 +1,11 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 3.5.0 (Critical Fix: Score Submission Rate Limit)
+ * VERSION: 3.6.0 (Ultimate Fix: User-Specific Time Lock)
  * DESCRIPTION: 
- * - Backend សម្រាប់ល្បែងគណិតវិទ្យា
- * - បន្ថែម Rate Limit ដ៏តឹងរឹងលើ API ដាក់ពិន្ទុ ដើម្បីការពារការបូកពិន្ទុលើស (Duplicate Submission Fix)
- * - ធានាថាមិនប៉ះពាល់ដល់ការ Deploy ឡើយ។
+ * - បន្ថែមការត្រួតពិនិត្យពេលវេលា Database (Time Lock) ដ៏តឹងរឹងលើ API ដាក់ពិន្ទុ។
+ * - ធានាថាអ្នកប្រើប្រាស់ម្នាក់អាចដាក់ពិន្ទុបានតែម្តងរៀងរាល់ 3 វិនាទីប៉ុណ្ណោះ។
+ * - ជួសជុលបញ្ហា Over-scoring ទាំងស្រុង។
  * =========================================================================================
  */
 
@@ -22,6 +22,9 @@ const { Pool } = require('pg');
 const app = express();
 const port = process.env.PORT || 3000;
 const MODEL_NAME = "gemini-2.5-flash"; // AI Model
+
+// ពេលវេលាអប្បបរមរវាងការដាក់ពិន្ទុ (3 វិនាទី)
+const MIN_TIME_BETWEEN_SUBMISSIONS = 3000; // 3000ms
 
 // សម្រាប់ការតាមដានស្ថិតិ (In-memory stats)
 let totalPlays = 0;
@@ -87,8 +90,8 @@ async function initializeDatabase() {
 
 // Existing AI Limiter (8 hours / 10 requests)
 const aiLimiter = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, // 8 ម៉ោង
-    max: 10, // អនុញ្ញាត ១០ ដង
+    windowMs: 8 * 60 * 60 * 1000, 
+    max: 10, 
     message: { 
         error: "Rate limit exceeded", 
         message: "⚠️ សូមអភ័យទោស! អ្នកបានប្រើប្រាស់សិទ្ធិបង្កើតលំហាត់អស់ហើយសម្រាប់ថ្ងៃនេះ។" 
@@ -97,10 +100,10 @@ const aiLimiter = rateLimit({
     skip: (req) => req.ip === process.env.OWNER_IP
 });
 
-// NEW: Score Submission Limiter (5 seconds / 1 request)
+// Existing Score Submission Limiter (5 seconds / 1 request) - ស្រទាប់ការពារទី១
 const scoreLimiter = rateLimit({
-    windowMs: 5000, // 5000 milliseconds = 5 វិនាទី
-    max: 1, // អនុញ្ញាតតែ 1 request ប៉ុណ្ណោះ
+    windowMs: 5000, 
+    max: 1, 
     message: { 
         error: "Score submission rate limit exceeded", 
         message: "⚠️ សូមអភ័យទោស! អ្នកបានព្យាយាមដាក់ពិន្ទុញឹកញាប់ពេក។ សូមរង់ចាំបន្តិច។" 
@@ -125,7 +128,7 @@ app.get('/', (req, res) => {
                     👮‍♂️ ចូលទៅកាន់ Admin Panel
                 </a>
             </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.5 (Duplicate Score Fixed)</p>
+            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v3.6 (Time Lock Activated)</p>
         </div>
     `);
 });
@@ -166,9 +169,8 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     }
 });
 
-// B. ដាក់ពិន្ទុចូល Leaderboard (SECURED WITH RATE LIMIT)
-app.post('/api/leaderboard/submit', scoreLimiter, async (req, res) => { // ប្រើ Limiter ថ្មីនៅទីនេះ
-    // មិនត្រូវការ score ពី client ទៀតទេ ព្រោះ Server គណនាដោយខ្លួនឯង
+// B. ដាក់ពិន្ទុចូល Leaderboard (ULTIMATE FIX: TIME LOCK)
+app.post('/api/leaderboard/submit', scoreLimiter, async (req, res) => {
     const { username, difficulty } = req.body; 
     
     // Validation
@@ -176,7 +178,7 @@ app.post('/api/leaderboard/submit', scoreLimiter, async (req, res) => { // ប�
         return res.status(400).json({ success: false, message: "ទិន្នន័យមិនត្រឹមត្រូវ (ត្រូវការឈ្មោះ និងកម្រិត)" });
     }
 
-    // ១. កំណត់ពិន្ទុដោយស្វ័យប្រវត្តិនៅ Backend (SECURITY MEASURE)
+    // ១. កំណត់ពិន្ទុដោយស្វ័យប្រវត្តិនៅ Backend (SECURITY: Server-Side Scoring)
     let pointsToAdd = 0;
     const level = difficulty.toLowerCase().trim();
 
@@ -199,15 +201,35 @@ app.post('/api/leaderboard/submit', scoreLimiter, async (req, res) => { // ប�
         const client = await pool.connect();
         
         // ៣. ពិនិត្យមើលថាឈ្មោះនេះមានឬនៅ?
-        const checkUser = await client.query('SELECT * FROM leaderboard WHERE username = $1', [safeUsername]);
+        const checkUser = await client.query('SELECT created_at FROM leaderboard WHERE username = $1', [safeUsername]);
 
         if (checkUser.rows.length > 0) {
+            
+            // ----------------------------------------------------
+            // ⚠️ NEW LOGIC: USER-SPECIFIC TIME LOCK (ស្រទាប់ការពារទី២)
+            // ----------------------------------------------------
+            const lastSubmissionTime = checkUser.rows[0].created_at;
+            const currentTime = new Date();
+            const timeDifference = currentTime.getTime() - lastSubmissionTime.getTime();
+
+            if (timeDifference < MIN_TIME_BETWEEN_SUBMISSIONS) {
+                client.release();
+                console.log(`❌ BLOCK: ${safeUsername} tried to submit too soon (${timeDifference}ms)`);
+                // បញ្ជូន Response ជោគជ័យដើម្បីការពារ Client មិនឱ្យព្យាយាមម្ដងទៀត
+                return res.status(200).json({ 
+                    success: false, 
+                    message: `✋ អ្នកមិនអាចដាក់ពិន្ទុញឹកញាប់ជាង 3 វិនាទីទេ។ សូមរង់ចាំ! (Score Blocked)` 
+                });
+            }
+
             // ករណីមានឈ្មោះហើយ: ធ្វើការ UPDATE (យកពិន្ទុចាស់ + pointsToAdd)
+            // created_at នឹងត្រូវបាន Update ទៅ NOW() សម្រាប់ Time Lock បន្ទាប់
             await client.query(
                 'UPDATE leaderboard SET score = score + $1, difficulty = $2, created_at = NOW() WHERE username = $3', 
                 [pointsToAdd, difficulty, safeUsername]
             );
             console.log(`🔄 Score Updated for: ${safeUsername} (+${pointsToAdd})`);
+
         } else {
             // ករណីឈ្មោះថ្មី: ធ្វើការ INSERT
             await client.query(
@@ -262,7 +284,6 @@ app.post('/api/submit-request', async (req, res) => {
 });
 
 // --- 7. ROUTES: ADMIN PANEL (ផ្ទាំងគ្រប់គ្រង) ---
-
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
