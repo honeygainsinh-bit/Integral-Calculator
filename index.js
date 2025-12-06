@@ -1,15 +1,17 @@
 /**
  * =========================================================================================
  * PROJECT: MATH QUIZ PRO BACKEND API
- * VERSION: 6.0.0 (FINAL CLEAN UP - Aggregation Logic Fixed)
+ * VERSION: 6.2.0 (FINAL STRUCTURE CONFIRMED)
  * DESCRIPTION: 
- * - បានដក Imgix/Certificate Generation ចេញទាំងអស់។
- * - ជួសជុលបញ្ហា: ការបូកពិន្ទុ (Score Aggregation) ដោយប្រើ Find & Update Logic។
- * - មុខងារ Admin Panel (View & Delete) ត្រូវបានរក្សាទុក។
+ * - កូដពេញលេញ រឹងមាំ និងមាន Logic បូកពិន្ទុត្រឹមត្រូវ។
+ * - ធានារក្សាមុខងារ Admin Panel (View & Delete)។
  * =========================================================================================
  */
 
-// --- 1. LOAD DEPENDENCIES (នាំចូល Library ចាំបាច់) ---
+// #########################################################################################
+// 1. LOAD DEPENDENCIES AND CONFIGURATION
+// #########################################################################################
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -18,43 +20,38 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg');
 
-// --- 2. SERVER CONFIGURATION (កំណត់រចនាសម្ព័ន្ធ) ---
 const app = express();
 const port = process.env.PORT || 3000;
-const MODEL_NAME = "gemini-2.5-flash"; // AI Model
+const MODEL_NAME = "gemini-2.5-flash"; 
 
-// សម្រាប់ការតាមដានស្ថិតិ (In-memory stats)
 let totalPlays = 0;
 const uniqueVisitors = new Set();
 
-// Middleware Setup
+// --- MIDDLEWARE SETUP ---
 app.set('trust proxy', 1); 
 app.use(cors()); 
 app.use(express.json()); 
 
-// Logger Middleware 
 app.use((req, res, next) => {
     const timestamp = new Date().toLocaleTimeString('km-KH');
     console.log(`[${timestamp}] 📡 REQUEST: ${req.method} ${req.path} - IP: ${req.ip}`);
     next();
 });
 
-// --- 3. DATABASE CONNECTION (ការភ្ជាប់ទិន្នន័យ) ---
+// #########################################################################################
+// 2. DATABASE CONNECTION & INITIALIZATION
+// #########################################################################################
+
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false } 
 });
 
-/**
- * មុខងារ: initializeDatabase
- * តួនាទី: បង្កើត Table ដោយស្វ័យប្រវត្តិប្រសិនបើវាមិនទាន់មាន
- */
 async function initializeDatabase() {
     console.log("... ⚙️ កំពុងពិនិត្យ Database Tables ...");
     try {
         const client = await pool.connect();
 
-        // 1. បង្កើត Table Leaderboard (សម្រាប់ពិន្ទុទូទៅ)
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -65,7 +62,6 @@ async function initializeDatabase() {
             );
         `);
 
-        // 2. បង្កើត Table Certificate Requests (សម្រាប់សំណើលិខិតសរសើរ)
         await client.query(`
             CREATE TABLE IF NOT EXISTS certificate_requests (
                 id SERIAL PRIMARY KEY,
@@ -83,62 +79,38 @@ async function initializeDatabase() {
     }
 }
 
-// --- 4. SECURITY: RATE LIMITER (កំណត់ចំនួនប្រើប្រាស់) ---
+// --- RATE LIMITER ---
 const aiLimiter = rateLimit({
     windowMs: 8 * 60 * 60 * 1000, 
     max: 10, 
-    message: { 
-        error: "Rate limit exceeded", 
-        message: "⚠️ សូមអភ័យទោស! អ្នកបានប្រើប្រាស់សិទ្ធិបង្កើតលំហាត់អស់ហើយសម្រាប់ថ្ងៃនេះ។" 
-    },
+    message: { error: "Rate limit exceeded" },
     keyGenerator: (req) => req.ip, 
     skip: (req) => req.ip === process.env.OWNER_IP 
 });
 
-// Static Files 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- 5. ROUTES: GENERAL (ផ្លូវទូទៅ) ---
+// #########################################################################################
+// 3. CORE API FUNCTIONALITY
+// #########################################################################################
 
 // Home Route
 app.get('/', (req, res) => {
     res.status(200).send(`
-        <div style="font-family: sans-serif; text-align: center; padding-top: 50px; background-color: #f8fafc; height: 100vh;">
-            <h1 style="color: #16a34a; font-size: 3rem;">Math Quiz API 🟢</h1>
-            <p style="font-size: 1.2rem; color: #64748b;">Server Status: Score Aggregation Fixed</p>
-            <div style="margin-top: 30px;">
-                <a href="/admin/requests" style="background: #0284c7; color: white; padding: 15px 30px; text-decoration: none; border-radius: 50px; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                    👮‍♂️ ចូលទៅកាន់ Admin Panel
-                </a>
-            </div>
-            <p style="margin-top: 50px; font-size: 0.9rem; color: #94a3b8;">Server Status: Stable v6.0</p>
-        </div>
+        <h1 style="color: #16a34a; text-align:center; margin-top:50px;">Math Quiz API 🟢</h1>
+        <p style="text-align:center;"><a href="/admin/requests">Go to Admin Panel</a></p>
     `);
 });
 
-// Stats Route
-app.get('/stats', (req, res) => {
-    res.json({ 
-        status: "active",
-        total_plays: totalPlays, 
-        unique_visitors: uniqueVisitors.size,
-        uptime: process.uptime()
-    });
-});
-
-// --- 6. ROUTES: API FUNCTIONALITY (មុខងារស្នូល) ---
-
-// A. បង្កើតលំហាត់ដោយប្រើ AI (Gemini)
+// A. GENERATE PROBLEM (AI)
 app.post('/api/generate-problem', aiLimiter, async (req, res) => {
     try {
         const { prompt } = req.body;
-        if (!prompt) return res.status(400).json({ error: "ត្រូវការ Prompt ជាចាំបាច់" });
+        if (!prompt) return res.status(400).json({ error: "No prompt provided" });
 
-        // Update Stats
         totalPlays++;
         uniqueVisitors.add(req.ip);
 
-        // Call Gemini API
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: MODEL_NAME });
         const result = await model.generateContent(prompt);
@@ -148,17 +120,16 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
 
     } catch (error) {
         console.error("❌ Gemini API Error:", error.message);
-        res.status(500).json({ error: "បរាជ័យក្នុងការបង្កើតលំហាត់។ សូមព្យាយាមម្តងទៀត។" });
+        res.status(500).json({ error: "AI Generation Failed" });
     }
 });
 
-// B. ដាក់ពិន្ទុចូល Leaderboard (FIXED: AGGREGATION LOGIC)
+// B. SUBMIT SCORE (AGGREGATION LOGIC FIXED)
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
     
-    // Validation
     if (!username || typeof score !== 'number' || !difficulty) {
-        return res.status(400).json({ success: false, message: "ទិន្នន័យមិនត្រឹមត្រូវ" });
+        return res.status(400).json({ success: false, message: "Invalid Data" });
     }
 
     const cleanUsername = username.trim().substring(0, 50);
@@ -192,14 +163,15 @@ app.post('/api/leaderboard/submit', async (req, res) => {
         }
 
         client.release();
-        res.status(200).json({ success: true, message: "ពិន្ទុត្រូវបានរក្សាទុក" });
+        res.status(200).json({ success: true, message: "Score saved successfully" });
+
     } catch (err) {
         console.error("DB Error:", err);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
 
-// C. ទាញយកពិន្ទុពី Leaderboard
+// C. GET LEADERBOARD
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pool.connect();
@@ -207,16 +179,16 @@ app.get('/api/leaderboard/top', async (req, res) => {
         client.release();
         res.json(result.rows);
     } catch (err) {
-        res.status(500).json({ success: false, message: "មិនអាចទាញយកទិន្នន័យបាន" });
+        res.status(500).json({ success: false, message: "Fetch Error" });
     }
 });
 
-// D. ស្នើសុំ Certificate (Submit Request)
+// D. SUBMIT CERTIFICATE REQUEST
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
     
     if (!username || score === undefined) {
-        return res.status(400).json({ success: false, message: "ខ្វះឈ្មោះ ឬ ពិន្ទុ" });
+        return res.status(400).json({ success: false, message: "Invalid data" });
     }
 
     try {
@@ -226,20 +198,19 @@ app.post('/api/submit-request', async (req, res) => {
             [username, score]
         );
         client.release();
-        console.log(`📩 New Certificate Request: ${username} - ${score}`);
-        res.json({ success: true, message: "សំណើត្រូវបានផ្ញើទៅ Admin" });
+        res.json({ success: true, message: "Request Sent" });
     } catch (err) {
-        console.error("Submit Request Error:", err.message);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
 
-// --- 7. ROUTES: ADMIN PANEL (ផ្ទាំងគ្រប់គ្រង - VIEW & DELETE) ---
+// #########################################################################################
+// 4. ADMIN PANEL FUNCTIONALITY (VIEW & DELETE)
+// #########################################################################################
 
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pool.connect();
-        // ទាញយកទិន្នន័យ (រៀបតាមថ្មីទៅចាស់)
         const result = await client.query('SELECT * FROM certificate_requests ORDER BY request_date DESC LIMIT 50');
         client.release();
 
@@ -251,8 +222,7 @@ app.get('/admin/requests', async (req, res) => {
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Admin Dashboard</title>
             <style>
-                @import url('https://fonts.googleapis.com/css2?family=Hanuman:wght@400;700&family=Poppins:wght@400;600&display=swap');
-                body { font-family: 'Poppins', 'Hanuman', sans-serif; background: #f3f4f6; padding: 20px; margin: 0; }
+                body { font-family: sans-serif; background: #f3f4f6; padding: 20px; margin: 0; }
                 .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); overflow: hidden; }
                 .header { background: #1e293b; color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center; }
                 .header h1 { margin: 0; font-size: 1.5rem; }
@@ -262,19 +232,9 @@ app.get('/admin/requests', async (req, res) => {
                 td { padding: 12px 15px; border-bottom: 1px solid #e2e8f0; color: #334155; vertical-align: middle; }
                 tr:hover { background: #f8fafc; }
                 
-                /* Name Cell Style - ដាក់ឈ្មោះ និងប៊ូតុងនៅជាមួយគ្នា */
-                .name-cell {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    gap: 15px;
-                }
+                .name-cell { display: flex; justify-content: space-between; align-items: center; gap: 15px; }
                 .username-text { font-weight: 700; color: #1e293b; font-size: 1rem; }
                 
-                /* Action Buttons Group */
-                .actions { display: flex; gap: 5px; }
-
-                /* Delete Button (Red) */
                 .btn-delete { 
                     border: none; 
                     background: #ef4444; 
@@ -352,10 +312,9 @@ app.get('/admin/requests', async (req, res) => {
                         const result = await response.json();
 
                         if (result.success) {
-                            // Highlight red before delete
                             const row = document.getElementById('row-' + id);
                             row.style.backgroundColor = "#fee2e2"; 
-                            setTimeout(() => row.remove(), 300); // Remove row from table
+                            setTimeout(() => row.remove(), 300);
                         } else {
                             alert("បរាជ័យ: " + result.message);
                         }
@@ -374,7 +333,7 @@ app.get('/admin/requests', async (req, res) => {
     }
 });
 
-// --- NEW ROUTE: DELETE REQUEST (លុបសំណើ) ---
+// --- DELETE REQUEST API ---
 app.delete('/admin/delete-request/:id', async (req, res) => {
     const id = req.params.id;
     try {
@@ -383,7 +342,7 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
         client.release();
 
         if (result.rowCount === 0) {
-            return res.status(404).json({ success: false, message: "រកមិនឃើញ ID នេះទេ" });
+            return res.status(404).json({ success: false, message: "Request not found" });
         }
 
         console.log(`🗑️ Deleted Request ID: ${id}`);
@@ -394,9 +353,9 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
     }
 });
 
-// 8. (ROUTE REMOVED: CERTIFICATE GENERATION LOGIC - IMGIX)
-
-// --- 9. START SERVER (ចាប់ផ្តើមដំណើរការ) ---
+// #########################################################################################
+// 5. START SERVER
+// #########################################################################################
 
 async function startServer() {
     // 1. ចាប់ផ្តើម Database Initialization ក្នុងផ្ទៃខាងក្រោយ
@@ -405,7 +364,7 @@ async function startServer() {
     // 2. បើក Server 
     app.listen(port, () => {
         console.log(`\n===================================================`);
-        console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING! (v6.0)`);
+        console.log(`🚀 MATH QUIZ PRO SERVER IS RUNNING! (v6.2)`);
         console.log(`👉 PORT: ${port}`);
         console.log(`👉 ADMIN PANEL: http://localhost:${port}/admin/requests`);
         console.log(`===================================================\n`);
