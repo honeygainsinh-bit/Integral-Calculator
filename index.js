@@ -1,12 +1,14 @@
 /**
  * =================================================================================================
- * PROJECT:      BRAINTEST - ULTIMATE HYBRID BACKEND
- * VERSION:      6.3.0 (ANTI-SPAM EDITION)
+ * PROJECT:      BRAINTEST - ULTIMATE HYBRID BACKEND (ENTERPRISE EDITION)
+ * VERSION:      6.3.2 (FULL RESTORED)
  * AUTHOR:       BRAINTEST TEAM
  * DESCRIPTION:  
- * - Full Feature Set (Admin, Certificates, Leaderboard)
- * - UPDATED: Rate Limit 10 requests / 8 Hours
- * - UPDATED: Force 60s Delay after 1st Request (Stops Auto-Retry Spam)
+ * - Full Dashboard UI with CSS & Real-time Logs
+ * - Admin Panel with Certificate Management
+ * - PostgreSQL Leaderboard (Smart Merge)
+ * - MongoDB Caching (Hybrid Logic)
+ * - SECURITY: Rate Limit 10 req / 8 Hours + 60s Forced Delay
  * =================================================================================================
  */
 
@@ -42,12 +44,12 @@ const CONFIG = {
     // Security & Logic
     IMG_API: process.env.EXTERNAL_IMAGE_API,
     
-    // 🔥 OWNER IP CONFIGURATION (ដាក់ IP របស់អ្នកក្នុង .env ដើម្បីកុំអោយជាប់ Limit)
+    // 🔥 OWNER IP: ដាក់ IP របស់អ្នកក្នុង .env ដើម្បីកុំអោយជាប់ Limit
     OWNER_IP: process.env.OWNER_IP, 
     
     CACHE_RATE: 0.25, // 25% Chance to use Cache, 75% use AI
     
-    // Score Validation
+    // Score Validation Limits
     ALLOWED_SCORES: {
         "Easy": 5,
         "Medium": 10,
@@ -66,7 +68,7 @@ const SYSTEM_STATE = {
     cacheHits: 0,
     aiCalls: 0,
     visitors: new Set(),
-    logs: [] // Stores recent 50 logs for dashboard
+    logs: [] // Stores recent 100 logs for dashboard
 };
 
 // =================================================================================================
@@ -83,14 +85,15 @@ function logSystem(type, message, details = '') {
         case 'ERR': icon = '❌'; break;
         case 'OK': icon = '✅'; break;
         case 'NET': icon = '📡'; break;
+        case 'WARN': icon = '⚠️'; break;
     }
 
     // Print to Console
     console.log(`[${time}] ${icon} [${type}] ${message} ${details ? '| ' + details : ''}`);
 
-    // Save to Memory (For Dashboard)
+    // Save to Memory (For Dashboard UI)
     SYSTEM_STATE.logs.unshift({ time, type, msg: message, det: details });
-    if (SYSTEM_STATE.logs.length > 50) SYSTEM_STATE.logs.pop();
+    if (SYSTEM_STATE.logs.length > 100) SYSTEM_STATE.logs.pop();
 }
 
 function cleanMongoURI(uri) {
@@ -124,7 +127,7 @@ async function initPostgres() {
         const client = await pgPool.connect();
         SYSTEM_STATE.postgresConnected = true;
         
-        // Auto-Create Tables (Including new Columns: ip_address, updated_at)
+        // Auto-Create Tables (Checking if tables exist first)
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -135,6 +138,7 @@ async function initPostgres() {
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
+            
             CREATE TABLE IF NOT EXISTS certificate_requests (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(100) NOT NULL,
@@ -200,11 +204,13 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// General Middleware for Logging Visitors
 app.use((req, res, next) => {
     SYSTEM_STATE.totalRequests++;
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     SYSTEM_STATE.visitors.add(ip);
     
+    // Log only API requests to keep console clean
     if (req.path.includes('/api') || req.path.includes('/admin')) {
         logSystem('NET', `${req.method} ${req.path}`, `IP: ${ip}`);
     }
@@ -212,18 +218,18 @@ app.use((req, res, next) => {
 });
 
 /**
- * 🔥 ANTI-SPAM RATE LIMITER (Version 6.3)
+ * 🔥 ANTI-SPAM RATE LIMITER (STRICT MODE)
  * - 10 Requests per 8 Hours
- * - DELAY: Force 60s wait after 1st request
+ * - FORCE DELAY: 60 Seconds after the FIRST request
  * - SKIP: Owner IP bypasses everything
  */
 const aiLimiter = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, // 8 ម៉ោង (8 Hours)
-    max: 10, // អនុញ្ញាត 10 ដង
+    windowMs: 8 * 60 * 60 * 1000, // 8 Hours Window
+    max: 10, // Limit each IP to 10 requests per window
     
-    // 🔥 ការពារ SPAM: បង្ខំឱ្យរង់ចាំ 60 វិនាទី បន្ទាប់ពី Request លើកទី 1
+    // 🔥 THE FIX: Force 60s delay immediately after the 1st request
     delayAfter: 1, 
-    delayMs: 60 * 1000, // 60 វិនាទី
+    delayMs: 60 * 1000, // 60 Seconds
     
     message: { 
         error: "Rate limit exceeded", 
@@ -235,20 +241,20 @@ const aiLimiter = rateLimit({
         return req.headers['x-forwarded-for'] || req.ip; 
     },
     skip: (req) => {
-        // 🔍 ពិនិត្យមើលថាតើ IP នេះជា Owner IP ដែរឬទេ?
+        // 🔍 Check Owner IP
         const currentIP = req.headers['x-forwarded-for'] || req.ip;
         const ownerIP = CONFIG.OWNER_IP;
         
         if (ownerIP && currentIP && currentIP.includes(ownerIP)) {
             logSystem('OK', '👑 Owner Access Bypass', `IP: ${currentIP}`);
-            return true; // Owner មិនជាប់ Limit និងមិនជាប់ Delay
+            return true; // Owner is free from limits
         }
         return false;
     }
 });
 
 // =================================================================================================
-// SECTION 6: DASHBOARD UI
+// SECTION 6: DASHBOARD UI (FULL VERSION)
 // =================================================================================================
 
 app.get('/', (req, res) => {
@@ -263,52 +269,68 @@ app.get('/', (req, res) => {
     const mgStatus = SYSTEM_STATE.mongoConnected ? 
         '<span style="color:#10b981">● CONNECTED</span>' : '<span style="color:#ef4444">● FAILED</span>';
 
+    // Full HTML with Embedded CSS for "Enterprise" Look
     const html = `
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>BrainTest Enterprise v6.3</title>
+        <title>BRAINTEST ENTERPRISE v6.3.2</title>
         <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;700&display=swap" rel="stylesheet">
         <style>
-            :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; }
-            body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; padding: 20px; display: flex; justify-content: center; }
-            .container { max-width: 700px; width: 100%; display: grid; gap: 20px; }
-            .card { background: var(--card); padding: 20px; border-radius: 12px; border: 1px solid #334155; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-            h1 { font-size: 1.5rem; color: var(--accent); margin: 0 0 5px 0; }
-            .sub { font-size: 0.8rem; color: #94a3b8; font-family: 'JetBrains Mono', monospace; }
-            .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
-            .stat { background: #020617; padding: 15px; border-radius: 8px; border: 1px solid #1e293b; }
-            .stat-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: #64748b; font-weight: bold; }
-            .stat-val { font-size: 1rem; font-weight: bold; margin-top: 5px; font-family: 'JetBrains Mono', monospace; }
-            .log-box { height: 300px; overflow-y: auto; background: #000; border-radius: 8px; padding: 15px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; border: 1px solid #334155; }
-            .log-item { margin-bottom: 6px; border-bottom: 1px solid #1e1e1e; padding-bottom: 4px; display: flex; gap: 10px; }
-            .time { color: #64748b; min-width: 65px; }
-            .msg { color: #e2e8f0; }
-            .det { color: #475569; }
-            .btn { display: block; width: 100%; background: var(--accent); color: white; text-align: center; padding: 12px; border-radius: 8px; text-decoration: none; font-weight: bold; margin-top: 10px; }
+            :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --error: #ef4444; }
+            body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; padding: 20px; margin: 0; min-height: 100vh; display: flex; justify-content: center; }
+            .container { max-width: 900px; width: 100%; display: grid; gap: 20px; }
+            .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+            .card { background: var(--card); padding: 25px; border-radius: 12px; border: 1px solid #334155; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+            h1 { font-size: 1.8rem; color: var(--accent); margin: 0; display: flex; align-items: center; gap: 10px; }
+            .sub { font-size: 0.9rem; color: #94a3b8; font-family: 'JetBrains Mono', monospace; margin-top: 5px; }
+            .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-top: 20px; }
+            .stat { background: #020617; padding: 20px; border-radius: 8px; border: 1px solid #1e293b; text-align: center; }
+            .stat-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: #64748b; font-weight: bold; margin-bottom: 8px; }
+            .stat-val { font-size: 1.2rem; font-weight: bold; font-family: 'JetBrains Mono', monospace; }
+            .log-box { height: 400px; overflow-y: auto; background: #000; border-radius: 8px; padding: 15px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; border: 1px solid #334155; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); }
+            .log-item { margin-bottom: 8px; border-bottom: 1px solid #1e1e1e; padding-bottom: 6px; display: flex; gap: 12px; }
+            .time { color: #64748b; min-width: 70px; }
+            .type { min-width: 40px; font-weight: bold; }
+            .msg { color: #e2e8f0; flex: 1; }
+            .det { color: #475569; font-size: 0.75rem; }
+            .btn { display: inline-block; width: 100%; background: var(--accent); color: white; text-align: center; padding: 15px; border-radius: 8px; text-decoration: none; font-weight: bold; margin-top: 15px; transition: 0.2s; }
+            .btn:hover { background: #2563eb; }
+            
+            /* Scrollbar styling */
+            ::-webkit-scrollbar { width: 8px; }
+            ::-webkit-scrollbar-track { background: #0f172a; }
+            ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
         </style>
     </head>
     <body>
         <div class="container">
             <div class="card">
-                <h1>🚀 BRAINTEST v6.3 (Anti-Spam)</h1>
-                <div class="sub">Uptime: ${d}d ${h}h ${m}m | Delay: 60s/Call</div>
+                <div class="header">
+                    <h1>🚀 BRAINTEST <span style="font-size:0.8em; opacity:0.7;">v6.3.2</span></h1>
+                    <div style="text-align:right">
+                        <div class="sub">STATUS: ONLINE</div>
+                    </div>
+                </div>
+                <div class="sub">Uptime: ${d}d ${h}h ${m}m | Protection: 60s Delay Active</div>
                 
                 <div class="stats-grid">
                     <div class="stat"><div class="stat-label">PostgreSQL</div><div class="stat-val">${pgStatus}</div></div>
                     <div class="stat"><div class="stat-label">MongoDB Cache</div><div class="stat-val">${mgStatus}</div></div>
-                    <div class="stat"><div class="stat-label">Total Requests</div><div class="stat-val">${SYSTEM_STATE.totalRequests}</div></div>
-                    <div class="stat"><div class="stat-label">Unique Visitors</div><div class="stat-val">${SYSTEM_STATE.visitors.size}</div></div>
-                    <div class="stat"><div class="stat-label">AI Calls</div><div class="stat-val">${SYSTEM_STATE.aiCalls}</div></div>
-                    <div class="stat"><div class="stat-label">Cache Hits</div><div class="stat-val">${SYSTEM_STATE.cacheHits}</div></div>
+                    <div class="stat"><div class="stat-label">Total Requests</div><div class="stat-val" style="color:#fbbf24">${SYSTEM_STATE.totalRequests}</div></div>
+                    <div class="stat"><div class="stat-label">Unique Visitors</div><div class="stat-val" style="color:#a78bfa">${SYSTEM_STATE.visitors.size}</div></div>
+                    <div class="stat"><div class="stat-label">AI Generated</div><div class="stat-val" style="color:#f472b6">${SYSTEM_STATE.aiCalls}</div></div>
+                    <div class="stat"><div class="stat-label">Cache Hits</div><div class="stat-val" style="color:#34d399">${SYSTEM_STATE.cacheHits}</div></div>
                 </div>
             </div>
 
             <div class="card">
-                <div class="stat-label" style="margin-bottom:10px">SYSTEM LOGS</div>
-                <div class="log-box">
+                <div class="header">
+                    <div class="stat-label">SYSTEM LOGS (REAL-TIME)</div>
+                </div>
+                <div class="log-box" id="logs">
                     ${SYSTEM_STATE.logs.map(l => `
                         <div class="log-item">
                             <span class="time">${l.time}</span>
@@ -319,9 +341,12 @@ app.get('/', (req, res) => {
                 </div>
             </div>
             
-            <a href="/admin/requests" class="btn">🔐 OPEN ADMIN PANEL</a>
+            <a href="/admin/requests" class="btn">🔐 ACCESS ADMIN CONTROL PANEL</a>
         </div>
-        <script>setTimeout(() => location.reload(), 10000);</script>
+        <script>
+            // Auto Refresh Logic
+            setTimeout(() => location.reload(), 10000);
+        </script>
     </body>
     </html>
     `;
@@ -333,7 +358,7 @@ app.get('/', (req, res) => {
 // =================================================================================================
 
 app.post('/api/generate-problem', aiLimiter, async (req, res) => {
-    // 1. Extract Data
+    // 1. Extract Data from Client
     const { prompt, topic, difficulty } = req.body;
     
     // 2. Validate Input
@@ -341,7 +366,7 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
 
     SYSTEM_STATE.totalGamesGenerated++;
 
-    // 3. CACHE STRATEGY
+    // 3. CACHE STRATEGY (25% Chance)
     let problemContent = null;
     let source = "ai";
 
@@ -364,7 +389,7 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
         }
     }
 
-    // 4. AI FALLBACK
+    // 4. AI FALLBACK (75% Chance or Cache Miss)
     if (!problemContent) {
         logSystem('AI', 'Calling Gemini API', 'Generating New Problem...');
         SYSTEM_STATE.aiCalls++;
@@ -379,19 +404,23 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
             problemContent = response.text();
             // --------------------
 
-            // 5. SAVE TO CACHE
-            if (problemContent && SYSTEM_STATE.mongoConnected && topic && difficulty) {
-                MathCache.create({
-                    topic,
-                    difficulty,
-                    raw_text: problemContent,
-                    source_ip: req.ip
-                }).catch(e => logSystem('WARN', 'Cache Write Failed', e.message));
+            // 5. SAVE TO CACHE (Critical Check)
+            if (problemContent && SYSTEM_STATE.mongoConnected) {
+                if (topic && difficulty) {
+                    MathCache.create({
+                        topic,
+                        difficulty,
+                        raw_text: problemContent,
+                        source_ip: req.ip
+                    }).catch(e => logSystem('WARN', 'Cache Write Failed', e.message));
+                } else {
+                    logSystem('WARN', 'Cache Skip', 'Client did not send topic/difficulty');
+                }
             }
 
         } catch (err) {
             logSystem('ERR', 'AI Generation Failed', err.message);
-            // Return 500 to let client handle retry (but now delayed by 60s)
+            // Return 500 to let client handle it (but now throttled by 60s)
             return res.status(500).json({ error: "Failed to generate problem" });
         }
     }
@@ -411,7 +440,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
         return res.status(400).json({ success: false, message: "Invalid Data" });
     }
 
-    const maxAllowed = CONFIG.ALLOWED_SCORES[difficulty] || 0;
+    const maxAllowed = CONFIG.ALLOWED_SCORES[difficulty] || 100;
     if (score > maxAllowed) {
         logSystem('WARN', `Suspicious Score: ${username}`, `Points: ${score}`);
         return res.status(403).json({ success: false, message: "Score Rejected" });
@@ -478,7 +507,7 @@ app.get('/api/leaderboard/top', async (req, res) => {
 });
 
 // =================================================================================================
-// SECTION 9: ADMIN & CERTIFICATE PANEL
+// SECTION 9: ADMIN & CERTIFICATE PANEL (FULL VERSION)
 // =================================================================================================
 
 app.post('/api/submit-request', async (req, res) => {
@@ -534,8 +563,8 @@ app.get('/admin/requests', async (req, res) => {
                 <td><span class="badge">${r.score}</span></td>
                 <td>${new Date(r.request_date).toLocaleDateString()}</td>
                 <td>
-                    <a href="/admin/generate-cert/${r.id}" target="_blank">🖨️</a>
-                    <span class="del" onclick="del(${r.id})">🗑️</span>
+                    <a href="/admin/generate-cert/${r.id}" target="_blank" title="Print">🖨️</a>
+                    <span class="del" onclick="del(${r.id})" title="Delete">🗑️</span>
                 </td>
             </tr>
         `).join('');
@@ -543,18 +572,36 @@ app.get('/admin/requests', async (req, res) => {
         res.send(`
             <!DOCTYPE html><html><head><title>Admin Panel</title>
             <style>
-                body{font-family:sans-serif;background:#f1f5f9;padding:20px;max-width:900px;margin:0 auto;} 
-                h2{color:#1e293b;}
-                table{width:100%;border-collapse:collapse;background:white;border-radius:8px;overflow:hidden;box-shadow:0 2px 5px rgba(0,0,0,0.05);} 
-                th,td{padding:15px;text-align:left;border-bottom:1px solid #e2e8f0;} 
-                th{background:#f8fafc;font-weight:bold;color:#64748b;text-transform:uppercase;font-size:0.8rem;}
-                .badge{background:#e0f2fe;color:#0369a1;padding:4px 8px;border-radius:4px;font-weight:bold;font-size:0.9rem;}
-                a, .del{cursor:pointer;font-size:1.2rem;margin-right:10px;text-decoration:none;}
+                body{font-family: 'Inter', sans-serif; background:#f1f5f9; padding:40px; max-width:900px; margin:0 auto; color: #334155;} 
+                h2{color:#0f172a; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;}
+                .table-container { background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); overflow: hidden; border: 1px solid #e2e8f0; }
+                table{width:100%; border-collapse:collapse;} 
+                th,td{padding:18px; text-align:left; border-bottom:1px solid #e2e8f0;} 
+                th{background:#f8fafc; font-weight:bold; color:#64748b; text-transform:uppercase; font-size:0.75rem; letter-spacing: 0.05em;}
+                tr:last-child td { border-bottom: none; }
+                tr:hover { background-color: #f8fafc; }
+                .badge{background:#e0f2fe; color:#0369a1; padding:4px 10px; border-radius:20px; font-weight:bold; font-size:0.85rem;}
+                a, .del{cursor:pointer; font-size:1.2rem; margin-right:15px; text-decoration:none; transition: 0.2s; display: inline-block;}
+                a:hover { transform: scale(1.1); }
+                .del:hover { color: #ef4444; transform: scale(1.1); }
+                .btn-back { display: inline-block; margin-bottom: 20px; color: #64748b; text-decoration: none; font-weight: bold; }
             </style>
             </head><body>
+            <a href="/" class="btn-back">← Back to Dashboard</a>
             <h2>🛡️ Certificate Requests (${result.rows.length})</h2>
-            <table><thead><tr><th>ID</th><th>User</th><th>Score</th><th>Date</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
-            <script>async function del(id){if(confirm('Delete this request?')){await fetch('/admin/delete-request/'+id,{method:'DELETE'});document.getElementById('row-'+id).remove();}}</script>
+            <div class="table-container">
+                <table><thead><tr><th>ID</th><th>User</th><th>Score</th><th>Date</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
+            </div>
+            <script>
+                async function del(id){
+                    if(confirm('Are you sure you want to delete this request?')){
+                        await fetch('/admin/delete-request/'+id,{method:'DELETE'});
+                        const row = document.getElementById('row-'+id);
+                        row.style.background = '#fee2e2';
+                        setTimeout(() => row.remove(), 300);
+                    }
+                }
+            </script>
             </body></html>
         `);
     } catch (e) { res.status(500).send("Server Error"); }
@@ -566,14 +613,14 @@ app.get('/admin/requests', async (req, res) => {
 
 async function startSystem() {
     console.clear();
-    logSystem('OK', `Starting BrainTest Engine v6.3`);
+    logSystem('OK', `Starting BrainTest Engine v6.3.2`);
 
     await initPostgres(); // Leaderboard
     await initMongo();    // Caching
 
     app.listen(CONFIG.PORT, () => {
         logSystem('OK', `Server Listening on Port ${CONFIG.PORT}`);
-        logSystem('INFO', `Dashboard: http://localhost:${CONFIG.PORT}`);
+        logSystem('INFO', `Dashboard available at http://localhost:${CONFIG.PORT}`);
     });
 }
 
