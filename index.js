@@ -1,12 +1,12 @@
 /**
  * =================================================================================================
- * PROJECT:      MATH QUIZ PRO - ULTIMATE HYBRID BACKEND
- * VERSION:      6.2.0 (FULL ENTERPRISE EDITION)
+ * PROJECT:      BRAINTEST - ULTIMATE HYBRID BACKEND
+ * VERSION:      6.3.0 (ANTI-SPAM EDITION)
  * AUTHOR:       BRAINTEST TEAM
  * DESCRIPTION:  
- * - Full Feature Set (Admin Panel, Certificate, Logs)
+ * - Full Feature Set (Admin, Certificates, Leaderboard)
  * - UPDATED: Rate Limit 10 requests / 8 Hours
- * - UPDATED: Owner IP Bypass System
+ * - UPDATED: Force 60s Delay after 1st Request (Stops Auto-Retry Spam)
  * =================================================================================================
  */
 
@@ -42,7 +42,7 @@ const CONFIG = {
     // Security & Logic
     IMG_API: process.env.EXTERNAL_IMAGE_API,
     
-    // 🔥 OWNER IP CONFIGURATION (ដាក់ IP របស់អ្នកក្នុង .env)
+    // 🔥 OWNER IP CONFIGURATION (ដាក់ IP របស់អ្នកក្នុង .env ដើម្បីកុំអោយជាប់ Limit)
     OWNER_IP: process.env.OWNER_IP, 
     
     CACHE_RATE: 0.25, // 25% Chance to use Cache, 75% use AI
@@ -73,9 +73,6 @@ const SYSTEM_STATE = {
 // SECTION 2: LOGGING & UTILITIES
 // =================================================================================================
 
-/**
- * មុខងារកត់ត្រា Log ចូលក្នុង Console និង Memory សម្រាប់ Dashboard
- */
 function logSystem(type, message, details = '') {
     const time = new Date().toLocaleTimeString('en-US', { hour12: false });
     let icon = 'ℹ️';
@@ -96,9 +93,6 @@ function logSystem(type, message, details = '') {
     if (SYSTEM_STATE.logs.length > 50) SYSTEM_STATE.logs.pop();
 }
 
-/**
- * មុខងារសម្អាត MongoDB URI (ការពារកំហុស Protocol)
- */
 function cleanMongoURI(uri) {
     if (!uri) return null;
     let clean = uri.trim();
@@ -116,7 +110,7 @@ function cleanMongoURI(uri) {
 // 3.1 PostgreSQL Connection (Leaderboard & Certificates)
 const pgPool = new Pool({
     connectionString: CONFIG.POSTGRES_URL,
-    ssl: { rejectUnauthorized: false }, // Required for Cloud DBs like Render/Neon
+    ssl: { rejectUnauthorized: false }, // Required for Render/Neon
     connectionTimeoutMillis: 5000
 });
 
@@ -130,7 +124,7 @@ async function initPostgres() {
         const client = await pgPool.connect();
         SYSTEM_STATE.postgresConnected = true;
         
-        // Auto-Create Tables (Including new Columns)
+        // Auto-Create Tables (Including new Columns: ip_address, updated_at)
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -177,7 +171,6 @@ async function initMongo() {
     }
 }
 
-// MongoDB Event Listeners
 mongoose.connection.on('connected', () => SYSTEM_STATE.mongoConnected = true);
 mongoose.connection.on('disconnected', () => SYSTEM_STATE.mongoConnected = false);
 
@@ -188,7 +181,7 @@ mongoose.connection.on('disconnected', () => SYSTEM_STATE.mongoConnected = false
 const problemSchema = new mongoose.Schema({
     topic: { type: String, required: true, index: true },
     difficulty: { type: String, required: true, index: true },
-    raw_text: { type: String, required: true }, // JSON String from AI
+    raw_text: { type: String, required: true },
     source_ip: String,
     createdAt: { type: Date, default: Date.now }
 });
@@ -196,27 +189,22 @@ const problemSchema = new mongoose.Schema({
 const MathCache = mongoose.model('MathProblemCache', problemSchema);
 
 // =================================================================================================
-// SECTION 5: MIDDLEWARE & NEW RATE LIMITER
+// SECTION 5: MIDDLEWARE & ANTI-SPAM RATE LIMITER
 // =================================================================================================
 
 const app = express();
+app.set('trust proxy', 1); // Important for Render
 
-// Trust Proxy for Render (To get real IP)
-app.set('trust proxy', 1);
-
-// Standard Middleware
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Traffic Logging Middleware
 app.use((req, res, next) => {
     SYSTEM_STATE.totalRequests++;
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     SYSTEM_STATE.visitors.add(ip);
     
-    // Log essential routes
     if (req.path.includes('/api') || req.path.includes('/admin')) {
         logSystem('NET', `${req.method} ${req.path}`, `IP: ${ip}`);
     }
@@ -224,21 +212,26 @@ app.use((req, res, next) => {
 });
 
 /**
- * 🔥 UPDATED RATE LIMITER
+ * 🔥 ANTI-SPAM RATE LIMITER (Version 6.3)
  * - 10 Requests per 8 Hours
- * - Skip if IP matches OWNER_IP
+ * - DELAY: Force 60s wait after 1st request
+ * - SKIP: Owner IP bypasses everything
  */
 const aiLimiter = rateLimit({
     windowMs: 8 * 60 * 60 * 1000, // 8 ម៉ោង (8 Hours)
     max: 10, // អនុញ្ញាត 10 ដង
+    
+    // 🔥 ការពារ SPAM: បង្ខំឱ្យរង់ចាំ 60 វិនាទី បន្ទាប់ពី Request លើកទី 1
+    delayAfter: 1, 
+    delayMs: 60 * 1000, // 60 វិនាទី
+    
     message: { 
         error: "Rate limit exceeded", 
-        message: "⚠️ អ្នកបានប្រើប្រាស់សិទ្ធិអស់ហើយ (10ដង/8ម៉ោង)។" 
+        message: "⚠️ អ្នកបានប្រើប្រាស់សិទ្ធិអស់ហើយ (10ដង/8ម៉ោង)។ សូមរង់ចាំ 60 វិនាទី។" 
     },
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => {
-        // យក IP ពិតប្រាកដពី Render Header
         return req.headers['x-forwarded-for'] || req.ip; 
     },
     skip: (req) => {
@@ -246,17 +239,16 @@ const aiLimiter = rateLimit({
         const currentIP = req.headers['x-forwarded-for'] || req.ip;
         const ownerIP = CONFIG.OWNER_IP;
         
-        // បើ IP ស្មើនឹង Owner IP => Skip Limit (លេងបានរហូត)
         if (ownerIP && currentIP && currentIP.includes(ownerIP)) {
             logSystem('OK', '👑 Owner Access Bypass', `IP: ${currentIP}`);
-            return true; 
+            return true; // Owner មិនជាប់ Limit និងមិនជាប់ Delay
         }
         return false;
     }
 });
 
 // =================================================================================================
-// SECTION 6: DASHBOARD UI (ROOT ROUTE)
+// SECTION 6: DASHBOARD UI
 // =================================================================================================
 
 app.get('/', (req, res) => {
@@ -277,7 +269,7 @@ app.get('/', (req, res) => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>BrainTest Enterprise v6.2</title>
+        <title>BrainTest Enterprise v6.3</title>
         <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;700&display=swap" rel="stylesheet">
         <style>
             :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; }
@@ -286,26 +278,23 @@ app.get('/', (req, res) => {
             .card { background: var(--card); padding: 20px; border-radius: 12px; border: 1px solid #334155; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
             h1 { font-size: 1.5rem; color: var(--accent); margin: 0 0 5px 0; }
             .sub { font-size: 0.8rem; color: #94a3b8; font-family: 'JetBrains Mono', monospace; }
-            
             .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
             .stat { background: #020617; padding: 15px; border-radius: 8px; border: 1px solid #1e293b; }
             .stat-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: #64748b; font-weight: bold; }
             .stat-val { font-size: 1rem; font-weight: bold; margin-top: 5px; font-family: 'JetBrains Mono', monospace; }
-            
             .log-box { height: 300px; overflow-y: auto; background: #000; border-radius: 8px; padding: 15px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; border: 1px solid #334155; }
             .log-item { margin-bottom: 6px; border-bottom: 1px solid #1e1e1e; padding-bottom: 4px; display: flex; gap: 10px; }
             .time { color: #64748b; min-width: 65px; }
             .msg { color: #e2e8f0; }
             .det { color: #475569; }
-            
             .btn { display: block; width: 100%; background: var(--accent); color: white; text-align: center; padding: 12px; border-radius: 8px; text-decoration: none; font-weight: bold; margin-top: 10px; }
         </style>
     </head>
     <body>
         <div class="container">
             <div class="card">
-                <h1>🚀 BRAINTEST v6.2 (Enterprise)</h1>
-                <div class="sub">Uptime: ${d}d ${h}h ${m}m | RateLimit: 10/8h</div>
+                <h1>🚀 BRAINTEST v6.3 (Anti-Spam)</h1>
+                <div class="sub">Uptime: ${d}d ${h}h ${m}m | Delay: 60s/Call</div>
                 
                 <div class="stats-grid">
                     <div class="stat"><div class="stat-label">PostgreSQL</div><div class="stat-val">${pgStatus}</div></div>
@@ -352,14 +341,13 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
 
     SYSTEM_STATE.totalGamesGenerated++;
 
-    // 3. CACHE STRATEGY: Try MongoDB First?
+    // 3. CACHE STRATEGY
     let problemContent = null;
     let source = "ai";
 
     if (SYSTEM_STATE.mongoConnected && topic && difficulty && Math.random() < CONFIG.CACHE_RATE) {
         logSystem('DB', `Checking Cache for ${topic}...`);
         try {
-            // Find 1 random problem matching criteria
             const cached = await MathCache.aggregate([
                 { $match: { topic, difficulty } },
                 { $sample: { size: 1 } }
@@ -376,7 +364,7 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
         }
     }
 
-    // 4. AI FALLBACK: If Cache missed or skipped, call Gemini
+    // 4. AI FALLBACK
     if (!problemContent) {
         logSystem('AI', 'Calling Gemini API', 'Generating New Problem...');
         SYSTEM_STATE.aiCalls++;
@@ -391,9 +379,8 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
             problemContent = response.text();
             // --------------------
 
-            // 5. SAVE TO CACHE (If successful)
+            // 5. SAVE TO CACHE
             if (problemContent && SYSTEM_STATE.mongoConnected && topic && difficulty) {
-                // Async save (don't wait)
                 MathCache.create({
                     topic,
                     difficulty,
@@ -404,6 +391,7 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
 
         } catch (err) {
             logSystem('ERR', 'AI Generation Failed', err.message);
+            // Return 500 to let client handle retry (but now delayed by 60s)
             return res.status(500).json({ error: "Failed to generate problem" });
         }
     }
@@ -419,12 +407,10 @@ app.post('/api/generate-problem', aiLimiter, async (req, res) => {
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
 
-    // 8.1 Basic Validation
     if (!username || typeof score !== 'number' || !difficulty) {
         return res.status(400).json({ success: false, message: "Invalid Data" });
     }
 
-    // 8.2 Anti-Cheat Validation
     const maxAllowed = CONFIG.ALLOWED_SCORES[difficulty] || 0;
     if (score > maxAllowed) {
         logSystem('WARN', `Suspicious Score: ${username}`, `Points: ${score}`);
@@ -435,7 +421,6 @@ app.post('/api/leaderboard/submit', async (req, res) => {
         const client = await pgPool.connect();
 
         // 8.3 SMART MERGE LOGIC
-        // Step 1: Check existing records
         const check = await client.query(
             'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC',
             [username, difficulty]
@@ -444,24 +429,20 @@ app.post('/api/leaderboard/submit', async (req, res) => {
         if (check.rows.length > 0) {
             // MERGE MODE
             const rows = check.rows;
-            const targetId = rows[0].id; // Keep oldest ID
-            
-            // Calculate total existing score + new score
+            const targetId = rows[0].id;
             const currentTotal = rows.reduce((acc, row) => acc + row.score, 0);
             const finalScore = currentTotal + score;
 
-            // Update Target
             await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [finalScore, targetId]);
             logSystem('DB', `Merged Score: ${username}`, `Total: ${finalScore}`);
 
-            // Delete Duplicates (If any)
             if (rows.length > 1) {
                 const idsToDelete = rows.slice(1).map(r => r.id);
                 await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
             }
 
         } else {
-            // INSERT MODE (New User) - Now includes ip_address
+            // INSERT MODE (Uses updated_at and ip_address)
             const userIP = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
@@ -500,7 +481,6 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // SECTION 9: ADMIN & CERTIFICATE PANEL
 // =================================================================================================
 
-// 9.1 Submit Request
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
     try {
@@ -512,7 +492,6 @@ app.post('/api/submit-request', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-// 9.2 Generate Image (Redirect to Imgix)
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
         const client = await pgPool.connect();
@@ -525,7 +504,6 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
         const dateStr = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
         const msg = `Score: ${score}%0A%0ADate Issued: ${dateStr}%0A%0APresented by: braintest.fun`;
 
-        // Construct Image URL
         const finalUrl = CONFIG.IMG_API + 
             `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodeURIComponent(username.toUpperCase())}&txt-fit=max&w=1800` +
             `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodeURIComponent(msg)}&mark-w=1600`;
@@ -534,7 +512,6 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
     } catch (e) { res.status(500).send("Error generating certificate"); }
 });
 
-// 9.3 Delete Request
 app.delete('/admin/delete-request/:id', async (req, res) => {
     try {
         const client = await pgPool.connect();
@@ -544,7 +521,6 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-// 9.4 Admin UI
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pgPool.connect();
@@ -590,13 +566,11 @@ app.get('/admin/requests', async (req, res) => {
 
 async function startSystem() {
     console.clear();
-    logSystem('OK', `Starting BrainTest Engine v6.2`);
+    logSystem('OK', `Starting BrainTest Engine v6.3`);
 
-    // 1. Init Databases
     await initPostgres(); // Leaderboard
     await initMongo();    // Caching
 
-    // 2. Start Express
     app.listen(CONFIG.PORT, () => {
         logSystem('OK', `Server Listening on Port ${CONFIG.PORT}`);
         logSystem('INFO', `Dashboard: http://localhost:${CONFIG.PORT}`);
