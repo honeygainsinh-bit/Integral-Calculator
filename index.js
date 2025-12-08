@@ -8,11 +8,11 @@
  * 
  * =================================================================================================
  * PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
- * EDITION:           ULTIMATE PRO (V8.3.1)
+ * EDITION:           ULTIMATE PRO (V9.0 - CAMBODIA EDITION)
  * ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE
  * AUTHOR:            BRAINTEST ENGINEERING TEAM
  * DATE:              DECEMBER 2025
- * LINES OF CODE:     1200+ (FULLY DOCUMENTED & EXPANDED)
+ * ENGINE:            GEMINI 2.5 FLASH INTEGRATION
  * =================================================================================================
  * 
  * █ SYSTEM CAPABILITIES & LOGIC FLOW:
@@ -28,20 +28,12 @@
  *    - STAGE B (TARGET MET): If DB has enough problems (e.g., 100), usage is 100% CACHE.
  *    - STAGE C (FILLING): If DB is not full, usage is 25% CACHE / 75% AI GENERATION.
  * 
- * 3. LEADERBOARD SYSTEM (V7 LOGIC):
- *    - SMART MERGE: Sums up scores for the same user/difficulty.
- *    - DEDUPLICATION: Removes duplicate rows, keeping only the oldest ID.
- *    - ANTI-CHEAT: Validates max possible score per difficulty level.
+ * 3. DATA STANDARDIZATION (BUG FIX):
+ *    - Auto-capitalizes difficulty inputs (e.g., "easy" -> "Easy") to prevent data leaks into default categories.
  * 
  * 4. AUTOMATIC BATCH GENERATOR (BACKGROUND WORKER):
  *    - Continuously checks all Topics and Difficulties.
- *    - Calls Google Gemini (2.5 Flash) to generate missing problems.
  *    - ERROR HANDLING: Waits 60 SECONDS before retrying if AI fails.
- * 
- * 5. ADMINISTRATIVE DASHBOARD (PREMIUM UI):
- *    - Server-Side Rendered (SSR) HTML/CSS.
- *    - Glassmorphism Design Language (Expanded CSS).
- *    - Real-time Controls and Logs.
  * 
  * =================================================================================================
  */
@@ -139,9 +131,11 @@ const CONFIG = {
     },
 
     // -------------------------------------------------------------------------
-    // 📚 TOPIC DEFINITIONS
+    // 📚 TOPIC DEFINITIONS (UPDATED v9.0)
     // -------------------------------------------------------------------------
     // Maps internal keys to display labels and AI prompts.
+    // Removed: Logic, Matrices
+    // Added: FuncAnalysis, Conics, Probability, Continuity
     TOPICS: [
         { 
             key: "Limits", 
@@ -173,15 +167,26 @@ const CONFIG = {
             label: "វ៉ិចទ័រ (Vectors)", 
             prompt: "Vector Algebra dot product cross product" 
         },
+        // --- NEW TOPICS ADDED BELOW ---
         { 
-            key: "Matrices", 
-            label: "ម៉ាទ្រីស (Matrices)", 
-            prompt: "Matrix operations determinants and inverses" 
+            key: "FuncAnalysis", 
+            label: "សិក្សាអនុគមន៍ (Func Analysis)", 
+            prompt: "Calculus Function Analysis domain range asymptotes graphs variations" 
         },
         { 
-            key: "Logic", 
-            label: "តក្កវិទ្យា (Logic)", 
-            prompt: "Mathematical Logic and Set Theory" 
+            key: "Conics", 
+            label: "កោនិក (Conics)", 
+            prompt: "Conic Sections parabolas ellipses hyperbolas circles standard forms" 
+        },
+        { 
+            key: "Probability", 
+            label: "ប្រូបាប (Probability)", 
+            prompt: "Probability theory permutations combinations conditional probability" 
+        },
+        { 
+            key: "Continuity", 
+            label: "ភាពជាប់ (Continuity)", 
+            prompt: "Calculus Continuity limits at a point continuous functions intermediate value theorem" 
         }
     ],
     
@@ -520,17 +525,18 @@ async function startBackgroundGeneration() {
 
                         logSystem('GEN', `✅ Generated Item`, `${topicObj.key} (${i+1}/${needed})`);
 
+                        // ⏳ RATE LIMIT PROTECTION (Normal Operation)
+                        // Pause for 4 seconds between requests to avoid Google 429 Errors.
+                        await new Promise(r => setTimeout(r, 4000));
+
                     } catch (err) {
                         logSystem('ERR', 'Generation Failed', err.message);
                         
                         // 🔥 FEATURE: WAIT 60 SECONDS ON FAILURE BEFORE RETRY
-                        logSystem('GEN', 'Cooling Down (60s)...', 'Error Recovery Mode');
+                        logSystem('GEN', '⚠️ API Error Detected', 'Cooling Down for 60 Seconds...');
                         await new Promise(r => setTimeout(r, 60000));
+                        logSystem('GEN', 'Resuming...', 'Retry Initiated');
                     }
-
-                    // ⏳ RATE LIMIT PROTECTION (Normal Operation)
-                    // Pause for 4 seconds between requests to avoid Google 429 Errors.
-                    await new Promise(r => setTimeout(r, 4000));
                 }
 
             } catch (err) {
@@ -620,23 +626,34 @@ const aiSpeedLimiter = rateLimit({
 // =================================================================================================
 
 /**
+ * Helper: Capitalize String
+ * Fixes the bug where "easy" was not matching "Easy" in DB.
+ */
+const capitalize = (s) => {
+    if (typeof s !== 'string' || !s) return null;
+    return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+};
+
+/**
  * 🤖 GENERATE PROBLEM API
  * 
  * LOGIC FLOW (HYBRID V8):
  * 1. Receive Request (Topic/Difficulty).
- * 2. Check how many problems exist in MongoDB for this specific request.
- * 3. DECISION TREE:
+ * 2. STANDARDIZE INPUT: Ensure "easy" becomes "Easy".
+ * 3. Check how many problems exist in MongoDB for this specific request.
+ * 4. DECISION TREE:
  *    - IF Count >= Target: FORCE CACHE (100%). Do not use API.
  *    - IF Count < Target: Use Random Logic (25% Cache / 75% API).
- * 4. Return result.
+ * 5. Return result.
  */
 app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, res) => {
     // 1. Extract Data
     const { prompt, topic, difficulty } = req.body;
     
-    // 2. Set Defaults (Fallback)
+    // 2. Set Defaults & Fix Formatting (BUG FIX)
     const finalTopic = topic || "Limits";
-    const finalDifficulty = difficulty || "Medium";
+    // If difficulty is missing, default to Medium. If present, capitalize it.
+    const finalDifficulty = capitalize(difficulty) || "Medium";
     
     SYSTEM_STATE.totalGamesGenerated++;
 
@@ -702,17 +719,17 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
         const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
         const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
         
-        const aiPrompt = prompt || `Generate a ${finalDifficulty} math problem about ${finalTopic}. Return JSON.`;
+        const aiPrompt = prompt || `Create 1 unique multiple-choice math problem for topic "${finalTopic}" with difficulty "${finalDifficulty}". Return JSON.`;
         
         const result = await model.generateContent(aiPrompt);
         const response = await result.response;
         const text = response.text();
         
-        // 4. Populate Database (Save for future)
+        // 4. Populate Database (Save for future) using CORRECTED Difficulty
         if (SYSTEM_STATE.mongoConnected) {
             MathCache.create({
                 topic: finalTopic,
-                difficulty: finalDifficulty,
+                difficulty: finalDifficulty, // Using the Capitalized version
                 raw_text: text,
                 source_ip: req.ip
             }).catch(e => {
@@ -748,12 +765,15 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     if (!username || typeof score !== 'number' || !difficulty) {
         return res.status(400).json({ success: false, message: "Invalid payload" });
     }
+    
+    // Normalize difficulty for Leaderboard too
+    const finalDiff = capitalize(difficulty);
 
     try {
         const client = await pgPool.connect();
 
         // 1. Anti-Cheat
-        const maxAllowed = CONFIG.ALLOWED_SCORES[difficulty] || 100;
+        const maxAllowed = CONFIG.ALLOWED_SCORES[finalDiff] || 100;
         if (score > maxAllowed) {
             client.release();
             logSystem('SEC', 'Score Rejected', `${username} tried to submit ${score}`);
@@ -763,7 +783,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
         // 2. Fetch Existing Rows
         const check = await client.query(
             'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC',
-            [username, difficulty]
+            [username, finalDiff]
         );
 
         if (check.rows.length > 0) {
@@ -790,7 +810,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
             const userIP = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
-                [username, score, difficulty, userIP]
+                [username, score, finalDiff, userIP]
             );
             logSystem('DB', `New Leaderboard Entry`, `User: ${username}`);
         }
@@ -1208,7 +1228,7 @@ app.get('/admin', (req, res) => {
             <div class="sidebar">
                 <div class="brand">
                     <h1>TITAN ENGINE</h1>
-                    <span>v8.3.1 ULTIMATE</span>
+                    <span>v9.0 ULTIMATE</span>
                 </div>
                 
                 <button class="nav-btn active" onclick="switchTab('gen', this)">
@@ -1494,7 +1514,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
         <div class="card">
-            <h1>🚀 TITAN ENGINE V8.3.1</h1>
+            <h1>🚀 TITAN ENGINE V9.0</h1>
             <p>UPTIME: ${d}d ${h}h</p>
             <div class="metric">PG: ${pg} | MONGO: ${mg}</div>
             <div class="metric">
@@ -1519,7 +1539,7 @@ app.get('/', (req, res) => {
  */
 async function startSystem() {
     console.clear();
-    logSystem('OK', 'Booting BrainTest Titan V8.3.1...');
+    logSystem('OK', 'Booting BrainTest Titan V9.0 (Cambodia Ed)...');
     
     // Initialize DBs (Non-blocking)
     initPostgres(); 
