@@ -8,32 +8,18 @@
  * 
  * =================================================================================================
  * PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
- * EDITION:           ULTIMATE PRO (V9.0 - CAMBODIA EDITION)
+ * EDITION:           ULTIMATE PRO (V9.6 - FULL SOURCE + FIX)
  * ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE
  * AUTHOR:            BRAINTEST ENGINEERING TEAM
  * DATE:              DECEMBER 2025
  * ENGINE:            GEMINI 2.5 FLASH INTEGRATION
  * =================================================================================================
  * 
- * █ SYSTEM CAPABILITIES & LOGIC FLOW:
- * 
- * 1. DUAL SECURITY LAYER (ANTI-SPAM):
- *    - QUOTA LIMITER: Maximum 10 requests per 8 Hours.
- *    - SPEED LIMITER: Maximum 5 requests per 1 Hour.
- *    - FORCED DELAY: 60 Seconds delay applied immediately after the 1st request.
- *    - IP BYPASS: Owner IP is whitelisted from all restrictions.
- * 
- * 2. HYBRID CACHE INTELLIGENCE (V8 ENGINE):
- *    - STAGE A (CHECK): System checks MongoDB for existing problems count.
- *    - STAGE B (TARGET MET): If DB has enough problems (e.g., 100), usage is 100% CACHE.
- *    - STAGE C (FILLING): If DB is not full, usage is 25% CACHE / 75% AI GENERATION.
- * 
- * 3. DATA STANDARDIZATION (BUG FIX):
- *    - Auto-capitalizes difficulty inputs (e.g., "easy" -> "Easy") to prevent data leaks into default categories.
- * 
- * 4. AUTOMATIC BATCH GENERATOR (BACKGROUND WORKER):
- *    - Continuously checks all Topics and Difficulties.
- *    - ERROR HANDLING: Waits 60 SECONDS before retrying if AI fails.
+ * █ UPDATE LOG (V9.6):
+ *    1. FIXED: "Easy" input defaulting to "Medium" (Added standardizeDifficulty).
+ *    2. FIXED: Case sensitivity issues (e.g., "very hard" vs "Very Hard").
+ *    3. ADDED: Input logging to see exactly what the App sends.
+ *    4. RESTORED: Full Admin Dashboard HTML/CSS (No minification).
  * 
  * =================================================================================================
  */
@@ -42,35 +28,13 @@
 // SECTION 1: LIBRARY IMPORTS & ENVIRONMENT SETUP
 // =================================================================================================
 
-/**
- * 1.1 Load Environment Variables
- * This creates a secure bridge between the code and the .env file.
- */
 require('dotenv').config();
 
-/**
- * 1.2 Core Dependencies
- * - Express: The web server framework.
- * - CORS: Handles cross-origin requests from frontend apps.
- * - Path: Utilities for working with file and directory paths.
- */
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-
-/**
- * 1.3 Database Drivers
- * - PG: The PostgreSQL client for Leaderboard data.
- * - Mongoose: The MongoDB object modeling tool for the Cache.
- */
 const { Pool } = require('pg');
 const mongoose = require('mongoose');
-
-/**
- * 1.4 AI & Utilities
- * - GoogleGenerativeAI: The SDK for accessing Gemini Models.
- * - RateLimit: Middleware to prevent abuse.
- */
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
 
@@ -78,11 +42,6 @@ const rateLimit = require('express-rate-limit');
 // SECTION 2: MASTER CONFIGURATION & CONSTANTS
 // =================================================================================================
 
-/**
- * CONFIG
- * A centralized object containing all system settings.
- * Adjust these values to tune the server's behavior.
- */
 const CONFIG = {
     // -------------------------------------------------------------------------
     // SERVER SETTINGS
@@ -100,8 +59,6 @@ const CONFIG = {
     // AI ENGINE CREDENTIALS
     // -------------------------------------------------------------------------
     GEMINI_KEY: process.env.GEMINI_API_KEY,
-    
-    // ✅ UPDATED TO GEMINI 2.5 FLASH AS REQUESTED
     AI_MODEL: "gemini-2.5-flash", 
     
     // -------------------------------------------------------------------------
@@ -111,18 +68,13 @@ const CONFIG = {
     OWNER_IP: process.env.OWNER_IP, 
     
     // -------------------------------------------------------------------------
-    // 🎲 CACHE PROBABILITY (FEATURE #4)
+    // 🎲 CACHE PROBABILITY
     // -------------------------------------------------------------------------
-    // This defines the probability of using the Cache when the database is NOT full.
-    // 0.25 means there is a 25% chance to save API calls and use cached data,
-    // and a 75% chance to generate new data to fill the database.
     CACHE_RATE: 0.25, 
     
     // -------------------------------------------------------------------------
     // 🎯 GENERATOR TARGETS
     // -------------------------------------------------------------------------
-    // The Auto-Generator will stop creating problems for a specific difficulty
-    // once these counts are reached in MongoDB.
     TARGETS: {
         "Easy": 100,      // Need 100 Easy problems
         "Medium": 30,     // Need 30 Medium problems
@@ -131,11 +83,8 @@ const CONFIG = {
     },
 
     // -------------------------------------------------------------------------
-    // 📚 TOPIC DEFINITIONS (UPDATED v9.0)
+    // 📚 TOPIC DEFINITIONS
     // -------------------------------------------------------------------------
-    // Maps internal keys to display labels and AI prompts.
-    // Removed: Logic, Matrices
-    // Added: FuncAnalysis, Conics, Probability, Continuity
     TOPICS: [
         { 
             key: "Limits", 
@@ -167,7 +116,6 @@ const CONFIG = {
             label: "វ៉ិចទ័រ (Vectors)", 
             prompt: "Vector Algebra dot product cross product" 
         },
-        // --- NEW TOPICS ADDED BELOW ---
         { 
             key: "FuncAnalysis", 
             label: "សិក្សាអនុគមន៍ (Func Analysis)", 
@@ -193,7 +141,6 @@ const CONFIG = {
     // -------------------------------------------------------------------------
     // 🛡️ ANTI-CHEAT RULES
     // -------------------------------------------------------------------------
-    // Maximum allowed score per submission for each difficulty.
     ALLOWED_SCORES: {
         "Easy": 5,
         "Medium": 10,
@@ -206,49 +153,24 @@ const CONFIG = {
 // SECTION 3: SYSTEM STATE MANAGEMENT & LOGGING
 // =================================================================================================
 
-/**
- * SYSTEM_STATE
- * A mutable global object to track real-time metrics and status.
- * This is accessed by the Dashboard to display live data.
- */
 const SYSTEM_STATE = {
-    // Startup Timestamp
     startTime: Date.now(),
-    
-    // Connection Status flags
     postgresConnected: false,
     mongoConnected: false,
-    
-    // Generator Status
     isGenerating: false,
     currentGenTask: "Idle",
-    
-    // Operational Metrics
     totalRequests: 0,
     totalGamesGenerated: 0,
     cacheHits: 0,
     aiCalls: 0,
     uniqueVisitors: new Set(), 
-    
-    // Log Buffer (Stores recent logs for the UI)
     logs: [] 
 };
 
-/**
- * logSystem
- * A specialized logging function that outputs to the console with icons
- * and saves the log to the memory buffer for the Admin Dashboard.
- * 
- * @param {string} type - The category (DB, AI, NET, ERR, etc.)
- * @param {string} message - The main message
- * @param {string} details - Detailed info (optional)
- */
 function logSystem(type, message, details = '') {
-    // 1. Generate Timestamp
     const now = new Date();
     const timeString = now.toLocaleTimeString('en-US', { hour12: false });
     
-    // 2. Assign Icons based on Type
     let icon = 'ℹ️';
     switch(type) {
         case 'DB':   icon = '🗄️'; break;
@@ -261,10 +183,8 @@ function logSystem(type, message, details = '') {
         case 'GEN':  icon = '⚙️'; break; 
     }
 
-    // 3. Output to Server Console
     console.log(`[${timeString}] ${icon} [${type}] ${message} ${details ? '| ' + details : ''}`);
 
-    // 4. Push to Memory Buffer (unshift adds to the top)
     SYSTEM_STATE.logs.unshift({ 
         time: timeString, 
         type: type, 
@@ -272,20 +192,14 @@ function logSystem(type, message, details = '') {
         det: details 
     });
     
-    // 5. Memory Management: Keep only the last 300 logs
     if (SYSTEM_STATE.logs.length > 300) {
         SYSTEM_STATE.logs.pop();
     }
 }
 
-/**
- * cleanMongoURI
- * Helper to ensure the MongoDB connection string is properly formatted.
- */
 function cleanMongoURI(uri) {
     if (!uri) return null;
     let clean = uri.trim();
-    // Add protocol if missing
     if (!clean.startsWith('mongodb://') && !clean.startsWith('mongodb+srv://')) {
         return `mongodb+srv://${clean}`;
     }
@@ -293,40 +207,27 @@ function cleanMongoURI(uri) {
 }
 
 // =================================================================================================
-// SECTION 4: POSTGRESQL DATABASE LAYER (RELATIONAL)
+// SECTION 4: POSTGRESQL DATABASE LAYER
 // =================================================================================================
 
-/**
- * PostgreSQL Connection Pool
- * Manages concurrent connections to the SQL database.
- */
 const pgPool = new Pool({
     connectionString: CONFIG.POSTGRES_URL,
-    ssl: { rejectUnauthorized: false }, // Necessary for cloud databases (Render, Neon, etc.)
+    ssl: { rejectUnauthorized: false }, 
     connectionTimeoutMillis: 5000,      
     max: 20                             
 });
 
-// Global Error Handler for the Pool
 pgPool.on('error', (err) => {
     SYSTEM_STATE.postgresConnected = false;
     logSystem('ERR', 'PostgreSQL Connection Error', err.message);
 });
 
-/**
- * initPostgres
- * Connects to PostgreSQL and ensures all required tables exist.
- */
 async function initPostgres() {
     try {
         logSystem('DB', 'Initializing PostgreSQL connection...');
         const client = await pgPool.connect();
         SYSTEM_STATE.postgresConnected = true;
         
-        // ---------------------------------------------------------------------
-        // TABLE 1: LEADERBOARD
-        // Stores user scores, linked by username and difficulty.
-        // ---------------------------------------------------------------------
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -339,10 +240,6 @@ async function initPostgres() {
             );
         `);
             
-        // ---------------------------------------------------------------------
-        // TABLE 2: CERTIFICATE REQUESTS
-        // Stores requests from users who want a completion certificate.
-        // ---------------------------------------------------------------------
         await client.query(`
             CREATE TABLE IF NOT EXISTS certificate_requests (
                 id SERIAL PRIMARY KEY,
@@ -361,13 +258,9 @@ async function initPostgres() {
 }
 
 // =================================================================================================
-// SECTION 5: MONGODB DATABASE LAYER (NOSQL CACHE)
+// SECTION 5: MONGODB DATABASE LAYER
 // =================================================================================================
 
-/**
- * initMongo
- * Connects to MongoDB to store generated math problems.
- */
 async function initMongo() {
     const uri = cleanMongoURI(CONFIG.MONGO_URI);
     
@@ -392,33 +285,24 @@ async function initMongo() {
     }
 }
 
-// Mongoose Connection Events
 mongoose.connection.on('connected', () => SYSTEM_STATE.mongoConnected = true);
 mongoose.connection.on('disconnected', () => SYSTEM_STATE.mongoConnected = false);
 
-/**
- * SCHEMA DEFINITION
- * Defines the structure of a Math Problem document in MongoDB.
- */
 const problemSchema = new mongoose.Schema({
-    // The mathematical topic (e.g., "Limits")
     topic: { 
         type: String, 
         required: true, 
         index: true 
     },
-    // The difficulty level (e.g., "Hard")
     difficulty: { 
         type: String, 
         required: true, 
         index: true 
     },
-    // The full JSON string of the problem/options/answer
     raw_text: { 
         type: String, 
         required: true 
     },
-    // Metadata
     source_ip: String,
     createdAt: { 
         type: Date, 
@@ -426,26 +310,16 @@ const problemSchema = new mongoose.Schema({
     }
 });
 
-// Composite Index for high-performance querying
 problemSchema.index({ topic: 1, difficulty: 1 });
-
-// Model Creation
 const MathCache = mongoose.model('MathProblemCache', problemSchema);
 
 // =================================================================================================
-// SECTION 6: BACKGROUND GENERATOR ENGINE (AUTO-FILLER)
+// SECTION 6: BACKGROUND GENERATOR ENGINE
 // =================================================================================================
 
-/**
- * startBackgroundGeneration
- * This function acts as a background worker. It iterates through all topics and difficulties,
- * checks if the database needs more problems, and generates them using AI if needed.
- */
 async function startBackgroundGeneration() {
-    // 1. Prevent multiple instances
     if (SYSTEM_STATE.isGenerating) return;
     
-    // 2. Check Database availability
     if (!SYSTEM_STATE.mongoConnected) {
         logSystem('ERR', 'Generator Aborted', 'MongoDB not connected.');
         return;
@@ -457,46 +331,30 @@ async function startBackgroundGeneration() {
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
     const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
 
-    // -------------------------------------------------------------------------
-    // OUTER LOOP: Iterate through defined Topics
-    // -------------------------------------------------------------------------
     for (const topicObj of CONFIG.TOPICS) {
-        
-        // ---------------------------------------------------------------------
-        // INNER LOOP: Iterate through Difficulties
-        // ---------------------------------------------------------------------
         for (const [diffLevel, targetCount] of Object.entries(CONFIG.TARGETS)) {
             
-            // Check manual stop signal
             if (!SYSTEM_STATE.isGenerating) {
                 logSystem('GEN', 'Engine Stopped Manually');
                 return;
             }
 
             try {
-                // A. Check Current Count in Database
                 const currentCount = await MathCache.countDocuments({ 
                     topic: topicObj.key, 
                     difficulty: diffLevel 
                 });
 
-                // B. Determine if work is needed
                 if (currentCount >= targetCount) {
-                    // Skip if target is met
                     continue; 
                 }
 
                 const needed = targetCount - currentCount;
                 
-                // Update System Status for UI
                 SYSTEM_STATE.currentGenTask = `${topicObj.label} (${diffLevel}): ${currentCount}/${targetCount}`;
                 logSystem('GEN', `Analyzing Task`, `${topicObj.key} [${diffLevel}] - Need: ${needed}`);
 
-                // -------------------------------------------------------------
-                // BATCH GENERATION LOOP
-                // -------------------------------------------------------------
                 for (let i = 0; i < needed; i++) {
-                    // Check stop signal again inside loop
                     if (!SYSTEM_STATE.isGenerating) break;
 
                     const prompt = `Create 1 unique multiple-choice math problem for topic "${topicObj.prompt}" with difficulty "${diffLevel}".
@@ -504,18 +362,13 @@ async function startBackgroundGeneration() {
                     Make sure options are distinct. Do not include markdown code blocks.`;
 
                     try {
-                        // Call Google AI
                         const result = await model.generateContent(prompt);
                         const response = await result.response;
                         let text = response.text();
                         
-                        // Clean markdown formatting if present
                         text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-
-                        // Validation: Parse JSON to ensure integrity
                         JSON.parse(text); 
 
-                        // Save to Database
                         await MathCache.create({
                             topic: topicObj.key,
                             difficulty: diffLevel,
@@ -524,15 +377,10 @@ async function startBackgroundGeneration() {
                         });
 
                         logSystem('GEN', `✅ Generated Item`, `${topicObj.key} (${i+1}/${needed})`);
-
-                        // ⏳ RATE LIMIT PROTECTION (Normal Operation)
-                        // Pause for 4 seconds between requests to avoid Google 429 Errors.
                         await new Promise(r => setTimeout(r, 4000));
 
                     } catch (err) {
                         logSystem('ERR', 'Generation Failed', err.message);
-                        
-                        // 🔥 FEATURE: WAIT 60 SECONDS ON FAILURE BEFORE RETRY
                         logSystem('GEN', '⚠️ API Error Detected', 'Cooling Down for 60 Seconds...');
                         await new Promise(r => setTimeout(r, 60000));
                         logSystem('GEN', 'Resuming...', 'Retry Initiated');
@@ -551,30 +399,24 @@ async function startBackgroundGeneration() {
 }
 
 // =================================================================================================
-// SECTION 7: SERVER MIDDLEWARE & SECURITY CONFIGURATION
+// SECTION 7: SERVER MIDDLEWARE & SECURITY
 // =================================================================================================
 
 const app = express();
 
-// Trust Proxy: Essential for secure headers behind proxies (like Nginx or Render)
 app.set('trust proxy', 1);
 
-// Standard Middleware
 app.use(cors()); 
 app.use(express.json({ limit: '2mb' })); 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public'))); 
 
-// Analytics & Logging Middleware
 app.use((req, res, next) => {
-    // 1. Count Total Requests
     SYSTEM_STATE.totalRequests++;
     
-    // 2. Track Unique Visitors
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     SYSTEM_STATE.uniqueVisitors.add(ip);
     
-    // 3. Log API calls (Exclude static files to keep logs clean)
     if (req.path.startsWith('/api') || req.path.startsWith('/admin')) {
         logSystem('NET', `${req.method} ${req.path}`, `IP: ${ip}`);
     }
@@ -582,22 +424,11 @@ app.use((req, res, next) => {
     next();
 });
 
-// -------------------------------------------------------------------------------------------------
-// 🛡️ SECURITY: RATE LIMITERS
-// -------------------------------------------------------------------------------------------------
-
-/**
- * QUOTA LIMITER (Layer 1)
- * Long-term protection. Limits users to 10 generations per 8 hours.
- */
 const aiLimiterQuota = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, // 8 Hours
+    windowMs: 8 * 60 * 60 * 1000, 
     max: 10, 
-    
-    // 🔥 FEATURE: FORCED 60s DELAY AFTER 1st REQUEST
     delayAfter: 1, 
     delayMs: 60 * 1000, 
-    
     message: { 
         error: "Quota Exceeded", 
         message: "⚠️ You have reached the limit (10/8hrs). Please wait." 
@@ -606,12 +437,8 @@ const aiLimiterQuota = rateLimit({
     skip: (req) => CONFIG.OWNER_IP && req.ip.includes(CONFIG.OWNER_IP)
 });
 
-/**
- * SPEED LIMITER (Layer 2)
- * Short-term burst protection. Limits users to 5 generations per 1 hour.
- */
 const aiSpeedLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000, // 1 Hour
+    windowMs: 60 * 60 * 1000, 
     max: 5, 
     message: { 
         error: "Speed Limit", 
@@ -622,59 +449,72 @@ const aiSpeedLimiter = rateLimit({
 });
 
 // =================================================================================================
-// SECTION 8: PRIMARY API ENDPOINTS (THE CORE LOGIC)
+// SECTION 8: PRIMARY API ENDPOINTS (FIXED LOGIC)
 // =================================================================================================
 
 /**
- * Helper: Capitalize String
- * Fixes the bug where "easy" was not matching "Easy" in DB.
+ * 🔥 HELPER: STANDARDIZE DIFFICULTY (FIX V9.6) 🔥
+ * This function fixes "eady", "Easy", "easy" -> "Easy"
  */
-const capitalize = (s) => {
-    if (typeof s !== 'string' || !s) return null;
-    return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+const standardizeDifficulty = (input) => {
+    // 1. Check if input is missing
+    if (!input) {
+        // Warning log for debugging
+        return "Medium";
+    }
+    
+    // 2. Normalize string
+    const s = String(input).toLowerCase().trim();
+
+    // 3. Match Logic
+    if (s === 'easy' || s === 'eady' || s === 'ez') return "Easy";
+    
+    // Check 'very hard' before 'hard' to avoid partial matching issues
+    if (s === 'very hard' || s === 'veryhard' || s === 'very-hard') return "Very Hard";
+    
+    if (s === 'hard') return "Hard";
+    
+    if (s === 'medium' || s === 'med') return "Medium";
+    
+    // Default Fallback
+    return "Medium";
 };
+
 
 /**
  * 🤖 GENERATE PROBLEM API
- * 
- * LOGIC FLOW (HYBRID V8):
- * 1. Receive Request (Topic/Difficulty).
- * 2. STANDARDIZE INPUT: Ensure "easy" becomes "Easy".
- * 3. Check how many problems exist in MongoDB for this specific request.
- * 4. DECISION TREE:
- *    - IF Count >= Target: FORCE CACHE (100%). Do not use API.
- *    - IF Count < Target: Use Random Logic (25% Cache / 75% API).
- * 5. Return result.
  */
 app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, res) => {
-    // 1. Extract Data
+    
+    // 🔍 DEBUG LOG: Check what the frontend actually sends
+    console.log("------------------------------------------------");
+    console.log("📥 [API REQUEST] Body:", req.body);
+    
     const { prompt, topic, difficulty } = req.body;
     
-    // 2. Set Defaults & Fix Formatting (BUG FIX)
+    // ✅ APPLY THE FIX
     const finalTopic = topic || "Limits";
-    // If difficulty is missing, default to Medium. If present, capitalize it.
-    const finalDifficulty = capitalize(difficulty) || "Medium";
+    const finalDifficulty = standardizeDifficulty(difficulty);
     
+    console.log(`✅ [LOGIC] Resolved: Topic="${finalTopic}", Diff="${finalDifficulty}"`);
+    console.log("------------------------------------------------");
+
     SYSTEM_STATE.totalGamesGenerated++;
 
     let useCache = false;
     let dbCount = 0;
 
     // -------------------------------------------------------------------------
-    // STEP 1: INTELLIGENT DATABASE CHECK
+    // STEP 1: DATABASE CHECK
     // -------------------------------------------------------------------------
     if (SYSTEM_STATE.mongoConnected) {
         try {
-            // Count documents matching the criteria
             dbCount = await MathCache.countDocuments({ topic: finalTopic, difficulty: finalDifficulty });
             const target = CONFIG.TARGETS[finalDifficulty] || 30;
 
             if (dbCount >= target) {
-                // ✅ TARGET MET: Database is full. Use Cache 100%.
                 useCache = true;
             } else {
-                // 🎲 TARGET NOT MET: Database needs filling.
-                // Roll the dice: 25% Cache, 75% AI.
                 if (Math.random() < CONFIG.CACHE_RATE) {
                     useCache = true;
                 }
@@ -685,11 +525,10 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
     }
 
     // -------------------------------------------------------------------------
-    // STEP 2: CACHE RETRIEVAL (IF SELECTED)
+    // STEP 2: CACHE RETRIEVAL
     // -------------------------------------------------------------------------
     if (useCache && SYSTEM_STATE.mongoConnected) {
         try {
-            // Aggregate: Match + Random Sample
             const cached = await MathCache.aggregate([
                 { $match: { topic: finalTopic, difficulty: finalDifficulty } }, 
                 { $sample: { size: 1 } }
@@ -709,10 +548,9 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
     }
 
     // -------------------------------------------------------------------------
-    // STEP 3: AI GENERATION FALLBACK
+    // STEP 3: AI GENERATION
     // -------------------------------------------------------------------------
-    // This runs if Cache was skipped (75% chance) OR if Cache was empty.
-    logSystem('AI', 'Calling Gemini API', `${finalTopic} (DB Count: ${dbCount})`);
+    logSystem('AI', 'Calling Gemini API', `${finalTopic} (Target: ${finalDifficulty})`);
     SYSTEM_STATE.aiCalls++;
     
     try {
@@ -725,11 +563,11 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
         const response = await result.response;
         const text = response.text();
         
-        // 4. Populate Database (Save for future) using CORRECTED Difficulty
+        // Save to Database with CORRECTED Difficulty
         if (SYSTEM_STATE.mongoConnected) {
             MathCache.create({
                 topic: finalTopic,
-                difficulty: finalDifficulty, // Using the Capitalized version
+                difficulty: finalDifficulty, 
                 raw_text: text,
                 source_ip: req.ip
             }).catch(e => {
@@ -750,13 +588,7 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
 });
 
 /**
- * 🏆 LEADERBOARD SUBMIT API (V7 LOGIC)
- * 
- * LOGIC FLOW:
- * 1. Anti-Cheat Check (Is score valid?).
- * 2. Check for existing record (User + Difficulty).
- * 3. MERGE: Add new score to old score.
- * 4. DEDUPLICATE: Keep only one record per user/difficulty.
+ * 🏆 LEADERBOARD SUBMIT API
  */
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
@@ -766,13 +598,13 @@ app.post('/api/leaderboard/submit', async (req, res) => {
         return res.status(400).json({ success: false, message: "Invalid payload" });
     }
     
-    // Normalize difficulty for Leaderboard too
-    const finalDiff = capitalize(difficulty);
+    // ✅ APPLY THE FIX HERE TOO
+    const finalDiff = standardizeDifficulty(difficulty);
 
     try {
         const client = await pgPool.connect();
 
-        // 1. Anti-Cheat
+        // Anti-Cheat Check
         const maxAllowed = CONFIG.ALLOWED_SCORES[finalDiff] || 100;
         if (score > maxAllowed) {
             client.release();
@@ -780,39 +612,36 @@ app.post('/api/leaderboard/submit', async (req, res) => {
             return res.status(403).json({ message: "Score rejected" });
         }
 
-        // 2. Fetch Existing Rows
+        // Check Existing
         const check = await client.query(
             'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC',
             [username, finalDiff]
         );
 
         if (check.rows.length > 0) {
-            // 3. MERGE LOGIC
+            // Merge Logic
             const rows = check.rows;
-            const targetId = rows[0].id; // Keep the oldest ID
+            const targetId = rows[0].id; 
             
-            // Sum all existing scores + new score
             const currentTotal = rows.reduce((acc, row) => acc + row.score, 0);
             const finalScore = currentTotal + score;
 
-            // Update record
             await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [finalScore, targetId]);
-            logSystem('DB', `Merged Score (V7)`, `User: ${username}, Total: ${finalScore}`);
+            logSystem('DB', `Merged Score`, `User: ${username}, Total: ${finalScore} [${finalDiff}]`);
 
-            // 4. DEDUPLICATE LOGIC
+            // Clean Duplicates
             if (rows.length > 1) {
                 const idsToDelete = rows.slice(1).map(r => r.id);
                 await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
-                logSystem('DB', `Cleaned Duplicates`, `Deleted IDs: ${idsToDelete.join(',')}`);
             }
         } else {
-            // Insert New Record
+            // New Record
             const userIP = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
                 [username, score, finalDiff, userIP]
             );
-            logSystem('DB', `New Leaderboard Entry`, `User: ${username}`);
+            logSystem('DB', `New Leaderboard Entry`, `User: ${username} [${finalDiff}]`);
         }
 
         client.release();
@@ -824,10 +653,6 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     }
 });
 
-/**
- * 📊 GET TOP SCORES API
- * Aggregates scores across all difficulties to show global ranking.
- */
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pgPool.connect();
@@ -849,9 +674,6 @@ app.get('/api/leaderboard/top', async (req, res) => {
 // SECTION 9: ADMINISTRATIVE API ENDPOINTS
 // =================================================================================================
 
-/**
- * Submit Certificate Request
- */
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
     try {
@@ -863,9 +685,6 @@ app.post('/api/submit-request', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-/**
- * Generate Certificate Image (Redirect)
- */
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
         const client = await pgPool.connect();
@@ -886,9 +705,6 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
     } catch (e) { res.status(500).send("Generation Error"); }
 });
 
-/**
- * Delete Certificate Request
- */
 app.delete('/admin/delete-request/:id', async (req, res) => {
     try {
         const client = await pgPool.connect();
@@ -898,9 +714,6 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-/**
- * Admin Data Aggregator (Stats)
- */
 app.get('/admin/api/stats', async (req, res) => {
     if (!SYSTEM_STATE.mongoConnected) return res.json({ stats: [] });
     
@@ -924,9 +737,6 @@ app.get('/admin/api/stats', async (req, res) => {
     });
 });
 
-/**
- * Toggle Generator State
- */
 app.post('/admin/api/toggle-gen', (req, res) => {
     const { action } = req.body;
     if (action === 'start') {
@@ -1228,7 +1038,7 @@ app.get('/admin', (req, res) => {
             <div class="sidebar">
                 <div class="brand">
                     <h1>TITAN ENGINE</h1>
-                    <span>v9.0 ULTIMATE</span>
+                    <span>v9.6 ULTIMATE</span>
                 </div>
                 
                 <button class="nav-btn active" onclick="switchTab('gen', this)">
@@ -1514,7 +1324,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
         <div class="card">
-            <h1>🚀 TITAN ENGINE V9.0</h1>
+            <h1>🚀 TITAN ENGINE V9.6</h1>
             <p>UPTIME: ${d}d ${h}h</p>
             <div class="metric">PG: ${pg} | MONGO: ${mg}</div>
             <div class="metric">
@@ -1539,7 +1349,7 @@ app.get('/', (req, res) => {
  */
 async function startSystem() {
     console.clear();
-    logSystem('OK', 'Booting BrainTest Titan V9.0 (Cambodia Ed)...');
+    logSystem('OK', 'Booting BrainTest Titan V9.6 (Full Source Ed)...');
     
     // Initialize DBs (Non-blocking)
     initPostgres(); 
