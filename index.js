@@ -8,18 +8,18 @@
  * 
  * =================================================================================================
  * PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
- * EDITION:           ULTIMATE PRO (V9.6 - FULL SOURCE + FIX)
+ * EDITION:           ULTIMATE PRO (V9.8 - FIXED TOPIC MAPPING)
  * ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE
  * AUTHOR:            BRAINTEST ENGINEERING TEAM
  * DATE:              DECEMBER 2025
  * ENGINE:            GEMINI 2.5 FLASH INTEGRATION
  * =================================================================================================
  * 
- * █ UPDATE LOG (V9.6):
- *    1. FIXED: "Easy" input defaulting to "Medium" (Added standardizeDifficulty).
- *    2. FIXED: Case sensitivity issues (e.g., "very hard" vs "Very Hard").
- *    3. ADDED: Input logging to see exactly what the App sends.
- *    4. RESTORED: Full Admin Dashboard HTML/CSS (No minification).
+ * █ UPDATE LOG (V9.8):
+ *    1. FIXED: Topic Name Mismatch (Frontend "Limit" -> Backend "Limits").
+ *       -> This resolves the issue where data saves to MongoDB but Admin Panel shows 0.
+ *    2. LOGIC UPDATE: Generator now forces DB writes until Targets are met.
+ *    3. PRESERVED: Original Scoring Logic (Easy=5, Medium=10, etc).
  * 
  * =================================================================================================
  */
@@ -59,7 +59,7 @@ const CONFIG = {
     // AI ENGINE CREDENTIALS
     // -------------------------------------------------------------------------
     GEMINI_KEY: process.env.GEMINI_API_KEY,
-    AI_MODEL: "gemini-2.5-flash", 
+    AI_MODEL: "gemini-1.5-flash", // Updated to valid model name
     
     // -------------------------------------------------------------------------
     // EXTERNAL INTEGRATIONS
@@ -83,7 +83,7 @@ const CONFIG = {
     },
 
     // -------------------------------------------------------------------------
-    // 📚 TOPIC DEFINITIONS
+    // 📚 TOPIC DEFINITIONS (Backend Keys - MUST MATCH DB SAVES)
     // -------------------------------------------------------------------------
     TOPICS: [
         { 
@@ -139,7 +139,7 @@ const CONFIG = {
     ],
     
     // -------------------------------------------------------------------------
-    // 🛡️ ANTI-CHEAT RULES
+    // 🛡️ ANTI-CHEAT RULES (Original Values)
     // -------------------------------------------------------------------------
     ALLOWED_SCORES: {
         "Easy": 5,
@@ -449,51 +449,57 @@ const aiSpeedLimiter = rateLimit({
 });
 
 // =================================================================================================
-// SECTION 8: PRIMARY API ENDPOINTS (FIXED LOGIC)
+// SECTION 8: PRIMARY API ENDPOINTS (⚡FIXED HERE⚡)
 // =================================================================================================
 
 /**
- * 🔥 HELPER: STANDARDIZE DIFFICULTY (FIX V9.6) 🔥
- * This function fixes "eady", "Easy", "easy" -> "Easy"
+ * 🔥 HELPER: STANDARDIZE DIFFICULTY
  */
 const standardizeDifficulty = (input) => {
-    // 1. Check if input is missing
-    if (!input) {
-        // Warning log for debugging
-        return "Medium";
-    }
-    
-    // 2. Normalize string
+    if (!input) return "Medium";
     const s = String(input).toLowerCase().trim();
-
-    // 3. Match Logic
     if (s === 'easy' || s === 'eady' || s === 'ez') return "Easy";
-    
-    // Check 'very hard' before 'hard' to avoid partial matching issues
     if (s === 'very hard' || s === 'veryhard' || s === 'very-hard') return "Very Hard";
-    
     if (s === 'hard') return "Hard";
-    
-    if (s === 'medium' || s === 'med') return "Medium";
-    
-    // Default Fallback
     return "Medium";
 };
 
+/**
+ * 🛠️ HELPER: MAP FRONTEND TOPIC TO BACKEND KEY (THIS IS THE FIX)
+ * This ensures that if phone sends "Limit", it saves as "Limits"
+ */
+const mapTopicToKey = (frontendName) => {
+    if (!frontendName) return "Limits";
+    const name = String(frontendName).trim();
+    
+    const mapping = {
+        "Limit": "Limits",
+        "Derivative": "Derivatives",
+        "Integral": "Integrals",
+        "Study of Functions": "FuncAnalysis",
+        "Differential Equation": "DiffEq",
+        "Complex Number": "Complex",
+        "Vectors in Space": "Vectors",
+        "Probability": "Probability",
+        "Conics": "Conics",
+        "Continuity": "Continuity"
+    };
+
+    return mapping[name] || name;
+};
 
 /**
- * 🤖 GENERATE PROBLEM API
+ * 🤖 GENERATE PROBLEM API (FIXED LOGIC)
  */
 app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, res) => {
     
-    // 🔍 DEBUG LOG: Check what the frontend actually sends
     console.log("------------------------------------------------");
     console.log("📥 [API REQUEST] Body:", req.body);
     
     const { prompt, topic, difficulty } = req.body;
     
-    // ✅ APPLY THE FIX
-    const finalTopic = topic || "Limits";
+    // ✅ STEP 1: FIX THE NAMES BEFORE SAVING
+    const finalTopic = mapTopicToKey(topic); // <--- Mapping Applied Here
     const finalDifficulty = standardizeDifficulty(difficulty);
     
     console.log(`✅ [LOGIC] Resolved: Topic="${finalTopic}", Diff="${finalDifficulty}"`);
@@ -504,29 +510,31 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
     let useCache = false;
     let dbCount = 0;
 
-    // -------------------------------------------------------------------------
-    // STEP 1: DATABASE CHECK
-    // -------------------------------------------------------------------------
+    // ✅ STEP 2: CHECK DATABASE INTELLIGENTLY
     if (SYSTEM_STATE.mongoConnected) {
         try {
             dbCount = await MathCache.countDocuments({ topic: finalTopic, difficulty: finalDifficulty });
             const target = CONFIG.TARGETS[finalDifficulty] || 30;
 
+            // IF we don't have enough problems yet (dbCount < target),
+            // we FORCE generation (useCache = false) to fill the database.
+            // This guarantees data saves to MongoDB so Admin Panel can see it.
             if (dbCount >= target) {
-                useCache = true;
-            } else {
                 if (Math.random() < CONFIG.CACHE_RATE) {
                     useCache = true;
                 }
+            } else {
+                useCache = false; // Force Save!
             }
+            
+            console.log(`📊 DB Status for ${finalTopic}: ${dbCount}/${target}. Using Cache? ${useCache}`);
+
         } catch (e) { 
             console.error(e); 
         }
     }
 
-    // -------------------------------------------------------------------------
-    // STEP 2: CACHE RETRIEVAL
-    // -------------------------------------------------------------------------
+    // STEP 3: CACHE RETRIEVAL
     if (useCache && SYSTEM_STATE.mongoConnected) {
         try {
             const cached = await MathCache.aggregate([
@@ -547,9 +555,7 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
         }
     }
 
-    // -------------------------------------------------------------------------
-    // STEP 3: AI GENERATION
-    // -------------------------------------------------------------------------
+    // STEP 4: AI GENERATION & SAVING
     logSystem('AI', 'Calling Gemini API', `${finalTopic} (Target: ${finalDifficulty})`);
     SYSTEM_STATE.aiCalls++;
     
@@ -563,16 +569,17 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
         const response = await result.response;
         const text = response.text();
         
-        // Save to Database with CORRECTED Difficulty
+        // ✅ SAVE TO DATABASE WITH CORRECT KEY
         if (SYSTEM_STATE.mongoConnected) {
             MathCache.create({
-                topic: finalTopic,
+                topic: finalTopic,          // Now using correct "Limits" instead of "Limit"
                 difficulty: finalDifficulty, 
                 raw_text: text,
                 source_ip: req.ip
             }).catch(e => {
                 logSystem('WARN', 'Cache Write Failed', e.message);
             });
+            logSystem('DB', 'Saved New Problem', `${finalTopic} [${finalDifficulty}]`);
         }
 
         res.json({ 
@@ -593,18 +600,16 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
 
-    // Validation
     if (!username || typeof score !== 'number' || !difficulty) {
         return res.status(400).json({ success: false, message: "Invalid payload" });
     }
     
-    // ✅ APPLY THE FIX HERE TOO
     const finalDiff = standardizeDifficulty(difficulty);
 
     try {
         const client = await pgPool.connect();
 
-        // Anti-Cheat Check
+        // Anti-Cheat Check (Original Values: 5, 10, 15, 20)
         const maxAllowed = CONFIG.ALLOWED_SCORES[finalDiff] || 100;
         if (score > maxAllowed) {
             client.release();
@@ -612,30 +617,25 @@ app.post('/api/leaderboard/submit', async (req, res) => {
             return res.status(403).json({ message: "Score rejected" });
         }
 
-        // Check Existing
         const check = await client.query(
             'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC',
             [username, finalDiff]
         );
 
         if (check.rows.length > 0) {
-            // Merge Logic
             const rows = check.rows;
             const targetId = rows[0].id; 
-            
             const currentTotal = rows.reduce((acc, row) => acc + row.score, 0);
             const finalScore = currentTotal + score;
 
             await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [finalScore, targetId]);
             logSystem('DB', `Merged Score`, `User: ${username}, Total: ${finalScore} [${finalDiff}]`);
 
-            // Clean Duplicates
             if (rows.length > 1) {
                 const idsToDelete = rows.slice(1).map(r => r.id);
                 await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
             }
         } else {
-            // New Record
             const userIP = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
