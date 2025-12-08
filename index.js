@@ -8,20 +8,26 @@
  * 
  * =================================================================================================
  * PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
- * EDITION:           V11.0 STABILITY PATCH (UNMINIFIED FULL SOURCE)
+ * EDITION:           V10.9 PLATINUM (UNMINIFIED FULL SOURCE)
  * ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE (PG + MONGO)
  * AUTHOR:            BRAINTEST ENGINEERING TEAM
  * DATE:              DECEMBER 2025
  * ENGINE:            GEMINI 2.5 FLASH INTEGRATION
- * STATUS:            PRODUCTION READY (CACHE FIX APPLIED)
+ * STATUS:            PRODUCTION READY
  * =================================================================================================
  * 
- * █ CRITICAL UPDATE LOG (V11.0):
- *    1. [FIX] CACHE RETRIEVAL LOGIC: Fixed issue where 2nd click on "Hard" limits would stall.
- *       Now forces cache retrieval if targets are met, preventing AI Rate Limit hits.
- *    2. [FIX] TOPIC MAPPING: Fixed "Derivatives" mapping issue ensuring "Derivative" -> "Derivatives".
- *    3. [FALLBACK] FAIL-SAFE FETCH: If MongoDB `$sample` fails, standard `skip()` is used.
- *    4. [RESTORE] FULL SOURCE: Kept all ~1500 lines for full administrative control.
+ * █ CRITICAL UPDATE LOG (V10.9):
+ *    1. [RESTORATION] FULL SOURCE CODE: Expanded all HTML/CSS/JS for the Admin Panel. 
+ *       Line count restored to ~1500+ for better readability and maintenance.
+ *    2. [MATRIX] FULL GRANULAR FORMS: Implemented detailed sub-topic lists for ALL 10 TOPICS.
+ *       (Limits, Derivatives, Integrals, DiffEq, Complex, Vectors, FuncAnalysis, Conics, Probability, Continuity)
+ *    3. [LOGIC] DIFFICULTY STANDARDS (BacII -> IMO): 
+ *       - Easy = BacII Standard.
+ *       - Very Hard = IMO/Olympiad Standard.
+ *    4. [SECURITY] STRICT ANSWER VALIDATION: 
+ *       - Ensures exactly ONE correct answer.
+ *       - Checks for duplicate options.
+ *       - Verifies 'answer' key matches one of the 'options'.
  * 
  * =================================================================================================
  */
@@ -378,7 +384,7 @@ problemSchema.index({ topic: 1, difficulty: 1 });
 const MathCache = mongoose.model('MathProblemCache', problemSchema);
 
 // =================================================================================================
-// SECTION 6: GENERATOR ENGINE (TITAN V11.0 CORE)
+// SECTION 6: GENERATOR ENGINE (TITAN V10.9 CORE)
 // =================================================================================================
 
 async function startBackgroundGeneration() {
@@ -389,7 +395,7 @@ async function startBackgroundGeneration() {
     }
 
     SYSTEM_STATE.isGenerating = true;
-    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initializing Matrix V11.0 (Strict Validation)...');
+    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initializing Matrix V10.9 (Strict Validation)...');
 
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
     const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
@@ -541,37 +547,15 @@ const aiSpeedLimiter = rateLimit({
 // SECTION 8: PRIMARY API ENDPOINTS
 // =================================================================================================
 
-// Helper: Map Frontend Names to Backend Keys (Fixed for V11.0)
+// Helper: Map Frontend Names to Backend Keys
 const mapTopicToKey = (frontendName) => {
     if (!frontendName) return "Limits";
     const name = String(frontendName).trim();
-    
-    // Check key phrases case-insensitive
-    const lower = name.toLowerCase();
-    
-    if (lower.includes('limit')) return "Limits";
-    if (lower.includes('deriv')) return "Derivatives"; // Handles 'Derivative' and 'Derivatives'
-    if (lower.includes('integral')) return "Integrals";
-    if (lower.includes('study') || lower.includes('func')) return "FuncAnalysis";
-    if (lower.includes('diff') && lower.includes('eq')) return "DiffEq";
-    if (lower.includes('complex')) return "Complex";
-    if (lower.includes('vector')) return "Vectors";
-    if (lower.includes('probab')) return "Probability";
-    if (lower.includes('conic')) return "Conics";
-    if (lower.includes('continu')) return "Continuity";
-
-    // Direct mapping fallback
     const mapping = {
-        "Limit": "Limits", 
-        "Derivative": "Derivatives", 
-        "Integral": "Integrals",
-        "Study of Functions": "FuncAnalysis", 
-        "Differential Equation": "DiffEq",
-        "Complex Number": "Complex", 
-        "Vectors in Space": "Vectors",
-        "Probability": "Probability", 
-        "Conics": "Conics", 
-        "Continuity": "Continuity"
+        "Limit": "Limits", "Derivative": "Derivatives", "Integral": "Integrals",
+        "Study of Functions": "FuncAnalysis", "Differential Equation": "DiffEq",
+        "Complex Number": "Complex", "Vectors in Space": "Vectors",
+        "Probability": "Probability", "Conics": "Conics", "Continuity": "Continuity"
     };
     return mapping[name] || name;
 };
@@ -584,7 +568,7 @@ const standardizeDifficulty = (input) => {
     return "Medium";
 };
 
-// 🤖 GENERATE PROBLEM API (FIXED LOGIC)
+// 🤖 GENERATE PROBLEM API
 app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, res) => {
     const { prompt, topic, difficulty } = req.body;
     const finalTopic = mapTopicToKey(topic); 
@@ -592,50 +576,39 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
     
     SYSTEM_STATE.totalGamesGenerated++;
 
-    // 🛡️ STRATEGY: TRY CACHE FIRST (AGGRESSIVE)
-    // If we have data, use it. Don't risk AI failure.
+    let useCache = false;
+    let dbCount = 0;
+
     if (SYSTEM_STATE.mongoConnected) {
         try {
-            const count = await MathCache.countDocuments({ topic: finalTopic, difficulty: finalDifficulty });
+            dbCount = await MathCache.countDocuments({ topic: finalTopic, difficulty: finalDifficulty });
             const target = CONFIG.TARGETS[finalDifficulty] || 30;
-
-            // CONDITION: If target met (100% full) OR we have at least 1 and RNG hits (25%)
-            // We force cache to prevent "Generating..." loops
-            const forceCache = count >= target;
-            const tryCache = forceCache || (count > 0 && Math.random() < 0.25);
-
-            if (tryCache) {
-                // Method 1: Random Sample (Fastest)
-                let cached = await MathCache.aggregate([
-                    { $match: { topic: finalTopic, difficulty: finalDifficulty } }, 
-                    { $sample: { size: 1 } }
-                ]);
-
-                // Method 2: Fallback if sample fails (Robustness)
-                if (cached.length === 0 && count > 0) {
-                    const skip = Math.floor(Math.random() * count);
-                    const fallbackDoc = await MathCache.findOne({ topic: finalTopic, difficulty: finalDifficulty }).skip(skip);
-                    if (fallbackDoc) cached = [fallbackDoc];
-                }
-
-                // Return if we found something
-                if (cached.length > 0) {
-                    if (forceCache) SYSTEM_STATE.cacheHits++; // Only count meaningful hits
-                    return res.json({ 
-                        text: cached[0].raw_text, 
-                        source: "cache",
-                        metadata: { topic: finalTopic, difficulty: finalDifficulty }
-                    });
-                }
+            if (dbCount >= target) {
+                useCache = true; // 100% Cache if target met
+            } else {
+                useCache = Math.random() < 0.25 && dbCount > 0; // 25% Cache if building
             }
-        } catch (e) { 
-            logSystem('ERR', 'Cache Read Error', e.message); 
-            // Don't crash, just fall through to AI
-        }
+        } catch (e) { console.error(e); }
     }
 
-    // 🤖 DIRECT AI FALLBACK (Uses Granular Logic too)
-    // Only happens if cache is empty OR we are building cache
+    if (useCache) {
+        try {
+            const cached = await MathCache.aggregate([
+                { $match: { topic: finalTopic, difficulty: finalDifficulty } }, 
+                { $sample: { size: 1 } }
+            ]);
+            if (cached.length > 0) {
+                SYSTEM_STATE.cacheHits++;
+                return res.json({ 
+                    text: cached[0].raw_text, 
+                    source: "cache",
+                    metadata: { topic: finalTopic, difficulty: finalDifficulty }
+                });
+            }
+        } catch (e) { logSystem('ERR', 'Cache Read Error', e.message); }
+    }
+
+    // Direct AI Fallback (Uses Granular Logic too)
     logSystem('AI', 'Direct AI Generation', `${finalTopic} [${finalDifficulty}]`);
     SYSTEM_STATE.aiCalls++;
     
@@ -661,16 +634,9 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
         const text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
         
         // Validate before sending
-        let parsed;
-        try {
-            parsed = JSON.parse(text);
-        } catch (e) {
-            throw new Error("AI produced invalid JSON");
-        }
-        
-        if(!parsed.options || parsed.options.length !== 4) throw new Error("Invalid Options Count");
+        const parsed = JSON.parse(text);
+        if(!parsed.options || parsed.options.length !== 4) throw new Error("Invalid Format");
 
-        // Save to cache for next person
         if (SYSTEM_STATE.mongoConnected) {
             MathCache.create({
                 topic: finalTopic,
@@ -684,8 +650,7 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
 
     } catch (err) {
         logSystem('ERR', 'AI Service Error', err.message);
-        // Fallback response so frontend doesn't hang
-        res.status(500).json({ error: "Service Busy", message: "AI is overloaded. Please try again." });
+        res.status(500).json({ error: "AI Service Unavailable" });
     }
 });
 
@@ -1065,7 +1030,7 @@ app.get('/admin', (req, res) => {
             <div class="sidebar">
                 <div class="brand">
                     <h1>TITAN ENGINE</h1>
-                    <span>v11.0 STABILITY</span>
+                    <span>v10.9 PLATINUM</span>
                 </div>
                 
                 <button class="nav-btn active" onclick="switchTab('gen', this)">
@@ -1342,7 +1307,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
         <div class="card">
-            <h1>🚀 TITAN ENGINE V11.0</h1>
+            <h1>🚀 TITAN ENGINE V10.9</h1>
             <p>UPTIME: ${d}d ${h}h</p>
             <div class="metric">PG: ${pg} | MONGO: ${mg}</div>
             <div class="metric">
@@ -1363,7 +1328,7 @@ app.get('/', (req, res) => {
 
 async function startSystem() {
     console.clear();
-    logSystem('OK', 'Booting BrainTest Titan V11.0 (Full Source Ed)...');
+    logSystem('OK', 'Booting BrainTest Titan V10.9 (Full Source Ed)...');
     
     // Initialize DBs (Non-blocking)
     initPostgres(); 
