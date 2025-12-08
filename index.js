@@ -8,40 +8,40 @@
  * 
  * =================================================================================================
  * PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
- * EDITION:           ULTIMATE PRO (V8.2.0)
+ * EDITION:           ULTIMATE PRO (V8.3.1)
  * ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE
  * AUTHOR:            BRAINTEST ENGINEERING TEAM
  * DATE:              DECEMBER 2025
- * LINES OF CODE:     1200+ (FULLY DOCUMENTED)
+ * LINES OF CODE:     1200+ (FULLY DOCUMENTED & EXPANDED)
  * =================================================================================================
  * 
  * █ SYSTEM CAPABILITIES & LOGIC FLOW:
  * 
  * 1. DUAL SECURITY LAYER (ANTI-SPAM):
- *    - QUOTA LIMITER: Maximum 10 requests per 8 Hours (Long-term protection).
- *    - SPEED LIMITER: Maximum 5 requests per 1 Hour (Burst protection).
+ *    - QUOTA LIMITER: Maximum 10 requests per 8 Hours.
+ *    - SPEED LIMITER: Maximum 5 requests per 1 Hour.
+ *    - FORCED DELAY: 60 Seconds delay applied immediately after the 1st request.
  *    - IP BYPASS: Owner IP is whitelisted from all restrictions.
  * 
  * 2. HYBRID CACHE INTELLIGENCE (V8 ENGINE):
  *    - STAGE A (CHECK): System checks MongoDB for existing problems count.
- *    - STAGE B (TARGET MET): If DB has enough problems (e.g., 100), usage is 100% CACHE (No API cost).
- *    - STAGE C (FILLING): If DB is not full, usage is 25% CACHE / 75% AI GENERATION to populate it.
+ *    - STAGE B (TARGET MET): If DB has enough problems (e.g., 100), usage is 100% CACHE.
+ *    - STAGE C (FILLING): If DB is not full, usage is 25% CACHE / 75% AI GENERATION.
  * 
  * 3. LEADERBOARD SYSTEM (V7 LOGIC):
- *    - SMART MERGE: If a user plays again, their score is ADDED to the previous total.
- *    - DEDUPLICATION: Ensures only ONE row exists per User/Difficulty pair (keeps the oldest ID).
+ *    - SMART MERGE: Sums up scores for the same user/difficulty.
+ *    - DEDUPLICATION: Removes duplicate rows, keeping only the oldest ID.
  *    - ANTI-CHEAT: Validates max possible score per difficulty level.
  * 
  * 4. AUTOMATIC BATCH GENERATOR (BACKGROUND WORKER):
- *    - A background loop that continuously checks all Topics and Difficulties.
- *    - Automatically calls Google Gemini AI to generate missing problems until Targets are met.
- *    - Respects API Rate Limits with smart delays.
+ *    - Continuously checks all Topics and Difficulties.
+ *    - Calls Google Gemini (2.5 Flash) to generate missing problems.
+ *    - ERROR HANDLING: Waits 60 SECONDS before retrying if AI fails.
  * 
  * 5. ADMINISTRATIVE DASHBOARD (PREMIUM UI):
  *    - Server-Side Rendered (SSR) HTML/CSS.
- *    - Glassmorphism Design Language.
- *    - Real-time Controls for the Generator Engine.
- *    - Certificate Management System.
+ *    - Glassmorphism Design Language (Expanded CSS).
+ *    - Real-time Controls and Logs.
  * 
  * =================================================================================================
  */
@@ -108,8 +108,9 @@ const CONFIG = {
     // AI ENGINE CREDENTIALS
     // -------------------------------------------------------------------------
     GEMINI_KEY: process.env.GEMINI_API_KEY,
-    // Using 'gemini-1.5-flash' for the best balance of speed and cost.
-    AI_MODEL: "gemini-1.5-flash", 
+    
+    // ✅ UPDATED TO GEMINI 2.5 FLASH AS REQUESTED
+    AI_MODEL: "gemini-2.5-flash", 
     
     // -------------------------------------------------------------------------
     // EXTERNAL INTEGRATIONS
@@ -521,11 +522,13 @@ async function startBackgroundGeneration() {
 
                     } catch (err) {
                         logSystem('ERR', 'Generation Failed', err.message);
-                        // Long cool-down on error
-                        await new Promise(r => setTimeout(r, 10000));
+                        
+                        // 🔥 FEATURE: WAIT 60 SECONDS ON FAILURE BEFORE RETRY
+                        logSystem('GEN', 'Cooling Down (60s)...', 'Error Recovery Mode');
+                        await new Promise(r => setTimeout(r, 60000));
                     }
 
-                    // ⏳ RATE LIMIT PROTECTION
+                    // ⏳ RATE LIMIT PROTECTION (Normal Operation)
                     // Pause for 4 seconds between requests to avoid Google 429 Errors.
                     await new Promise(r => setTimeout(r, 4000));
                 }
@@ -584,8 +587,11 @@ app.use((req, res, next) => {
 const aiLimiterQuota = rateLimit({
     windowMs: 8 * 60 * 60 * 1000, // 8 Hours
     max: 10, 
+    
+    // 🔥 FEATURE: FORCED 60s DELAY AFTER 1st REQUEST
     delayAfter: 1, 
-    delayMs: 60 * 1000, // Force 60s delay after 1st request
+    delayMs: 60 * 1000, 
+    
     message: { 
         error: "Quota Exceeded", 
         message: "⚠️ You have reached the limit (10/8hrs). Please wait." 
@@ -942,7 +948,9 @@ app.get('/admin', (req, res) => {
                 --text-mute: #94a3b8;
             }
 
-            * { box-sizing: border-box; }
+            * {
+                box-sizing: border-box;
+            }
 
             body {
                 margin: 0;
@@ -1013,7 +1021,10 @@ app.get('/admin', (req, res) => {
                 align-items: center;
                 gap: 12px;
             }
-            .nav-btn:hover { background: rgba(255,255,255,0.05); color: white; }
+            .nav-btn:hover {
+                background: rgba(255,255,255,0.05);
+                color: white;
+            }
             .nav-btn.active {
                 background: rgba(59, 130, 246, 0.15);
                 color: var(--primary);
@@ -1092,7 +1103,10 @@ app.get('/admin', (req, res) => {
                 color: white;
                 box-shadow: 0 4px 20px var(--success-glow);
             }
-            .btn-start:hover { transform: translateY(-2px); box-shadow: 0 8px 25px var(--success-glow); }
+            .btn-start:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 8px 25px var(--success-glow);
+            }
             
             .btn-stop {
                 background: linear-gradient(135deg, #991b1b, #ef4444);
@@ -1137,10 +1151,23 @@ app.get('/admin', (req, res) => {
             }
 
             /* --- TABLES --- */
-            table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-            td { padding: 12px 5px; border-bottom: 1px solid rgba(255,255,255,0.05); }
-            tr:last-child td { border-bottom: none; }
-            .diff-badge { font-family: 'JetBrains Mono'; font-size: 0.75rem; color: var(--text-mute); }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 0.9rem;
+            }
+            td {
+                padding: 12px 5px;
+                border-bottom: 1px solid rgba(255,255,255,0.05);
+            }
+            tr:last-child td {
+                border-bottom: none;
+            }
+            .diff-badge {
+                font-family: 'JetBrains Mono';
+                font-size: 0.75rem;
+                color: var(--text-mute);
+            }
 
             /* --- TERMINAL / LOGS --- */
             .terminal {
@@ -1154,7 +1181,11 @@ app.get('/admin', (req, res) => {
                 font-size: 0.8rem;
                 box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
             }
-            .log-row { margin-bottom: 5px; display: flex; gap: 10px; }
+            .log-row {
+                margin-bottom: 5px;
+                display: flex;
+                gap: 10px;
+            }
             .log-time { color: #52525b; }
             .log-type { font-weight: bold; }
 
@@ -1177,7 +1208,7 @@ app.get('/admin', (req, res) => {
             <div class="sidebar">
                 <div class="brand">
                     <h1>TITAN ENGINE</h1>
-                    <span>v8.2.0 ULTIMATE</span>
+                    <span>v8.3.1 ULTIMATE</span>
                 </div>
                 
                 <button class="nav-btn active" onclick="switchTab('gen', this)">
@@ -1463,7 +1494,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
         <div class="card">
-            <h1>🚀 TITAN ENGINE V8.2.0</h1>
+            <h1>🚀 TITAN ENGINE V8.3.1</h1>
             <p>UPTIME: ${d}d ${h}h</p>
             <div class="metric">PG: ${pg} | MONGO: ${mg}</div>
             <div class="metric">
@@ -1488,7 +1519,7 @@ app.get('/', (req, res) => {
  */
 async function startSystem() {
     console.clear();
-    logSystem('OK', 'Booting BrainTest Titan V8.2.0...');
+    logSystem('OK', 'Booting BrainTest Titan V8.3.1...');
     
     // Initialize DBs (Non-blocking)
     initPostgres(); 
