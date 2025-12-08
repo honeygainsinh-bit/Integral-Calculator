@@ -137,7 +137,7 @@ class ConfigurationRegistry {
         this.GEN = {
             CACHE_RATE: 0.25, // 25% chance to use cache if not full
             TARGETS: {
-                "Easy": 60,
+                "Easy": 100,
                 "Medium": 40,
                 "Hard": 30,
                 "Very Hard": 20
