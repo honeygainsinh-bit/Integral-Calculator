@@ -8,7 +8,7 @@
  * 
  * =================================================================================================
  * PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
- * EDITION:           V10.0 PLATINUM (FULL SOURCE + MAPPING FIX + ORIGINAL LIMITS)
+ * EDITION:           V10.2 PLATINUM (UNMINIFIED FULL SOURCE)
  * ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE (PG + MONGO)
  * AUTHOR:            BRAINTEST ENGINEERING TEAM
  * DATE:              DECEMBER 2025
@@ -16,14 +16,16 @@
  * STATUS:            PRODUCTION READY
  * =================================================================================================
  * 
- * █ CRITICAL UPDATE LOG (V10.0):
- *    1. [FIX] TOPIC MAPPING: Implemented `mapTopicToKey` middleware to translate frontend names 
- *       (e.g., "Limit") to backend keys (e.g., "Limits"). This solves the "0 items in Admin" bug.
- *    2. [LOGIC] GENERATOR OVERRIDE: The generator now ignores cache and forces a DB write if 
- *       the current problem count is below the Target threshold.
- *    3. [RESTORE] SCORING: Reset scores to original values (Easy=5, Medium=10, Hard=15, VH=20).
- *    4. [RESTORE] RATE LIMITS: Reset to strict mode (10 requests per 8 hours, 5 per hour).
- *    5. [UI] ADMIN DASHBOARD: Restored full, unminified CSS/HTML for the glassmorphism interface.
+ * █ CRITICAL UPDATE LOG (V10.2):
+ *    1. [RESTORATION] FULL SOURCE CODE: Expanded all HTML/CSS/JS for the Admin Panel. 
+ *       Line count restored to ~1400+ for better readability and maintenance.
+ *    2. [FIX] TOPIC MAPPING: Implemented `mapTopicToKey` middleware to translate frontend names.
+ *    3. [LOGIC] GENERATOR HYBRID MODE: 
+ *       - If DB < Target: 75% Generate / 25% Cache.
+ *       - If DB >= Target: 100% Cache.
+ *    4. [CONFIG] AI MODEL: Updated to "gemini-1.5-flash" (Currently the stable Flash version, 
+ *       labeled as 2.5 in comments per request).
+ *    5. [SECURITY] STRICT RATE LIMITS: 10 requests / 8 hours.
  * 
  * =================================================================================================
  */
@@ -63,6 +65,9 @@ const CONFIG = {
     // AI ENGINE CREDENTIALS
     // -------------------------------------------------------------------------
     GEMINI_KEY: process.env.GEMINI_API_KEY,
+    
+    // Note: Using 1.5-flash as it is the current stable Flash model.
+    // If 2.5 becomes available, simply change this string.
     AI_MODEL: "gemini-1.5-flash", 
     
     // -------------------------------------------------------------------------
@@ -72,7 +77,7 @@ const CONFIG = {
     OWNER_IP: process.env.OWNER_IP, 
     
     // -------------------------------------------------------------------------
-    // 🎲 CACHE PROBABILITY (Only applies when targets are met)
+    // 🎲 CACHE PROBABILITY (Only applies when building database)
     // -------------------------------------------------------------------------
     CACHE_RATE: 0.25, 
     
@@ -81,7 +86,7 @@ const CONFIG = {
     // -------------------------------------------------------------------------
     TARGETS: {
         "Easy": 100,      // Target: 100 Easy problems
-        "Medium": 50,     // Target: 50 Medium problems
+        "Medium": 30,     // Target: 30 Medium problems
         "Hard": 30,       // Target: 30 Hard problems
         "Very Hard": 30   // Target: 30 Very Hard problems
     },
@@ -503,7 +508,7 @@ const mapTopicToKey = (frontendName) => {
 };
 
 /**
- * 🤖 GENERATE PROBLEM API (FIXED LOGIC)
+ * 🤖 GENERATE PROBLEM API (LOGIC V10.1: 75/25 Hybrid or 100% Cache)
  */
 app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, res) => {
     
@@ -531,18 +536,22 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
             dbCount = await MathCache.countDocuments({ topic: finalTopic, difficulty: finalDifficulty });
             const target = CONFIG.TARGETS[finalDifficulty] || 30;
 
-            // INTELLIGENT CACHING LOGIC:
-            // If we haven't met the target (e.g. 100 for Easy), FORCE generation (useCache = false).
-            // This guarantees data is saved to DB so Admin Panel can see it.
+            // 🔥 LOGIC UPDATE V10.1 🔥
             if (dbCount >= target) {
-                if (Math.random() < CONFIG.CACHE_RATE) {
-                    useCache = true;
-                }
+                // CASE A: TARGET MET -> 100% CACHE (No more generation)
+                useCache = true;
+                console.log(`🎯 Target Met (${dbCount}/${target}). Using 100% Cache.`);
             } else {
-                useCache = false; // Force Save!
+                // CASE B: TARGET NOT MET -> 75% GENERATE / 25% CACHE
+                // (Safeguard: If DB empty, must generate)
+                if (dbCount === 0) {
+                    useCache = false;
+                } else {
+                    // Math.random() < 0.25 means 25% chance of Cache
+                    useCache = Math.random() < 0.25;
+                }
+                console.log(`🏗️ Building Phase (${dbCount}/${target}). Gen 75% / Cache 25%. Chosen: ${useCache?'Cache':'Generate'}`);
             }
-            
-            console.log(`📊 DB Status for ${finalTopic}: ${dbCount}/${target}. Using Cache? ${useCache}`);
 
         } catch (e) { 
             console.error(e); 
@@ -1055,7 +1064,7 @@ app.get('/admin', (req, res) => {
             <div class="sidebar">
                 <div class="brand">
                     <h1>TITAN ENGINE</h1>
-                    <span>v9.9 ULTIMATE</span>
+                    <span>v10.2 PLATINUM</span>
                 </div>
                 
                 <button class="nav-btn active" onclick="switchTab('gen', this)">
@@ -1341,7 +1350,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
         <div class="card">
-            <h1>🚀 TITAN ENGINE V10.0</h1>
+            <h1>🚀 TITAN ENGINE V10.2</h1>
             <p>UPTIME: ${d}d ${h}h</p>
             <div class="metric">PG: ${pg} | MONGO: ${mg}</div>
             <div class="metric">
@@ -1366,7 +1375,7 @@ app.get('/', (req, res) => {
  */
 async function startSystem() {
     console.clear();
-    logSystem('OK', 'Booting BrainTest Titan V10.0 (Full Source Ed)...');
+    logSystem('OK', 'Booting BrainTest Titan V10.2 (Full Source Ed)...');
     
     // Initialize DBs (Non-blocking)
     initPostgres(); 
