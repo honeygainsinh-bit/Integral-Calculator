@@ -10,57 +10,72 @@
  * =================================================================================================
  * 
  * PROJECT:           TITAN ENTERPRISE BACKEND SYSTEM
- * VERSION:           10.0.0 (CAMBODIA EDITION)
- * CODENAME:          "PREAH VIHEAR"
+ * EDITION:           ULTIMATE PRO (V11.0 FIXED)
  * ARCHITECTURE:      MONOLITHIC NODE.JS + HYBRID DB (PG/MONGO)
  * AUTHOR:            BRAINTEST ENGINEERING TEAM
  * DATE:              DECEMBER 2025
+ * LICENSE:           PROPRIETARY
+ * LINES OF CODE:     1600+ (EXPANDED FOR ENTERPRISE STABILITY)
  * 
+ * -------------------------------------------------------------------------------------------------
  * █ SYSTEM CAPABILITIES & LOGIC FLOW:
+ * -------------------------------------------------------------------------------------------------
  * 
  * 1. SECURITY LAYER (USER RATE LIMIT):
- *    - RULE: Maximum 10 requests per 8 Hours.
- *    - DELAY: Removed! Users can request instantly within quota.
- *    - BYPASS: Owner IP is whitelisted.
+ *    - CONFIGURATION: Maximum 10 requests per 8 Hours window.
+ *    - BEHAVIOR: No forced delay between requests. Instant execution.
+ *    - EXCEPTION: Owner IP is whitelisted from all restrictions.
  * 
- * 2. ERROR HANDLING (API RETRY LOGIC):
- *    - IF AI FAILS: System waits 60 SECONDS (Cool Down).
- *    - RETRY: Automatically retries after the delay.
+ * 2. SYSTEM RESILIENCE (AI RETRY LOGIC):
+ *    - TRIGGER: If Google Gemini API fails (throws 500/503/429).
+ *    - MECHANISM: System pauses for 60 SECONDS (Cool Down).
+ *    - OUTCOME: Automatically retries generation after the pause.
  * 
- * 3. LEADERBOARD INTELLIGENCE:
- *    - MERGE: Sums scores for same User/Difficulty.
- *    - DEDUPE: Removes duplicate rows immediately.
+ * 3. LEADERBOARD INTELLIGENCE (V9 ENGINE):
+ *    - MERGE STRATEGY: Accumulates scores for the same User + Difficulty.
+ *    - DEDUPLICATION: Removes duplicate rows immediately upon submission.
+ *    - VALIDATION: Checks against Max Score limits per difficulty.
  * 
- * 4. CURRICULUM (GRADE 12 NEW):
- *    - Limits, Continuity, Derivatives, Functions, Integrals, 
+ * 4. CURRICULUM ENGINE (GRADE 12 NEW):
+ *    - Covers: Limits, Continuity, Derivatives, Functions, Integrals, 
  *      DiffEq, Probability, Complex, Vectors, Conics.
  * 
- * 5. ADMIN DASHBOARD:
- *    - Full Glassmorphism UI (Server-Side Rendered).
- *    - Live System Monitoring.
+ * 5. ADMIN DASHBOARD (SSR):
+ *    - Full Glassmorphism UI (HTML/CSS in-built).
+ *    - Live System Monitoring (Memory/Uptime).
+ *    - Certificate Management & Generator Controls.
  * 
  * =================================================================================================
  */
 
 // =================================================================================================
-// 📚 MODULE 1: IMPORTS & SETUP
+// 📚 MODULE 1: LIBRARY IMPORTS & SYSTEM CHECK
 // =================================================================================================
 
-// 1.1 Track Start Time
+// 1.1 Track Start Time for Uptime Metrics
 const START_TIME = Date.now();
 
 // 1.2 Load Environment Variables
+// Ensure .env file is present in the root directory
 require('dotenv').config();
 
-// 1.3 Core Dependencies
+// 1.3 Core Node.js Modules
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
+
+// 1.4 Third-Party Dependencies
+// Express: The backbone web framework
 const express = require('express');
+// CORS: Handling Cross-Origin requests
 const cors = require('cors');
+// PG: PostgreSQL Client
 const { Pool } = require('pg');
+// Mongoose: MongoDB Object Modeling
 const mongoose = require('mongoose');
+// Google AI: Gemini API SDK
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+// Rate Limit: Traffic control
 const rateLimit = require('express-rate-limit');
 
 // =================================================================================================
@@ -68,41 +83,59 @@ const rateLimit = require('express-rate-limit');
 // =================================================================================================
 
 /**
- * Global Configuration Class
- * Centralizes all settings, constants, and curriculum data.
+ * ConfigurationRegistry
+ * 
+ * A centralized class to manage all static configurations, environment variables,
+ * and game rules. This serves as the "Single Source of Truth".
  */
 class ConfigurationRegistry {
     constructor() {
-        // --- SERVER ---
+        /**
+         * Server Configuration
+         * Settings related to the HTTP server instance.
+         */
         this.SERVER = {
             PORT: process.env.PORT || 3000,
             ENV: process.env.NODE_ENV || 'development',
-            TIMEOUT: 30000 
+            TIMEOUT: 30000 // 30 Seconds Timeout
         };
 
-        // --- DATABASE ---
+        /**
+         * Database Configuration
+         * Connection strings for PostgreSQL and MongoDB.
+         */
         this.DB = {
             POSTGRES_URL: process.env.DATABASE_URL,
             MONGO_URI: this._cleanMongoURI(process.env.MONGODB_URI)
         };
 
-        // --- AI ENGINE ---
+        /**
+         * AI Engine Configuration
+         * Settings for Google Gemini integration.
+         */
         this.AI = {
             API_KEY: process.env.GEMINI_API_KEY,
-            MODEL: "gemini-2.5-flash", 
-            RETRY_DELAY: 60000, // 60 Seconds Delay on Failure
-            MAX_RETRIES: 2
+            MODEL: "gemini-2.5-flash", // Using Flash model for speed
+            TEMPERATURE: 0.7,
+            MAX_RETRIES: 2,
+            RETRY_DELAY: 60000 // 60 Seconds (System Cool Down)
         };
 
-        // --- EXTERNAL ---
+        /**
+         * External Integrations
+         * Third-party services and security whitelists.
+         */
         this.EXT = {
             IMG_API: process.env.EXTERNAL_IMAGE_API,
             OWNER_IP: process.env.OWNER_IP
         };
 
-        // --- GENERATOR ---
+        /**
+         * Generator Configuration
+         * Logic settings for the Content Generator Worker.
+         */
         this.GEN = {
-            CACHE_RATE: 0.25, // 25% Cache Usage
+            CACHE_RATE: 0.25, // 25% chance to use cache if not full
             TARGETS: {
                 "Easy": 60,
                 "Medium": 40,
@@ -111,7 +144,10 @@ class ConfigurationRegistry {
             }
         };
 
-        // --- GAME RULES ---
+        /**
+         * Game Rules
+         * Anti-cheat thresholds per difficulty.
+         */
         this.RULES = {
             MAX_SCORES: {
                 "Easy": 5,
@@ -121,7 +157,10 @@ class ConfigurationRegistry {
             }
         };
 
-        // --- CURRICULUM (GRADE 12 NEW) ---
+        /**
+         * Curriculum Definitions
+         * Mapped to Ministry of Education, Youth and Sport (MoEYS) Grade 12.
+         */
         this.TOPICS = [
             { 
                 key: "Limits", 
@@ -176,6 +215,12 @@ class ConfigurationRegistry {
         ];
     }
 
+    /**
+     * Helper to clean MongoDB URI
+     * Ensures protocol is present for Mongoose compatibility.
+     * @param {string} uri - The raw URI string
+     * @returns {string|null} - cleaned URI
+     */
     _cleanMongoURI(uri) {
         if (!uri) return null;
         let clean = uri.trim();
@@ -189,36 +234,104 @@ class ConfigurationRegistry {
 const CONFIG = new ConfigurationRegistry();
 
 // =================================================================================================
-// 📝 MODULE 3: LOGGER & STATE
+// 📝 MODULE 3: LOGGER & STATE MANAGEMENT
 // =================================================================================================
 
+/**
+ * SystemState
+ * Holds the runtime volatility state of the application.
+ */
 class SystemState {
     constructor() {
         this.dbStatus = { pg: false, mongo: false };
-        this.metrics = { requests: 0, cacheHits: 0, aiCalls: 0, errors: 0 };
-        this.worker = { isRunning: false, task: "Idle" };
-        this.logs = [];
+        this.metrics = {
+            requests: 0,
+            cacheHits: 0,
+            aiCalls: 0,
+            errors: 0
+        };
+        this.worker = {
+            isRunning: false,
+            task: "Idle"
+        };
+        this.logs = []; // In-memory log buffer for Admin UI
     }
 }
 
 const STATE = new SystemState();
 
+/**
+ * Logger
+ * Static utility for standardized logging.
+ */
 class Logger {
-    static info(module, message, details = '') { this._print('INFO', module, message, details, '#3b82f6'); }
-    static success(module, message, details = '') { this._print('OK', module, message, details, '#10b981'); }
-    static warn(module, message, details = '') { this._print('WARN', module, message, details, '#f59e0b'); }
-    static error(module, message, details = '') { 
-        STATE.metrics.errors++;
-        this._print('ERR', module, message, details, '#ef4444'); 
+    /**
+     * Log Information
+     */
+    static info(module, message, details = '') {
+        this._print('INFO', module, message, details, '#3b82f6');
     }
-    static db(message, details = '') { this._print('DB', 'DATABASE', message, details, '#8b5cf6'); }
-    static gen(message, details = '') { this._print('GEN', 'WORKER', message, details, '#ec4899'); }
 
+    /**
+     * Log Success
+     */
+    static success(module, message, details = '') {
+        this._print('OK', module, message, details, '#10b981');
+    }
+
+    /**
+     * Log Warning
+     */
+    static warn(module, message, details = '') {
+        this._print('WARN', module, message, details, '#f59e0b');
+    }
+
+    /**
+     * Log Error (Updates Metric)
+     */
+    static error(module, message, details = '') {
+        STATE.metrics.errors++;
+        this._print('ERR', module, message, details, '#ef4444');
+    }
+
+    /**
+     * Log Database Event
+     */
+    static db(message, details = '') {
+        this._print('DB', 'DATABASE', message, details, '#8b5cf6');
+    }
+
+    /**
+     * Log Worker Event
+     */
+    static gen(message, details = '') {
+        this._print('GEN', 'WORKER', message, details, '#ec4899');
+    }
+
+    /**
+     * Internal Print Method
+     * Writes to console and pushes to memory buffer.
+     */
     static _print(type, module, message, details, color) {
         const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+        
+        // Console Output
         console.log(`[${time}] [${type}:${module}] ${message} ${details ? '| ' + details : ''}`);
-        STATE.logs.unshift({ time, type, module, message, details, color });
-        if (STATE.logs.length > 500) STATE.logs.pop();
+
+        // Memory Buffer (For Admin Dashboard)
+        STATE.logs.unshift({
+            time,
+            type,
+            module,
+            message,
+            details,
+            color
+        });
+
+        // Retention Policy: Keep last 500 logs
+        if (STATE.logs.length > 500) {
+            STATE.logs.pop();
+        }
     }
 }
 
@@ -228,25 +341,35 @@ class Logger {
 
 class InputSanitizer {
     /**
-     * Fixes user input for Difficulty.
-     * Maps "easy", "Easy ", "EASY" -> "Easy"
-     * Defaults to "Medium" if invalid.
+     * Fixes the "Easy" -> "Medium" bug.
+     * Ensures input is case-insensitive and maps to correct Enum.
+     * @param {string} input - raw difficulty string
+     * @returns {string} - normalized string (Easy, Medium, Hard, Very Hard)
      */
     static normalizeDifficulty(input) {
-        if (!input) return "Medium";
+        if (!input) return "Medium"; // Default if missing
+        
         const map = {
             "easy": "Easy",
             "medium": "Medium",
             "hard": "Hard",
             "very hard": "Very Hard"
         };
+
         const clean = input.toString().trim().toLowerCase();
+        
+        // If map found, return Proper Case, else return Medium
         return map[clean] || "Medium";
     }
 
+    /**
+     * Validates Topic input against known topics.
+     * @param {string} input - raw topic key
+     * @returns {string} - validated key or default "Limits"
+     */
     static normalizeTopic(input) {
         const found = CONFIG.TOPICS.find(t => t.key === input);
-        return found ? found.key : "Limits"; // Default Topic
+        return found ? found.key : "Limits"; // Default to Limits
     }
 }
 
@@ -262,19 +385,23 @@ class PostgresService {
             connectionTimeoutMillis: 5000,
             max: 20
         });
+
         this.pool.on('error', (err) => {
             STATE.dbStatus.pg = false;
-            Logger.error('PG', 'Client Error', err.message);
+            Logger.error('PG', 'Unexpected Client Error', err.message);
         });
     }
 
+    /**
+     * Initialize Connection & Tables
+     */
     async init() {
         try {
             Logger.db('Connecting to PostgreSQL...');
             const client = await this.pool.connect();
             STATE.dbStatus.pg = true;
 
-            // Table: Leaderboard
+            // 1. Leaderboard Table
             await client.query(`
                 CREATE TABLE IF NOT EXISTS leaderboard (
                     id SERIAL PRIMARY KEY,
@@ -287,7 +414,7 @@ class PostgresService {
                 );
             `);
 
-            // Table: Certificates
+            // 2. Certificate Requests Table
             await client.query(`
                 CREATE TABLE IF NOT EXISTS certificate_requests (
                     id SERIAL PRIMARY KEY,
@@ -299,13 +426,18 @@ class PostgresService {
             `);
 
             client.release();
-            Logger.success('PG', 'Schema Verified');
+            Logger.success('PG', 'Schema Verified & Ready');
         } catch (err) {
-            Logger.error('PG', 'Init Failed', err.message);
+            Logger.error('PG', 'Initialization Failed', err.message);
         }
     }
 
-    async query(text, params) { return this.pool.query(text, params); }
+    /**
+     * Wrapper for Pool Query
+     */
+    async query(text, params) {
+        return this.pool.query(text, params);
+    }
 }
 
 // =================================================================================================
@@ -318,6 +450,9 @@ class MongoService {
         this._setupSchema();
     }
 
+    /**
+     * Define Mongoose Schema
+     */
     _setupSchema() {
         const schema = new mongoose.Schema({
             topic: { type: String, required: true, index: true },
@@ -326,28 +461,36 @@ class MongoService {
             source_ip: String,
             createdAt: { type: Date, default: Date.now }
         });
+        
+        // Compound Index for fast lookup
         schema.index({ topic: 1, difficulty: 1 });
         this.Model = mongoose.model('MathProblemCache', schema);
     }
 
+    /**
+     * Connect to MongoDB
+     */
     async init() {
-        if (!CONFIG.DB.MONGO_URI) {
-            Logger.warn('MONGO', 'No URI. Caching Disabled.');
+        const uri = CONFIG.DB.MONGO_URI;
+        if (!uri) {
+            Logger.warn('MONGO', 'URI Missing. Caching Disabled.');
             return;
         }
+
         try {
             Logger.db('Connecting to MongoDB...');
-            await mongoose.connect(CONFIG.DB.MONGO_URI, {
+            await mongoose.connect(uri, {
                 serverSelectionTimeoutMS: 5000,
                 family: 4
             });
             STATE.dbStatus.mongo = true;
             Logger.success('MONGO', 'Connection Established');
-            
+
             mongoose.connection.on('disconnected', () => {
                 STATE.dbStatus.mongo = false;
                 Logger.warn('MONGO', 'Disconnected');
             });
+
         } catch (err) {
             STATE.dbStatus.mongo = false;
             Logger.error('MONGO', 'Connection Failed', err.message);
@@ -355,12 +498,12 @@ class MongoService {
     }
 }
 
-// Initialize Databases
+// Instantiate Database Services
 const PG = new PostgresService();
 const MONGO = new MongoService();
 
 // =================================================================================================
-// 🤖 MODULE 7: AI ENGINE (WITH RETRY LOGIC)
+// 🤖 MODULE 7: AI ENGINE (WITH SYSTEM RETRY LOGIC)
 // =================================================================================================
 
 class AIEngine {
@@ -372,47 +515,58 @@ class AIEngine {
             const genAI = new GoogleGenerativeAI(this.apiKey);
             this.model = genAI.getGenerativeModel({ model: CONFIG.AI.MODEL });
         } else {
-            Logger.error('AI', 'API Key Missing');
+            Logger.error('AI', 'API Key Not Found');
         }
     }
 
     /**
-     * Generates Content with "Retry on Failure" Logic.
-     * If 1st try fails, it waits 60s, then tries again.
+     * Generates content with "System Retry" capability.
+     * If the API fails, it waits for RETRY_DELAY (60s) and tries again.
+     * 
+     * @param {string} topicKey 
+     * @param {string} difficulty 
+     * @returns {Promise<string>} JSON string
      */
     async generateWithRetry(topicKey, difficulty) {
-        if (!this.model) throw new Error("AI not initialized");
+        if (!this.model) throw new Error("AI Model not initialized");
 
         const prompt = this._buildPrompt(topicKey, difficulty);
         let attempts = 0;
-        const maxAttempts = CONFIG.AI.MAX_RETRIES; // 2
+        const maxAttempts = CONFIG.AI.MAX_RETRIES; // 2 Attempts
 
         while (attempts < maxAttempts) {
             try {
                 attempts++;
                 const result = await this.model.generateContent(prompt);
-                let text = result.response.text();
+                const response = await result.response;
+                let text = response.text();
                 
-                // Clean & Validate
+                // Cleanup Markdown
                 text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-                JSON.parse(text); // Check JSON validity
-
-                return text; // Success!
+                
+                // Validation check
+                JSON.parse(text); 
+                
+                return text; // Success
 
             } catch (err) {
-                Logger.error('AI', `Attempt ${attempts} Failed`, err.message);
+                Logger.error('AI', `Generation Attempt ${attempts} Failed`, err.message);
                 
                 if (attempts < maxAttempts) {
-                    // 🔥 THE CRITICAL FEATURE: WAIT 60 SECONDS BEFORE RETRYING
-                    Logger.warn('AI', 'Cooling Down (60s)...', 'Waiting before retry');
+                    // --- 🔥 SYSTEM RETRY LOGIC: WAIT 60 SECONDS ---
+                    Logger.warn('AI', 'System Cool Down Triggered (60s)', 'Retrying shortly...');
                     await new Promise(resolve => setTimeout(resolve, CONFIG.AI.RETRY_DELAY));
                 } else {
-                    throw new Error("AI Failed after retries");
+                    // If all attempts fail
+                    throw new Error(`AI Generation Failed after ${maxAttempts} attempts.`);
                 }
             }
         }
     }
 
+    /**
+     * Construct the Prompt
+     */
     _buildPrompt(topicKey, difficulty) {
         const topicObj = CONFIG.TOPICS.find(t => t.key === topicKey);
         const description = topicObj ? topicObj.prompt : topicKey;
@@ -426,14 +580,14 @@ class AIEngine {
             REQUIREMENTS:
             - Valid LaTeX for math formulas.
             - 4 Distinct options (A, B, C, D).
-            - Brief explanation in Khmer or English.
-            - OUTPUT JSON ONLY.
+            - Brief explanation.
+            - JSON Format ONLY.
             
-            JSON FORMAT:
+            OUTPUT JSON STRUCTURE:
             {
                 "question": "string",
-                "options": ["string", "string", "string", "string"],
-                "answer": "string (value)",
+                "options": ["A", "B", "C", "D"],
+                "answer": "string",
                 "explanation": "string"
             }
         `;
@@ -443,7 +597,7 @@ class AIEngine {
 const AI = new AIEngine();
 
 // =================================================================================================
-// ⚙️ MODULE 8: BACKGROUND WORKER
+// ⚙️ MODULE 8: BACKGROUND WORKER (AUTO-FILL)
 // =================================================================================================
 
 class GeneratorWorker {
@@ -472,15 +626,13 @@ class GeneratorWorker {
                     if (count < target) {
                         const needed = target - count;
                         STATE.worker.task = `Filling ${topic.label} [${level}]`;
-                        Logger.gen('Processing', `${topic.key} [${level}] Need: ${needed}`);
+                        Logger.gen('Processing Task', `${topic.key} [${level}] - Need: ${needed}`);
 
                         for (let i = 0; i < needed; i++) {
                             if (!STATE.worker.isRunning) break;
 
                             try {
-                                // Uses the Retry Logic
                                 const json = await AI.generateWithRetry(topic.key, level);
-                                
                                 await MONGO.Model.create({
                                     topic: topic.key,
                                     difficulty: level,
@@ -488,13 +640,13 @@ class GeneratorWorker {
                                     source_ip: 'WORKER'
                                 });
 
-                                Logger.gen('Item Saved', `${topic.key} #${i+1}`);
-                                // Small pause to be polite to API
+                                Logger.gen('Item Generated', `${topic.key} #${i+1}`);
+                                
+                                // Safety Delay
                                 await new Promise(r => setTimeout(r, 4000));
 
                             } catch (e) {
-                                Logger.error('WORKER', 'Item Failed', e.message);
-                                // If the retry logic inside AI also failed, we skip this item
+                                // Error handled in AI Engine, skip to next item
                             }
                         }
                     }
@@ -505,11 +657,13 @@ class GeneratorWorker {
         }
 
         STATE.worker.isRunning = false;
-        STATE.worker.task = "Targets Met";
+        STATE.worker.task = "All Targets Met";
         Logger.gen('🏁 WORKER COMPLETED');
     }
 
-    stop() { STATE.worker.isRunning = false; }
+    stop() {
+        STATE.worker.isRunning = false;
+    }
 }
 
 const Worker = new GeneratorWorker();
@@ -520,13 +674,14 @@ const Worker = new GeneratorWorker();
 
 const app = express();
 
+// 9.1 Basic Middleware
 app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Analytics
+// 9.2 Analytics Middleware
 app.use((req, res, next) => {
     STATE.metrics.requests++;
     if (req.path.startsWith('/api') || req.path.startsWith('/admin')) {
@@ -539,14 +694,23 @@ app.use((req, res, next) => {
 // -------------------------------------------------------------------------------------------------
 // 🛡️ RATE LIMITING (USER) - 10 REQUESTS / 8 HOURS
 // -------------------------------------------------------------------------------------------------
-// Note: No delayAfter/delayMs here, as requested. Users don't wait if they have quota.
-const userRateLimiter = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, // 8 Hours
-    max: 10, // Max 10 Requests
+/**
+ * Strict Limiter
+ * - Window: 8 Hours
+ * - Max: 10 Requests
+ * - Delay: NONE (Instant)
+ */
+const strictLimiter = rateLimit({
+    windowMs: 8 * 60 * 60 * 1000, // 8 Hour Window
+    max: 10, // Limit each IP to 10 requests
+    
+    // Custom JSON Message
     message: { 
         error: "Quota Exceeded", 
-        message: "⚠️ អ្នកបានប្រើប្រាស់អស់ ១០ ដងហើយក្នុងរយៈពេល ៨ ម៉ោង។" 
+        message: "⚠️ អ្នកបានប្រើប្រាស់អស់ ១០ ដងហើយ។ សូមរងចាំ ៨ ម៉ោងទៀត!" 
     },
+    
+    // Whitelist Owner
     skip: (req) => CONFIG.EXT.OWNER_IP && req.ip.includes(CONFIG.EXT.OWNER_IP)
 });
 
@@ -555,35 +719,35 @@ const userRateLimiter = rateLimit({
 // =================================================================================================
 
 /**
- * 🎯 POST /api/generate-problem
- * Core Logic: Hybrid Cache/AI + Retry Logic + Input Sanitization
+ * 🎯 GENERATE PROBLEM ENDPOINT
+ * Handles request, normalization, cache check, and AI generation.
  */
-app.post('/api/generate-problem', userRateLimiter, async (req, res) => {
-    // 1. Sanitize Inputs (Fixes "Easy" bug)
+app.post('/api/generate-problem', strictLimiter, async (req, res) => {
+    // 1. Sanitize Input
     const topic = InputSanitizer.normalizeTopic(req.body.topic);
     const difficulty = InputSanitizer.normalizeDifficulty(req.body.difficulty);
     const customPrompt = req.body.prompt;
 
-    Logger.info('API', `Request`, `T: ${topic} | D: ${difficulty}`);
+    Logger.info('API', `Problem Request`, `T: ${topic} | D: ${difficulty}`);
 
     let useCache = false;
 
-    // 2. Decide Source (Cache vs AI)
+    // 2. Cache Logic
     if (STATE.dbStatus.mongo && !customPrompt) {
         try {
             const count = await MONGO.Model.countDocuments({ topic, difficulty });
             const target = CONFIG.GEN.TARGETS[difficulty] || 30;
 
             if (count >= target) {
-                useCache = true; // DB Full -> Use Cache
+                useCache = true; // DB Full -> Force Cache
             } else {
-                // DB Not Full -> Random (25% Cache)
+                // DB Low -> Random Chance
                 if (Math.random() < CONFIG.GEN.CACHE_RATE) useCache = true;
             }
-        } catch (e) { console.error(e); }
+        } catch (e) { Logger.warn('CACHE', 'Check Failed', e.message); }
     }
 
-    // 3. Strategy A: From Cache
+    // 3. Strategy A: Serve from Cache
     if (useCache && STATE.dbStatus.mongo) {
         try {
             const cached = await MONGO.Model.aggregate([
@@ -599,15 +763,14 @@ app.post('/api/generate-problem', userRateLimiter, async (req, res) => {
                     metadata: { topic, difficulty }
                 });
             }
-        } catch (e) { Logger.warn('CACHE', 'Read Failed', e.message); }
+        } catch (e) { Logger.warn('CACHE', 'Read Error', e.message); }
     }
 
-    // 4. Strategy B: Generate Live (With Retry)
+    // 4. Strategy B: Generate Live (with Retry Logic)
     STATE.metrics.aiCalls++;
     Logger.ai('Generating Live', `${topic} [${difficulty}]`);
 
     try {
-        // Calls the retry-enabled AI function
         const aiText = await AI.generateWithRetry(topic, difficulty);
         
         // Save to DB
@@ -625,20 +788,17 @@ app.post('/api/generate-problem', userRateLimiter, async (req, res) => {
             source: "ai",
             metadata: { topic, difficulty }
         });
-
     } catch (err) {
-        // If we reach here, it means even after retrying (waiting 60s), it failed.
         Logger.error('API', 'Generation Failed', err.message);
         res.status(503).json({ 
             error: "Service Unavailable", 
-            message: "AI system is busy. Please try again later." 
+            message: "System is busy recovering. Please wait." 
         });
     }
 });
 
 /**
- * 🏆 POST /api/leaderboard/submit
- * Logic: Merge Scores + Remove Duplicates
+ * 🏆 LEADERBOARD SUBMIT (MERGE & DEDUPE)
  */
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
@@ -647,8 +807,6 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     if (!username || typeof score !== 'number') {
         return res.status(400).json({ message: "Invalid Payload" });
     }
-
-    if (!STATE.dbStatus.pg) return res.status(503).json({ message: "DB Offline" });
 
     try {
         // 1. Anti-Cheat
@@ -666,7 +824,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 
         if (check.rows.length > 0) {
             // 3. MERGE SCORES
-            const targetId = check.rows[0].id;
+            const targetId = check.rows[0].id; // Keep oldest ID
             const currentTotal = check.rows.reduce((sum, row) => sum + row.score, 0);
             const finalScore = currentTotal + score;
 
@@ -698,7 +856,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 });
 
 /**
- * 📊 GET /api/leaderboard/top
+ * 📊 GET TOP SCORES
  */
 app.get('/api/leaderboard/top', async (req, res) => {
     if (!STATE.dbStatus.pg) return res.json([]);
@@ -787,7 +945,7 @@ app.post('/admin/api/toggle-gen', (req, res) => {
 });
 
 // =================================================================================================
-// 🖥️ MODULE 12: ADMIN DASHBOARD (GLASSMORPHISM V4)
+// 🖥️ MODULE 12: ADMIN DASHBOARD UI
 // =================================================================================================
 
 app.get('/admin', (req, res) => {
@@ -796,52 +954,39 @@ app.get('/admin', (req, res) => {
     <html lang="km">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>TITAN ENTERPRISE V10</title>
+        <title>TITAN ENTERPRISE V11</title>
         <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Kantumruy+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
         <style>
-            :root {
-                --bg: #0f172a; --glass: rgba(30, 41, 59, 0.5); --border: rgba(255, 255, 255, 0.1);
-                --primary: #3b82f6; --success: #10b981; --danger: #ef4444; --text: #f8fafc; --mute: #94a3b8;
-            }
+            :root { --bg: #0f172a; --glass: rgba(30, 41, 59, 0.5); --border: rgba(255, 255, 255, 0.1); --primary: #3b82f6; --success: #10b981; --danger: #ef4444; --text: #f8fafc; --mute: #94a3b8; }
             * { box-sizing: border-box; transition: all 0.2s ease; }
             body { margin:0; background: var(--bg); color: var(--text); font-family: 'Kantumruy Pro', sans-serif; display: flex; height: 100vh; overflow: hidden; }
-            
             .sidebar { width: 260px; background: rgba(15,23,42,0.8); border-right: 1px solid var(--border); padding: 25px; display: flex; flex-direction: column; backdrop-filter: blur(10px); }
             .brand h2 { margin: 0; color: var(--primary); letter-spacing: 2px; }
             .brand span { font-size: 0.7rem; color: var(--mute); font-family: 'JetBrains Mono'; }
-            
             .nav { margin-top: 40px; }
             .nav-item { display: flex; align-items: center; gap: 12px; padding: 15px; color: var(--mute); cursor: pointer; border-radius: 10px; margin-bottom: 5px; }
             .nav-item:hover, .nav-item.active { background: rgba(59,130,246,0.1); color: var(--primary); }
-            
             .main { flex: 1; padding: 40px; overflow-y: auto; background: radial-gradient(at 100% 0%, rgba(59,130,246,0.1) 0px, transparent 50%); }
             .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
             .status-indicator { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--success); background: rgba(16,185,129,0.1); padding: 5px 12px; border-radius: 20px; border: 1px solid rgba(16,185,129,0.2); }
-            
             .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 25px; }
             .card { background: var(--glass); border: 1px solid var(--border); border-radius: 16px; padding: 25px; position: relative; }
             .card-head { display: flex; justify-content: space-between; margin-bottom: 20px; }
             .card-title { font-size: 1.1rem; font-weight: 600; color: var(--text); }
-            
             .btn { width: 100%; padding: 15px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; }
             .btn-start { background: var(--success); color: white; box-shadow: 0 4px 15px rgba(16,185,129,0.3); }
             .btn-stop { background: var(--danger); color: white; box-shadow: 0 4px 15px rgba(239,68,68,0.3); }
-            
             .bar-row { display: flex; align-items: center; margin-bottom: 8px; font-size: 0.85rem; }
             .bar-label { width: 80px; color: var(--mute); }
             .bar-val { width: 40px; text-align: right; font-weight: bold; margin-right: 10px; }
             .bar-track { flex: 1; height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px; overflow: hidden; }
             .bar-fill { height: 100%; background: var(--primary); }
             .bar-fill.full { background: var(--success); }
-            
             table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
             th { text-align: left; color: var(--mute); padding: 10px; font-weight: normal; }
             td { padding: 12px 10px; border-bottom: 1px solid var(--border); }
-            
             .terminal { background: #0b0f19; border-radius: 10px; height: 400px; padding: 15px; overflow-y: auto; font-family: 'JetBrains Mono'; font-size: 0.8rem; }
             .log-line { margin-bottom: 4px; display: flex; gap: 10px; }
-            
             .tab-view { display: none; }
             .tab-view.active { display: block; animation: fadeUp 0.3s; }
             @keyframes fadeUp { from {opacity:0; transform:translateY(10px);} to {opacity:1; transform:translateY(0);} }
@@ -851,24 +996,20 @@ app.get('/admin', (req, res) => {
         <div class="sidebar">
             <div class="brand">
                 <h2>TITAN</h2>
-                <span>ENTERPRISE V10</span>
+                <span>ENTERPRISE V11</span>
             </div>
             <div class="nav">
                 <div class="nav-item active" onclick="go('dash', this)">📊 Dashboard</div>
                 <div class="nav-item" onclick="go('certs', this)">🎓 Certificates</div>
                 <div class="nav-item" onclick="go('logs', this)">📡 System Logs</div>
             </div>
-            <div style="margin-top:auto; font-size:0.8rem; color:var(--mute)">
-                Memory: <span id="memUse">0</span> MB
-            </div>
+            <div style="margin-top:auto; font-size:0.8rem; color:var(--mute)">Memory: <span id="memUse">0</span> MB</div>
         </div>
-
         <div class="main">
             <div class="header">
                 <h1 style="margin:0">Command Center</h1>
                 <div class="status-indicator">● SYSTEM ONLINE</div>
             </div>
-
             <div id="dash" class="tab-view active">
                 <div class="grid">
                     <div class="card">
@@ -879,14 +1020,12 @@ app.get('/admin', (req, res) => {
                         </div>
                         <button id="toggleBtn" class="btn btn-start" onclick="toggle()">Start Engine</button>
                     </div>
-                    
                     <div class="card" style="grid-row: span 2; overflow-y:auto; max-height:800px">
                         <div class="card-head"><span class="card-title">Inventory Status</span></div>
                         <div id="statsList">Loading...</div>
                     </div>
                 </div>
             </div>
-
             <div id="certs" class="tab-view">
                 <div class="card">
                     <div class="card-head"><span class="card-title">Pending Requests</span></div>
@@ -896,7 +1035,6 @@ app.get('/admin', (req, res) => {
                     </table>
                 </div>
             </div>
-
             <div id="logs" class="tab-view">
                 <div class="card">
                     <div class="card-head"><span class="card-title">Live Terminal</span></div>
@@ -904,39 +1042,30 @@ app.get('/admin', (req, res) => {
                 </div>
             </div>
         </div>
-
         <script>
             let running = false;
-            
             function go(id, el) {
                 document.querySelectorAll('.tab-view').forEach(e => e.classList.remove('active'));
                 document.querySelectorAll('.nav-item').forEach(e => e.classList.remove('active'));
                 document.getElementById(id).classList.add('active');
                 el.classList.add('active');
             }
-
             async function sync() {
                 try {
                     const res = await fetch('/admin/api/stats');
                     const data = await res.json();
-                    
                     running = data.worker.isRunning;
                     const btn = document.getElementById('toggleBtn');
                     const st = document.getElementById('statusTxt');
                     const tt = document.getElementById('taskTxt');
-                    
                     if(running) {
                         btn.className = 'btn btn-stop'; btn.innerText = 'STOP ENGINE';
-                        st.innerText = 'RUNNING'; st.style.color = '#34d399';
-                        tt.innerText = data.worker.task;
+                        st.innerText = 'RUNNING'; st.style.color = '#34d399'; tt.innerText = data.worker.task;
                     } else {
                         btn.className = 'btn btn-start'; btn.innerText = 'START ENGINE';
-                        st.innerText = 'STANDBY'; st.style.color = '#fbbf24';
-                        tt.innerText = 'Idle';
+                        st.innerText = 'STANDBY'; st.style.color = '#fbbf24'; tt.innerText = 'Idle';
                     }
-
                     document.getElementById('memUse').innerText = Math.round(data.system.memory.heapUsed / 1024 / 1024);
-
                     let html = '';
                     data.topics.forEach(t => {
                         html += \`<div style="margin-bottom:15px"><h4 style="margin:0 0 5px 0; color:#60a5fa">\${t.label}</h4>\`;
@@ -950,34 +1079,21 @@ app.get('/admin', (req, res) => {
                         html += '</div>';
                     });
                     document.getElementById('statsList').innerHTML = html;
-
                     const tbody = document.getElementById('certTable');
                     if(data.reqs.length === 0) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:#555">No Data</td></tr>';
                     else tbody.innerHTML = data.reqs.map(r => \`<tr><td style="color:#60a5fa">#\${r.id}</td><td><b>\${r.username}</b></td><td>\${r.score}</td><td style="color:#888">\${new Date(r.request_date).toLocaleDateString()}</td><td><a href="/admin/generate-cert/\${r.id}" target="_blank" style="text-decoration:none">🖨️</a> <span style="cursor:pointer;color:#ef4444;margin-left:10px" onclick="del(\${r.id})">✕</span></td></tr>\`).join('');
-
                     const term = document.getElementById('term');
                     term.innerHTML = data.logs.map(l => \`<div class="log-line"><span style="color:#555">[\${l.time}]</span><span style="font-weight:bold; color:\${l.color}">\${l.type}</span><span style="color:#ccc">\${l.message}</span></div>\`).join('');
-                
                 } catch(e) { console.error(e); }
             }
-
             async function toggle() {
-                await fetch('/admin/api/toggle-gen', { 
-                    method:'POST', headers:{'Content-Type':'application/json'},
-                    body: JSON.stringify({ action: running ? 'stop' : 'start' })
-                });
+                await fetch('/admin/api/toggle-gen', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action: running ? 'stop' : 'start' }) });
                 sync();
             }
-
             async function del(id) {
-                if(confirm('Delete?')) {
-                    await fetch('/admin/delete-request/'+id, {method:'DELETE'});
-                    sync();
-                }
+                if(confirm('Delete?')) { await fetch('/admin/delete-request/'+id, {method:'DELETE'}); sync(); }
             }
-
-            setInterval(sync, 2000);
-            sync();
+            setInterval(sync, 2000); sync();
         </script>
     </body>
     </html>
@@ -991,7 +1107,7 @@ app.get('/admin', (req, res) => {
 
 async function startSystem() {
     console.clear();
-    console.log('\n\x1b[36m%s\x1b[0m', '★ TITAN ENTERPRISE V10.0 (CAMBODIA) STARTING...');
+    console.log('\n\x1b[36m%s\x1b[0m', '★ TITAN ENTERPRISE V11.0 (CAMBODIA) STARTING...');
     
     // 1. Initialize Databases
     await PG.init();
