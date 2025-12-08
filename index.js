@@ -23,7 +23,7 @@
  *    3. [LOGIC] GENERATOR HYBRID MODE: 
  *       - If DB < Target: 75% Generate / 25% Cache.
  *       - If DB >= Target: 100% Cache.
- *    4. [CONFIG] AI MODEL: Updated to "gemini-1.5-flash" (Currently the stable Flash version, 
+ *    4. [CONFIG] AI MODEL: Updated to "gemini-2.5-flash" (Currently the stable Flash version, 
  *       labeled as 2.5 in comments per request).
  *    5. [SECURITY] STRICT RATE LIMITS: 10 requests / 8 hours.
  * 
@@ -66,9 +66,9 @@ const CONFIG = {
     // -------------------------------------------------------------------------
     GEMINI_KEY: process.env.GEMINI_API_KEY,
     
-    // Note: Using 1.5-flash as it is the current stable Flash model.
+    // Note: Using 2.5-flash as it is the current stable Flash model.
     // If 2.5 becomes available, simply change this string.
-    AI_MODEL: "gemini-1.5-flash", 
+    AI_MODEL: "gemini-2.5-flash", 
     
     // -------------------------------------------------------------------------
     // EXTERNAL INTEGRATIONS
