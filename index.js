@@ -430,7 +430,7 @@ const MathCache = mongoose.model('MathProblemCache', problemSchema);
 
 
 // =================================================================================================
-// SECTION 6: GENERATOR ENGINE (TITAN V11.5 - NO FAIL MODE)
+// SECTION 6: GENERATOR ENGINE (TITAN V11.6 - SMART RETRY SYSTEM)
 // =================================================================================================
 
 async function startBackgroundGeneration() {
@@ -441,22 +441,21 @@ async function startBackgroundGeneration() {
     }
 
     SYSTEM_STATE.isGenerating = true;
-    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initializing Matrix V11.5 (Auto-Repair Active)...');
+    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initializing Matrix V11.6 (Quality Assurance Mode)...');
 
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
 
-    // ⚡ CONFIG: Temperature Dynamic
+    // ⚡ CONFIG: Temperature Control
     const getModelConfig = (diff) => {
-        let temp = 0.5; 
-        if (diff === "Medium") temp = 0.7;
-        if (diff === "Hard") temp = 0.9; 
-        if (diff === "Very Hard") temp = 1.0; 
+        // Lower temperature slightly to reduce hallucinations
+        let temp = 0.3; 
+        if (diff === "Medium") temp = 0.6;
+        if (diff === "Hard") temp = 0.8; 
+        if (diff === "Very Hard") temp = 0.9; 
         
         return genAI.getGenerativeModel({ 
             model: CONFIG.AI_MODEL,
-            generationConfig: {
-                temperature: temp,
-            }
+            generationConfig: { temperature: temp }
         });
     };
 
@@ -481,125 +480,122 @@ async function startBackgroundGeneration() {
                 for (let i = 0; i < needed; i++) {
                     if (!SYSTEM_STATE.isGenerating) break;
 
-                    const forms = ALL_FORMS[topicObj.key] || ["General Math Problem"];
-                    const randomForm = forms[Math.floor(Math.random() * forms.length)];
-                    const variables = ["x", "t", "theta", "alpha", "u"];
-                    const chosenVar = variables[Math.floor(Math.random() * variables.length)];
-                    
-                    // 🧠 PROMPT SIMPLIFIED FOR STABILITY
-                    const prompt = `
-                    ACT AS: Math Olympiad Creator.
-                    TOPIC: "${topicObj.prompt}"
-                    SUB-TOPIC: "${randomForm}"
-                    LEVEL: "${diffLevel}"
-                    VAR: "${chosenVar}"
+                    // 🔄 RETRY LOOP: ព្យាយាម 3 ដងសម្រាប់លំហាត់មួយ
+                    let attempts = 0;
+                    let success = false;
 
-                    STRICT RULES:
-                    1. ${DIFFICULTY_INSTRUCTIONS[diffLevel]}
-                    2. OUTPUT JSON ONLY.
-                    3. Language: Logic in English, Output "question"/"explanation" in KHMER.
-                    4. "options" must be Math/LaTeX strings.
-
-                    JSON STRUCTURE:
-                    {
-                        "question": "Khmer Question String",
-                        "options": ["Opt1", "Opt2", "Opt3", "Opt4"],
-                        "answer": "Exact String of Correct Option",
-                        "explanation": "Khmer Explanation"
-                    }
-                    `;
-
-                    try {
-                        const result = await model.generateContent(prompt);
-                        const response = await result.response;
-                        let text = response.text();
-
-                        // 🛠️ V11.5 FIX: ULTRA AGGRESSIVE CLEANER
-                        // Remove Markdown blocks
-                        text = text.replace(/```json/g, '').replace(/```/g, '');
+                    while (attempts < 3 && !success) {
+                        attempts++;
                         
-                        const firstBrace = text.indexOf('{');
-                        const lastBrace = text.lastIndexOf('}');
-                        
-                        if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON found in response");
-                        
-                        text = text.substring(firstBrace, lastBrace + 1);
-                        
-                        let parsedData;
                         try {
-                            parsedData = JSON.parse(text);
-                        } catch (e) {
-                            // Retry mechanism could go here, but for now skip
-                            throw new Error("JSON Syntax Error");
-                        }
+                            const forms = ALL_FORMS[topicObj.key] || ["General Math Problem"];
+                            const randomForm = forms[Math.floor(Math.random() * forms.length)];
+                            const variables = ["x", "t", "theta", "alpha", "u"];
+                            const chosenVar = variables[Math.floor(Math.random() * variables.length)];
 
-                        // 🛠️ V11.5 FIX: AUTO-REPAIR DATA (កុំឱ្យ Error ទៀត)
-                        parsedData.options = parsedData.options.map(o => String(o).trim());
-                        parsedData.answer = String(parsedData.answer).trim();
+                            const prompt = `
+                            ACT AS: Math Olympiad Creator.
+                            TOPIC: "${topicObj.prompt}"
+                            SUB-TOPIC: "${randomForm}"
+                            LEVEL: "${diffLevel}"
+                            VAR: "${chosenVar}"
 
-                        // 1. Check if Answer is just "A", "B", "C", "D"
-                        const indexMap = { "A": 0, "B": 1, "C": 2, "D": 3, "OPTION A": 0, "OPTION B": 1, "OPTION C": 2, "OPTION D": 3 };
-                        const upperAns = parsedData.answer.toUpperCase();
-                        
-                        if (indexMap.hasOwnProperty(upperAns)) {
-                            // Convert "A" to the actual option text
-                            parsedData.answer = parsedData.options[indexMap[upperAns]];
-                        }
+                            STRICT RULES:
+                            1. ${DIFFICULTY_INSTRUCTIONS[diffLevel]}
+                            2. OUTPUT JSON ONLY.
+                            3. Language: Logic in English, Output "question"/"explanation" in KHMER.
+                            4. "options" must be Math/LaTeX strings.
+                            5. IMPORTANT: The "answer" field MUST be an EXACT copy of one of the "options".
 
-                        // 2. Fuzzy Match / Force Fix
-                        if (!parsedData.options.includes(parsedData.answer)) {
-                            const match = parsedData.options.find(o => o.includes(parsedData.answer) || parsedData.answer.includes(o));
-                            if (match) {
-                                parsedData.answer = match;
-                            } else {
-                                // ⚠️ ULTIMATE FAIL-SAFE:
-                                // បើ AI ឆ្លើយខុសទំនងពេក យើងចាប់យក Option ទី 1 ធ្វើជាចម្លើយត្រូវតែម្ដង (ដើម្បីកុំឱ្យ Error)
-                                // រួច Note ទុកក្នុង Console
-                                logSystem('WARN', 'Auto-Fixed Answer', 'Defaulted to Option A');
-                                parsedData.answer = parsedData.options[0];
+                            JSON STRUCTURE:
+                            {
+                                "question": "Khmer Question String",
+                                "options": ["Opt1", "Opt2", "Opt3", "Opt4"],
+                                "answer": "Correct Option String",
+                                "explanation": "Khmer Explanation"
                             }
+                            `;
+
+                            const result = await model.generateContent(prompt);
+                            const response = await result.response;
+                            let text = response.text();
+
+                            // CLEANER
+                            text = text.replace(/```json/g, '').replace(/```/g, '');
+                            const firstBrace = text.indexOf('{');
+                            const lastBrace = text.lastIndexOf('}');
+                            if (firstBrace === -1 || lastBrace === -1) throw new Error("No JSON");
+                            text = text.substring(firstBrace, lastBrace + 1);
+                            
+                            let parsedData = JSON.parse(text);
+
+                            // DATA NORMALIZATION
+                            parsedData.options = parsedData.options.map(o => String(o).trim());
+                            parsedData.answer = String(parsedData.answer).trim();
+
+                            // 🛠️ SMART MATCHING (មិនបង្ខំខុស តែជួយកែត្រូវ)
+                            // 1. Check A/B/C/D
+                            const indexMap = { "A": 0, "B": 1, "C": 2, "D": 3 };
+                            if (indexMap.hasOwnProperty(parsedData.answer.toUpperCase())) {
+                                parsedData.answer = parsedData.options[indexMap[parsedData.answer.toUpperCase()]];
+                            }
+
+                            // 2. Fuzzy Check
+                            if (!parsedData.options.includes(parsedData.answer)) {
+                                const match = parsedData.options.find(o => o === parsedData.answer || o.includes(parsedData.answer) || parsedData.answer.includes(o));
+                                if (match) {
+                                    parsedData.answer = match;
+                                } else {
+                                    // ❌ បើរកមិនឃើញសោះ គឺបោះ Error ដើម្បីឱ្យវាធ្វើម្ដងទៀត (Retry)
+                                    // យើងមិនបង្ខំយក Option A ទេ ព្រោះខ្លាចខុសគណិតវិទ្យា
+                                    throw new Error("Answer not found in options");
+                                }
+                            }
+
+                            // 🛑 DUPLICATE CHECK
+                            const snippet = parsedData.question.substring(0, 30).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                            const duplicateExists = await MathCache.findOne({ 
+                                topic: topicObj.key,
+                                difficulty: diffLevel,
+                                raw_text: { $regex: snippet }
+                            });
+                            if (duplicateExists) throw new Error("Duplicate content");
+
+                            // ✅ SUCCESS SAVE
+                            await MathCache.create({
+                                topic: topicObj.key,
+                                difficulty: diffLevel,
+                                raw_text: JSON.stringify(parsedData),
+                                source_ip: 'TITAN-V11.6'
+                            });
+
+                            logSystem('GEN', `✅ Created`, `[${diffLevel}] ${topicObj.key}`);
+                            success = true; // Break the loop
+
+                        } catch (err) {
+                            // ស្ងាត់ស្ងៀម (Silent Fail) ក្នុង Loop
+                            // បើខុស វាគ្រាន់តែព្យាយាមម្ដងទៀត (attempts++)
                         }
-
-                        // 🛑 DUPLICATE CHECK
-                        const snippet = parsedData.question.substring(0, 30).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                        const duplicateExists = await MathCache.findOne({ 
-                            topic: topicObj.key,
-                            difficulty: diffLevel,
-                            raw_text: { $regex: snippet }
-                        });
-
-                        if (duplicateExists) {
-                            i--; 
-                            continue;
-                        }
-
-                        // ✅ SUCCESS
-                        await MathCache.create({
-                            topic: topicObj.key,
-                            difficulty: diffLevel,
-                            raw_text: JSON.stringify(parsedData),
-                            source_ip: 'TITAN-V11.5'
-                        });
-
-                        logSystem('GEN', `✅ Created`, `[${diffLevel}] ${topicObj.key}`);
-                        
-                        // Smart Delay
-                        await new Promise(r => setTimeout(r, 3000));
-
-                    } catch (err) {
-                        logSystem('ERR', 'Skipped', err.message);
-                        // No delay on error, just try next
+                    }
+                    
+                    // បើព្យាយាម 3 ដងហើយនៅតែមិនបាន ទើប Log Error តិចតួច
+                    if (!success) {
+                        logSystem('WARN', 'Skipped Task', 'AI struggled 3 times');
+                    } else {
+                        // Delay តែពេលជោគជ័យ
+                        await new Promise(r => setTimeout(r, 3000)); 
                     }
                 }
 
             } catch (err) {
-                logSystem('ERR', 'Logic Crash', err.message);
+                logSystem('ERR', 'Critical Logic Error', err.message);
             }
         }
     }
     SYSTEM_STATE.isGenerating = false;
-    logSystem('GEN', '🏁 DONE', 'All tasks finished.');
+    logSystem('GEN', '🏁 DONE', 'All targets met.');
 }
+
 
 // =================================================================================================
 // SECTION 7: MIDDLEWARE & SECURITY (FIXED)
