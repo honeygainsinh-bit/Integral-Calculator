@@ -1,42 +1,37 @@
 /**
-=================================================================================================
-|  /  |     | | | |    / ____|
-| \  / | __ | || |__ | |  __  ___ _ __  _   _ ___
-| |/| |/ ` | | ' | | | |/ _ \ ' | | | / __|
-| |  | | (| | || | | | |__| |  __/ | | | || _ \
-||  | |_ _|_ \ | _ _ | | _ / ___ | ___ | _ \
-||__/_| || _|_/_| / _| _ / _|
-||__/_| || _|_/_| / _| _ / _|
-
-PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
-VERSION:           7.2.1 (FULL EDITION + AUTO GENERATOR + IMO LEVEL)
-AUTHOR:            BRAINTEST ENGINEERING TEAM
-DATE:              DECEMBER 2025
-=================================================================================================
-
-SYSTEM ARCHITECTURE OVERVIEW:
------------------------------
-CORE ENGINE:      Node.js with Express framework.
-DATABASE LAYER:   Hybrid Architecture (SQL + NoSQL).
-  - PostgreSQL:   Stores Leaderboard scores & Certificate Requests.
-  - MongoDB:      Caches AI math problems (General/Medium Default) & Auto-Generated Batches.
-
-SECURITY LAYER (DUAL DEFENSE):
-  - Quota Limiter:  Max 10 requests per 8 Hours.
-  - Speed Limiter:  Max 5 requests per 1 Hour (Burst Protection).
-  - Anti-Spam:      60-second forced delay after first request.
-
-AI ENGINE:        Google Gemini (Flash Model 1.5) optimized for Speed.
-ADMIN TOOLS:      Auto-Generator (Batch 10), Certificate Manager.
-INTERFACE:        Server-Side Rendered (SSR) Dashboard with Advanced CSS.
-
-=================================================================================================
-DEPLOYMENT INSTRUCTIONS:
-1. Ensure 'package.json' includes: express, cors, pg, mongoose, dotenv, @google/generative-ai, express-rate-limit
-2. Run 'npm install'
-3. Deploy!
-=================================================================================================
-*/
+ * =================================================================================================
+ * __  __       _   _      _____                                
+ * |  \/  |     | | | |    / ____|                               
+ * | \  / | __ _| |_| |__ | |  __  ___ _ __  _   _ ___           
+ * | |\/| |/ _` | __| '_ \| | |_ |/ _ \ '_ \| | | / __|          
+ * | |  | | (_| | |_| | | | |__| |  __/ | | | |_| \__ \          
+ * |_|  | |\_ \____|\_ \ | \___ \_ | | \_ / \___ | \___ | \_ \
+ * |_|\__\____/\_____| _|_| \___|\____/\___|__ / \___| \_ / \___|
+ * |_|\__\____/\_____| _|_| \___|\____/\___|__ / \___| \_ / \___|
+ * * PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
+ * VERSION:           7.1.1 (PUBLIC LEADERBOARD + DUAL SECURITY)
+ * AUTHOR:            BRAINTEST ENGINEERING TEAM
+ * DATE:              DECEMBER 2025
+ * * =================================================================================================
+ * SYSTEM ARCHITECTURE OVERVIEW:
+ * -------------------------------------------------------------------------------------------------
+ * 1. CORE ENGINE:      Node.js with Express framework.
+ * 2. DATABASE LAYER:   Hybrid Architecture (SQL + NoSQL).
+ * - PostgreSQL:     Stores Leaderboard scores (Smart Merge Logic).
+ * - MongoDB:        Caches AI math problems (General/Medium Default).
+ * 3. SECURITY LAYER (DUAL DEFENSE):   
+ * - Quota Limiter:  Max 10 requests per 8 Hours.
+ * - Speed Limiter:  Max 5 requests per 1 Hour (Burst Protection).
+ * - Anti-Spam:      60-second forced delay after first request.
+ * 4. AI ENGINE:        Google Gemini (Flash Model) with automatic caching.
+ * 5. INTERFACE:        Server-Side Rendered (SSR) Dashboard with Advanced CSS.
+ * * =================================================================================================
+ * DEPLOYMENT INSTRUCTIONS:
+ * 1. Ensure 'package.json' includes: express, cors, pg, mongoose, dotenv, @google/generative-ai, express-rate-limit
+ * 2. Run 'npm install'
+ * 3. Deploy!
+ * =================================================================================================
+ */
 
 // =================================================================================================
 // SECTION 1: GLOBAL IMPORTS & DEPENDENCY MANAGEMENT
@@ -76,46 +71,46 @@ const CONFIG = {
     // -------------------------------------------------------------------------
     PORT: process.env.PORT || 3000,
     ENV: process.env.NODE_ENV || 'development',
-
+    
     // -------------------------------------------------------------------------
     // DATABASE CREDENTIALS
     // -------------------------------------------------------------------------
     POSTGRES_URL: process.env.DATABASE_URL,
     MONGO_URI: process.env.MONGODB_URI,
-
+    
     // -------------------------------------------------------------------------
     // AI ENGINE SETTINGS
     // -------------------------------------------------------------------------
     GEMINI_KEY: process.env.GEMINI_API_KEY,
-    // Using 'gemini-1.5-flash' for speed optimization in Batch Generation
-    AI_MODEL: "gemini-1.5-flash",
-
+    // Using 'gemini-1.5-flash' or 'gemini-2.5-flash' for speed optimization
+    AI_MODEL: "gemini-2.5-flash", 
+    
     // -------------------------------------------------------------------------
     // EXTERNAL SERVICES
     // -------------------------------------------------------------------------
     IMG_API: process.env.EXTERNAL_IMAGE_API, // URL for dynamic certificate generation
-
+    
     // -------------------------------------------------------------------------
     // SECURITY SETTINGS
     // -------------------------------------------------------------------------
     OWNER_IP: process.env.OWNER_IP, // IP Whitelist for admin bypass
-
+    
     // -------------------------------------------------------------------------
     // CACHING STRATEGY
     // -------------------------------------------------------------------------
     // 0.25 = 25% chance to retrieve from Cache, 75% chance to Generate new AI problem.
     // This helps populate the database initially.
-    CACHE_RATE: 0.25,
-
+    CACHE_RATE: 0.25, 
+    
     // -------------------------------------------------------------------------
-    // GAMEPLAY RULES (ANTI-CHEAT & DIFFICULTY)
+    // GAMEPLAY RULES (ANTI-CHEAT)
     // -------------------------------------------------------------------------
     // Validates if a score submitted for a difficulty level is physically possible.
     ALLOWED_SCORES: {
-        "Easy": 5,      // BacII Level
-        "Medium": 10,   // Scholarship Level
-        "Hard": 15,     // National Olympiad
-        "Very Hard": 20 // IMO Level
+        "Easy": 5,
+        "Medium": 10,
+        "Hard": 15,
+        "Very Hard": 20
     }
 };
 
@@ -132,27 +127,22 @@ const SYSTEM_STATE = {
     startTime: Date.now(),
     postgresConnected: false,
     mongoConnected: false,
-
+    
     // Metrics
     totalRequests: 0,
     totalGamesGenerated: 0,
     cacheHits: 0,
     aiCalls: 0,
     uniqueVisitors: new Set(), // Using a Set to ensure unique visitor counting
-
-    // Generator State
-    isGenerating: false,
-    genProgress: 0,
-    lastBatchInfo: "None",
-
+    
     // Log Buffer (Stores last 150 logs for display)
-    logs: []
+    logs: [] 
 };
 
 /**
  * Advanced Logger Utility
  * Provides colorful console output and buffers logs for the web dashboard.
- * @param {string} type - The category of the log (e.g., DB, AI, ERR, SEC, GEN)
+ * * @param {string} type - The category of the log (e.g., DB, AI, ERR, SEC)
  * @param {string} message - The primary log message
  * @param {string} details - Additional technical details (optional)
  */
@@ -160,7 +150,7 @@ function logSystem(type, message, details = '') {
     // Format timestamp
     const now = new Date();
     const timeString = now.toLocaleTimeString('en-US', { hour12: false });
-
+    
     // Icon mapping for visual clarity
     let icon = 'ℹ️';
     switch(type) {
@@ -171,22 +161,21 @@ function logSystem(type, message, details = '') {
         case 'NET':  icon = '📡'; break;
         case 'WARN': icon = '⚠️'; break;
         case 'SEC':  icon = '🛡️'; break; // Security Log
-        case 'GEN':  icon = '⚙️'; break; // Generator Log
     }
 
     // 1. Print to Server Console (Standard Output)
     console.log(`[${timeString}] ${icon} [${type}] ${message} ${details ? '| ' + details : ''}`);
 
     // 2. Add to Dashboard Buffer
-    SYSTEM_STATE.logs.unshift({
-        time: timeString,
-        type: type,
-        msg: message,
-        det: details
+    SYSTEM_STATE.logs.unshift({ 
+        time: timeString, 
+        type: type, 
+        msg: message, 
+        det: details 
     });
-
+    
     // 3. Prevent Memory Leak (Cap log size)
-    if (SYSTEM_STATE.logs.length > 200) {
+    if (SYSTEM_STATE.logs.length > 150) {
         SYSTEM_STATE.logs.pop();
     }
 }
@@ -226,46 +215,46 @@ pgPool.on('error', (err) => {
 
 /**
  * Initializes PostgreSQL Database
- * Connects to the database.
- * Checks for existence of required tables.
- * Automatically creates tables if they are missing (Auto-Migration).
+ * - Connects to the database.
+ * - Checks for existence of required tables.
+ * - Automatically creates tables if they are missing (Auto-Migration).
  */
 async function initPostgres() {
     try {
         logSystem('DB', 'Initializing PostgreSQL connection...');
         const client = await pgPool.connect();
         SYSTEM_STATE.postgresConnected = true;
-
+        
         // ---------------------------------------------------------------------
         // TABLE 1: LEADERBOARD (Scores)
         // Stores High Scores linked to Usernames.
         // ---------------------------------------------------------------------
         await client.query(`
-            CREATE TABLE IF NOT EXISTS leaderboard ( 
-                id SERIAL PRIMARY KEY, 
-                username VARCHAR(50) NOT NULL, 
-                score INTEGER NOT NULL, 
-                difficulty VARCHAR(20) NOT NULL, 
-                ip_address VARCHAR(45), 
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, 
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP 
+            CREATE TABLE IF NOT EXISTS leaderboard (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(50) NOT NULL,
+                score INTEGER NOT NULL,
+                difficulty VARCHAR(20) NOT NULL,
+                ip_address VARCHAR(45),
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
-
+            
         // ---------------------------------------------------------------------
         // TABLE 2: CERTIFICATE REQUESTS (Admin)
         // Queue for generating completion certificates.
         // ---------------------------------------------------------------------
         await client.query(`
-            CREATE TABLE IF NOT EXISTS certificate_requests ( 
-                id SERIAL PRIMARY KEY, 
-                username VARCHAR(100) NOT NULL, 
-                score INTEGER NOT NULL, 
-                status VARCHAR(20) DEFAULT 'Pending', 
-                request_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP 
+            CREATE TABLE IF NOT EXISTS certificate_requests (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(100) NOT NULL,
+                score INTEGER NOT NULL,
+                status VARCHAR(20) DEFAULT 'Pending',
+                request_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
-
+        
         logSystem('OK', 'PostgreSQL Ready', 'Schema verification complete.');
         client.release();
     } catch (err) {
@@ -283,7 +272,7 @@ async function initPostgres() {
  */
 async function initMongo() {
     const uri = cleanMongoURI(CONFIG.MONGO_URI);
-
+    
     if (!uri) {
         logSystem('WARN', 'MongoDB URI is not defined', 'Caching features will be disabled.');
         return;
@@ -301,7 +290,6 @@ async function initMongo() {
         
         SYSTEM_STATE.mongoConnected = true;
         logSystem('OK', 'MongoDB Connected', 'Hybrid caching system active.');
-
     } catch (err) {
         SYSTEM_STATE.mongoConnected = false;
         logSystem('ERR', 'MongoDB Connection Failed', err.message);
@@ -326,33 +314,27 @@ mongoose.connection.on('error', (err) => {
 
 const problemSchema = new mongoose.Schema({
     // Topic: e.g., "Calculus", "Algebra"
-    topic: {
-        type: String,
-        required: true,
+    topic: { 
+        type: String, 
+        required: true, 
         index: true // Indexing for fast lookup
     },
     // Difficulty: e.g., "Easy", "Hard"
-    difficulty: {
-        type: String,
-        required: true,
-        index: true
+    difficulty: { 
+        type: String, 
+        required: true, 
+        index: true 
     },
     // The actual JSON content of the problem
-    raw_text: {
-        type: String,
-        required: true
+    raw_text: { 
+        type: String, 
+        required: true 
     },
     // Metadata for tracking
     source_ip: String,
-    
-    // New Field: To distinguish auto-generated content
-    is_auto_generated: {
-        type: Boolean,
-        default: false
-    },
-    createdAt: {
-        type: Date,
-        default: Date.now
+    createdAt: { 
+        type: Date, 
+        default: Date.now 
     }
 });
 
@@ -382,12 +364,12 @@ app.use((req, res, next) => {
     // Extract real IP
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     SYSTEM_STATE.uniqueVisitors.add(ip);
-
+    
     // Log API traffic (filter out static file requests to keep logs clean)
     if (req.path.startsWith('/api') || req.path.startsWith('/admin')) {
         logSystem('NET', `${req.method} ${req.path}`, `IP: ${ip}`);
     }
-
+    
     next();
 });
 
@@ -398,28 +380,28 @@ app.use((req, res, next) => {
 /**
  * 🛡️ LAYER 1: AI QUOTA LIMITER (The Primary Shield)
  * Prevents users from spamming the "Generate Problem" button.
- * Rule: 10 requests per 8 hours.
- * ENFORCEMENT: Forces a 60-second delay after the FIRST request.
+ * - Rule: 10 requests per 8 hours.
+ * - ENFORCEMENT: Forces a 60-second delay after the FIRST request.
  */
 const aiLimiterQuota = rateLimit({
     windowMs: 8 * 60 * 60 * 1000, // 8 Hours Window
     max: 10, // Max 10 Requests per Window
-
+    
     // 🔥 FORCED DELAY: The 60-second wait logic
-    delayAfter: 1,
+    delayAfter: 1, 
     delayMs: 60 * 1000, // 60 Seconds
-
-    message: {
-        error: "Quota Limit Exceeded",
-        message: "⚠️ អ្នកបានប្រើប្រាស់សិទ្ធិអស់ហើយ (10ដង/8ម៉ោង)។"
+    
+    message: { 
+        error: "Quota Limit Exceeded", 
+        message: "⚠️ អ្នកបានប្រើប្រាស់សិទ្ធិអស់ហើយ (10ដង/8ម៉ោង)។" 
     },
-
+    
     standardHeaders: true,
     legacyHeaders: false,
-
+    
     // Custom key generator for Proxy environments
     keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
-
+    
     // Bypass Logic for Admin/Owner
     skip: (req) => {
         const currentIP = req.headers['x-forwarded-for'] || req.ip;
@@ -434,15 +416,15 @@ const aiLimiterQuota = rateLimit({
 /**
  * 🛡️ LAYER 2: SPEED LIMITER (The Burst Protection) - NEW
  * Prevents "Quota Burning" (using up all 10 requests in 10 minutes).
- * Rule: 5 requests per 1 hour.
+ * - Rule: 5 requests per 1 hour.
  */
 const aiSpeedLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 Hour Window
     max: 5, // 🔥 Max 5 requests per hour (The new strict limit)
-
-    message: {
-        error: "Speed Limit Exceeded",
-        message: "⚠️ ល្បឿនប្រើប្រាស់លឿនពេក (កំណត់ត្រឹម 5ដង/ម៉ោង)។ សូមរង់ចាំមួយរយៈ។"
+    
+    message: { 
+        error: "Speed Limit Exceeded", 
+        message: "⚠️ ល្បឿនប្រើប្រាស់លឿនពេក (កំណត់ត្រឹម 5ដង/ម៉ោង)។ សូមរង់ចាំមួយរយៈ។" 
     },
     standardHeaders: true,
     legacyHeaders: false,
@@ -499,7 +481,9 @@ app.get('/', (req, res) => {
                 --error: #ef4444;
                 --warning: #f59e0b;
             }
+            
             * { box-sizing: border-box; }
+            
             body {
                 background-color: var(--bg-main);
                 color: var(--text-primary);
@@ -511,12 +495,15 @@ app.get('/', (req, res) => {
                 flex-direction: column;
                 align-items: center;
             }
+
             .dashboard-wrapper {
                 width: 100%;
                 max-width: 1200px;
                 display: grid;
                 gap: 30px;
             }
+
+            /* --- CARDS --- */
             .panel {
                 background-color: var(--bg-panel);
                 border: 1px solid var(--border-color);
@@ -524,6 +511,8 @@ app.get('/', (req, res) => {
                 padding: 30px;
                 box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
             }
+
+            /* --- HEADER --- */
             .header-flex {
                 display: flex;
                 justify-content: space-between;
@@ -532,6 +521,7 @@ app.get('/', (req, res) => {
                 padding-bottom: 20px;
                 margin-bottom: 20px;
             }
+
             h1 {
                 margin: 0;
                 font-size: 1.8rem;
@@ -541,6 +531,7 @@ app.get('/', (req, res) => {
                 align-items: center;
                 gap: 15px;
             }
+            
             .version-tag {
                 font-size: 0.8rem;
                 background: #1e293b;
@@ -549,16 +540,20 @@ app.get('/', (req, res) => {
                 border-radius: 6px;
                 font-weight: 400;
             }
+
             .system-info {
                 font-family: 'JetBrains Mono', monospace;
                 font-size: 0.85rem;
                 color: var(--text-secondary);
             }
+
+            /* --- METRICS GRID --- */
             .metrics-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
                 gap: 20px;
             }
+
             .metric-box {
                 background: rgba(0,0,0,0.2);
                 border: 1px solid var(--border-color);
@@ -571,6 +566,7 @@ app.get('/', (req, res) => {
                 transform: translateY(-2px);
                 border-color: var(--accent-color);
             }
+
             .metric-label {
                 font-size: 0.7rem;
                 text-transform: uppercase;
@@ -579,15 +575,19 @@ app.get('/', (req, res) => {
                 margin-bottom: 10px;
                 font-weight: 700;
             }
+
             .metric-value {
                 font-family: 'JetBrains Mono', monospace;
                 font-size: 1.5rem;
                 font-weight: 700;
                 color: var(--text-primary);
             }
+
             .status-indicator { font-size: 0.8rem; }
             .status-indicator.online { color: var(--success); }
             .status-indicator.offline { color: var(--error); }
+
+            /* --- LOG VIEWER --- */
             .log-container {
                 background: #000;
                 border: 1px solid var(--border-color);
@@ -598,6 +598,7 @@ app.get('/', (req, res) => {
                 font-family: 'JetBrains Mono', monospace;
                 font-size: 0.85rem;
             }
+
             .log-entry {
                 display: flex;
                 gap: 15px;
@@ -605,17 +606,12 @@ app.get('/', (req, res) => {
                 border-bottom: 1px solid #1e1e1e;
                 padding-bottom: 4px;
             }
+            
             .log-time { color: var(--text-secondary); min-width: 80px; }
             .log-msg { color: #e2e8f0; font-weight: 600; }
             .log-detail { color: #64748b; font-size: 0.8rem; }
-            
-            .btn-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 20px;
-                margin-top: 20px;
-            }
 
+            /* --- BUTTONS --- */
             .action-btn {
                 display: block;
                 width: 100%;
@@ -627,28 +623,29 @@ app.get('/', (req, res) => {
                 border-radius: 12px;
                 font-weight: 700;
                 font-size: 1rem;
+                margin-top: 20px;
                 transition: background 0.3s;
                 text-transform: uppercase;
                 letter-spacing: 1px;
             }
             .action-btn:hover { background: var(--accent-hover); }
-            .action-btn.purple { background: #8b5cf6; }
-            .action-btn.purple:hover { background: #7c3aed; }
 
+            /* SCROLLBAR */
             ::-webkit-scrollbar { width: 10px; }
             ::-webkit-scrollbar-track { background: var(--bg-main); }
             ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 5px; }
+
         </style>
     </head>
     <body>
         <div class="dashboard-wrapper">
-
+            
             <div class="panel">
                 <div class="header-flex">
                     <h1>
-                        <span style="font-size: 2rem;">🚀</span> 
+                        <span style="font-size: 2rem;">🚀</span>
                         BRAINTEST CLOUD CORE
-                        <span class="version-tag">v7.2.1 (Auto-Gen + IMO)</span>
+                        <span class="version-tag">v7.1.1 (Dual Security)</span>
                     </h1>
                     <div class="system-info">
                         UPTIME: <span style="color:#fff">${d}d ${h}h ${m}m</span>
@@ -693,7 +690,7 @@ app.get('/', (req, res) => {
             <div class="panel">
                 <div class="header-flex">
                     <h1>
-                        <span style="font-size: 1.5rem;">📡</span> 
+                        <span style="font-size: 1.5rem;">📡</span>
                         LIVE SERVER TELEMETRY
                     </h1>
                     <div class="status-indicator online">REAL-TIME</div>
@@ -709,14 +706,9 @@ app.get('/', (req, res) => {
                 </div>
             </div>
 
-            <div class="btn-grid">
-                <a href="/admin/requests" class="action-btn">
-                    🔐 CERTIFICATE MANAGER
-                </a>
-                <a href="/admin/generator" class="action-btn purple">
-                    ⚙️ AUTO-GENERATOR ENGINE
-                </a>
-            </div>
+            <a href="/admin/requests" class="action-btn">
+                🔐 ACCESS ADMINISTRATIVE CONTROL PANEL
+            </a>
 
         </div>
 
@@ -740,19 +732,19 @@ app.get('/', (req, res) => {
 /**
  * 🤖 GENERATE PROBLEM API
  * The core logic of the BrainTest app.
- * LOGIC FLOW:
+ * * LOGIC FLOW:
  * 1. Validate Client Input.
- * 2. Force Default Metadata (Topic/Difficulty) if missing.
+ * 2. Force Default Metadata (Topic/Difficulty) if missing (The "Workaround").
  * 3. Check MongoDB Cache (25% Probability).
  * 4. If Cache Miss -> Call Google Gemini AI.
- * 5. Save AI result to Cache.
+ * 5. Save AI result to Cache for future use.
  * 6. Return Problem to Client.
  */
 // 🔥 APPLIED DUAL RATE LIMITERS (QUOTA + SPEED)
 app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, res) => {
     // 1. Data Extraction
     const { prompt, topic, difficulty } = req.body;
-
+    
     // 2. Validation
     if (!prompt) {
         return res.status(400).json({ error: "Bad Request", message: "Prompt is required." });
@@ -764,7 +756,7 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
     // Ensures we can always save to cache, even if client app sends nulls.
     const finalTopic = topic || "General";
     const finalDifficulty = difficulty || "Medium";
-
+    
     let problemContent = null;
     let source = "ai"; // Default source tag
 
@@ -777,10 +769,10 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
         try {
             // MongoDB Aggregation Pipeline: Match + Random Sample
             const cached = await MathCache.aggregate([
-                { $match: { topic: finalTopic, difficulty: finalDifficulty } },
+                { $match: { topic: finalTopic, difficulty: finalDifficulty } }, 
                 { $sample: { size: 1 } }
             ]);
-            
+
             if (cached.length > 0) {
                 problemContent = cached[0].raw_text;
                 source = "cache";
@@ -835,8 +827,8 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
     }
 
     // 6. Final Response
-    res.json({
-        text: problemContent,
+    res.json({ 
+        text: problemContent, 
         source: source,
         metadata: {
             topic: finalTopic,
@@ -936,10 +928,12 @@ app.get('/api/leaderboard/top', async (req, res) => {
 });
 
 // =================================================================================================
-// SECTION 10: ADMINISTRATIVE PANEL - CERTIFICATES
+// SECTION 10: ADMINISTRATIVE PANEL (SECURE AREA)
 // =================================================================================================
 
-// 1. Submit Request
+/**
+ * API: Request a Certificate
+ */
 app.post('/api/submit-request', async (req, res) => {
     const { username, score } = req.body;
     try {
@@ -951,7 +945,9 @@ app.post('/api/submit-request', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-// 2. Generate Image Link
+/**
+ * API: Generate Certificate Image
+ */
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
         const client = await pgPool.connect();
@@ -969,11 +965,12 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
             `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodeURIComponent(msg)}&mark-w=1600`;
 
         res.redirect(finalUrl);
-
     } catch (e) { res.status(500).send("Generation Error"); }
 });
 
-// 3. Delete Request
+/**
+ * API: Delete Request
+ */
 app.delete('/admin/delete-request/:id', async (req, res) => {
     try {
         const client = await pgPool.connect();
@@ -983,7 +980,9 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-// 4. Admin UI (Requests)
+/**
+ * UI: Admin Control Panel HTML
+ */
 app.get('/admin/requests', async (req, res) => {
     try {
         const client = await pgPool.connect();
@@ -1010,20 +1009,63 @@ app.get('/admin/requests', async (req, res) => {
                 <title>BrainTest Admin Control</title>
                 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
                 <style>
-                    body { font-family: 'Inter', sans-serif; background:#f8fafc; padding:50px; color:#334155; display:flex; justify-content:center; }
-                    .admin-panel { width: 100%; max-width:1000px; background:white; padding:40px; border-radius:20px; box-shadow:0 10px 25px -5px rgba(0,0,0,0.05); }
-                    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; border-bottom: 2px solid #f1f5f9; padding-bottom: 20px; }
+                    body { 
+                        font-family: 'Inter', sans-serif; 
+                        background:#f8fafc; 
+                        padding:50px; 
+                        color:#334155; 
+                        display:flex; 
+                        justify-content:center; 
+                    }
+                    .admin-panel { 
+                        width: 100%; 
+                        max-width:1000px; 
+                        background:white; 
+                        padding:40px; 
+                        border-radius:20px; 
+                        box-shadow:0 10px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.01); 
+                    }
+                    .header {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        margin-bottom: 30px;
+                        border-bottom: 2px solid #f1f5f9;
+                        padding-bottom: 20px;
+                    }
                     h2 { margin:0; color:#0f172a; font-size: 1.5rem; }
-                    .back-link { text-decoration:none; color:#64748b; font-weight:600; transition: color 0.2s; }
+                    .back-link { 
+                        text-decoration:none; 
+                        color:#64748b; 
+                        font-weight:600; 
+                        display: flex; 
+                        align-items: center; 
+                        gap: 8px;
+                        transition: color 0.2s;
+                    }
                     .back-link:hover { color: #3b82f6; }
+                    
                     table { width:100%; border-collapse:separate; border-spacing: 0 10px; }
                     th { text-align:left; padding:15px; color:#94a3b8; font-size:0.75rem; text-transform:uppercase; letter-spacing:1px; }
                     td { background: #f8fafc; padding:15px; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; }
+                    td:first-child { border-top-left-radius: 10px; border-bottom-left-radius: 10px; border-left: 1px solid #e2e8f0; }
+                    td:last-child { border-top-right-radius: 10px; border-bottom-right-radius: 10px; border-right: 1px solid #e2e8f0; }
+                    
                     .id-badge { font-family: monospace; color: #94a3b8; }
                     .score-badge { background:#dbeafe; color:#1e40af; padding:5px 10px; border-radius:99px; font-weight:700; font-size:0.85rem; }
+                    
                     .actions { display: flex; gap: 15px; }
-                    .btn-icon { border:none; background:white; cursor:pointer; font-size:1.2rem; width: 40px; height: 40px; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,0.05); transition: transform 0.2s; text-decoration: none; display: flex; align-items: center; justify-content: center; }
+                    .btn-icon { 
+                        border:none; background:white; cursor:pointer; font-size:1.2rem; 
+                        width: 40px; height: 40px; border-radius: 50%; 
+                        display: flex; align-items: center; justify-content: center;
+                        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+                        transition: transform 0.2s, background 0.2s;
+                        text-decoration: none;
+                    }
                     .btn-icon:hover { transform: scale(1.1); }
+                    .print:hover { background: #eff6ff; color: #3b82f6; }
+                    .del:hover { background: #fef2f2; color: #ef4444; }
                 </style>
             </head>
             <body>
@@ -1034,7 +1076,13 @@ app.get('/admin/requests', async (req, res) => {
                     </div>
                     <table>
                         <thead>
-                            <tr><th>Ref ID</th><th>Username</th><th>High Score</th><th>Submission Date</th><th>Actions</th></tr>
+                            <tr>
+                                <th>Ref ID</th>
+                                <th>Username</th>
+                                <th>High Score</th>
+                                <th>Submission Date</th>
+                                <th>Actions</th>
+                            </tr>
                         </thead>
                         <tbody>${rows}</tbody>
                     </table>
@@ -1056,230 +1104,7 @@ app.get('/admin/requests', async (req, res) => {
 });
 
 // =================================================================================================
-// SECTION 11: ADMINISTRATIVE PANEL - AUTO GENERATOR (NEW FEATURE)
-// =================================================================================================
-
-/** 
- * HELPER: Math Topic Dictionary
- * Defines the complex forms for specific targeting in the generator.
- */
-const MATH_TOPICS = {
-    "Limits": ["Indeterminate 0/0", "Indeterminate Infinity/Infinity", "Trigonometric Limits", "Exponential Limits", "Continuity"],
-    "Derivatives": ["Chain Rule", "Implicit Differentiation", "Parametric Equations", "Higher Order Derivatives"],
-    "Integrals": ["Rational Functions", "Integration by Parts", "Trigonometric Substitution", "Definite Integrals", "Area & Volume"],
-    "Complex Numbers": ["Modulus & Argument", "De Moivre's Theorem", "Roots of Unity", "Geometric Representation"],
-    "Geometry": ["3D Space Vectors", "Plane Equations", "Sphere Equations", "Cross Product Applications"],
-    "Probability": ["Conditional Probability", "Combinatorics", "Bernoulli Trials"]
-};
-
-/**
- * HELPER: Difficulty Prompt Modifier
- * Ensures the AI understands exactly what "Hard" means for our context.
- */
-function getDifficultyPrompt(level) {
-    switch(level) {
-        case "Easy": return "Level: Grade 12 Advanced Exam (BacII). Requires standard formulas but careful calculation.";
-        case "Medium": return "Level: University Scholarship Exam. Requires trick substitutions or deep understanding.";
-        case "Hard": return "Level: National Math Olympiad. Requires creative insight, proof, or non-standard approach.";
-        case "Very Hard": return "Level: IMO (International Math Olympiad). Extremely abstract, multi-step logic, very difficult.";
-        default: return "Level: Standard.";
-    }
-}
-
-/**
- * API: Trigger Batch Generation
- * Runs in background to prevent timeout.
- */
-app.post('/admin/run-auto-gen', async (req, res) => {
-    const { topic, subtopic, difficulty } = req.body;
-    
-    // Safety Checks
-    if (SYSTEM_STATE.isGenerating) return res.status(429).json({ error: "Job already running" });
-    if (!SYSTEM_STATE.mongoConnected) return res.status(500).json({ error: "MongoDB not connected" });
-
-    // Lock System
-    SYSTEM_STATE.isGenerating = true;
-    SYSTEM_STATE.genProgress = 0;
-    SYSTEM_STATE.lastBatchInfo = `${topic} (${subtopic}) - ${difficulty}`;
-    
-    // Start background process (Fire and Forget)
-    (async () => {
-        const count = 10;
-        const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
-        const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
-
-        logSystem('GEN', `Starting Batch Job: ${topic} (${subtopic}) - ${difficulty}`);
-
-        for (let i = 0; i < count; i++) {
-            try {
-                // Construct High-Precision Prompt
-                const prompt = `
-                Create a unique math problem.
-                Topic: ${topic} specifically focusing on ${subtopic}.
-                ${getDifficultyPrompt(difficulty)}
-                
-                OUTPUT FORMAT:
-                Return ONLY the math problem in LaTeX or clear text.
-                Do NOT provide the solution.
-                Ensure the numbers are clean but the logic is challenging.
-                `;
-
-                // Call AI
-                const result = await model.generateContent(prompt);
-                const text = result.response.text();
-
-                // Save to DB (Marked as Auto-Generated)
-                await MathCache.create({
-                    topic: topic, 
-                    difficulty: difficulty,
-                    raw_text: text,
-                    source_ip: 'AUTO-GEN-BOT',
-                    is_auto_generated: true
-                });
-
-                // Update Progress
-                SYSTEM_STATE.genProgress = ((i + 1) / count) * 100;
-                logSystem('GEN', `Generated ${i+1}/${count}`, `${topic} - ${difficulty}`);
-                
-                // Sleep 2 seconds to avoid Rate Limits (Google Flash Limit)
-                await new Promise(r => setTimeout(r, 2000));
-
-            } catch (err) {
-                logSystem('ERR', 'Batch Gen Failed', err.message);
-            }
-        }
-        
-        // Unlock System
-        SYSTEM_STATE.isGenerating = false;
-        logSystem('GEN', 'Batch Job Complete', '10 Problems Added.');
-    })();
-
-    res.json({ success: true, message: "Started generating 10 problems in background." });
-});
-
-/**
- * UI: Generator Dashboard
- * A specialized interface for the admin to control the bot.
- */
-app.get('/admin/generator', (req, res) => {
-    // Dynamically build dropdown options from dictionary
-    let topicOptions = "";
-    for (const [key, subs] of Object.entries(MATH_TOPICS)) {
-        subs.forEach(sub => {
-            topicOptions += `<option value="${key}|${sub}">${key} - ${sub}</option>`;
-        });
-    }
-
-    const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Titan Auto-Generator</title>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
-        <style>
-            body { background: #0f172a; color: #fff; font-family: 'Inter', sans-serif; padding: 50px; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin:0; }
-            .card { background: #1e293b; padding: 40px; border-radius: 20px; width: 600px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid #334155; }
-            h2 { color: #8b5cf6; margin-top: 0; display: flex; align-items: center; gap: 10px; }
-            label { display: block; margin-bottom: 8px; color: #94a3b8; font-size: 0.9rem; font-weight: bold; }
-            select, button { width: 100%; padding: 15px; margin-bottom: 20px; border-radius: 10px; border: 1px solid #334155; background: #0f172a; color: white; font-size: 1rem; appearance: none; }
-            select:focus, button:focus { outline: 2px solid #8b5cf6; }
-            
-            button { background: #8b5cf6; font-weight: bold; cursor: pointer; transition: 0.2s; border: none; text-transform: uppercase; letter-spacing: 1px; }
-            button:hover { background: #7c3aed; transform: translateY(-2px); }
-            button:disabled { background: #475569; cursor: not-allowed; transform: none; }
-            
-            .status { margin-top: 20px; padding: 20px; background: #000; border-radius: 10px; font-family: monospace; color: #4ade80; border: 1px solid #334155; height: 150px; overflow-y: auto; }
-            .back { text-align: center; display: block; color: #64748b; text-decoration: none; margin-top: 20px; font-weight: 600; }
-            .back:hover { color: #fff; }
-            
-            .badge-imo { background: #dc2626; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; vertical-align: middle; }
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <h2>⚙️ AI MATH GENERATOR</h2>
-            <p style="color: #cbd5e1; margin-bottom: 30px;">
-                Generates 10 problems per batch. Content is automatically saved to the MongoDB Cluster.
-            </p>
-            
-            <label>TARGET TOPIC & SUB-FORM</label>
-            <select id="topicSel">${topicOptions}</select>
-
-            <label>DIFFICULTY LEVEL</label>
-            <select id="diffSel">
-                <option value="Easy">Easy (BacII Standard)</option>
-                <option value="Medium" selected>Medium (Scholarship/Uni)</option>
-                <option value="Hard">Hard (National Olympiad)</option>
-                <option value="Very Hard">Very Hard (IMO / Global) 🔥</option>
-            </select>
-
-            <button onclick="startGen()" id="btnGen">⚡ GENERATE BATCH (10)</button>
-            
-            <label>CONSOLE OUTPUT</label>
-            <div class="status" id="console">System Ready... Waiting for command.</div>
-            
-            <a href="/" class="back">← RETURN TO MAIN DASHBOARD</a>
-        </div>
-
-        <script>
-            async function startGen() {
-                const btn = document.getElementById('btnGen');
-                const con = document.getElementById('console');
-                const [topic, subtopic] = document.getElementById('topicSel').value.split('|');
-                const diff = document.getElementById('diffSel').value;
-
-                // UI Lockdown
-                btn.disabled = true;
-                btn.innerText = "⏳ CONTACTING TITAN ENGINE...";
-                con.innerText = ">> [INIT] Establishing connection to Gemini 1.5 Flash...\\n";
-                con.innerText += ">> [REQ] Generating batch for: " + topic + " (" + diff + ")\\n";
-
-                try {
-                    const res = await fetch('/admin/run-auto-gen', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ topic, subtopic, difficulty: diff })
-                    });
-                    const data = await res.json();
-                    
-                    if(data.success) {
-                        con.innerText += ">> [OK] Job Started Successfully!\\n";
-                        con.innerText += ">> [INFO] Check Server Terminal for real-time logs.\\n";
-                        con.innerText += ">> [WAIT] Please wait 20 seconds for the batch to finish...\\n";
-                        
-                        // Cooldown timer visual
-                        let timeLeft = 20;
-                        const timer = setInterval(() => {
-                            btn.innerText = "PROCESSING... (" + timeLeft + "s)";
-                            timeLeft--;
-                            if(timeLeft < 0) {
-                                clearInterval(timer);
-                                btn.disabled = false;
-                                btn.innerText = "⚡ GENERATE BATCH (10)";
-                                con.innerText += ">> [DONE] Batch complete. Ready for next task.";
-                            }
-                        }, 1000);
-                        
-                    } else {
-                        con.innerText += ">> [ERR] " + data.error;
-                        btn.disabled = false;
-                        btn.innerText = "⚡ GENERATE BATCH (10)";
-                    }
-                } catch(e) {
-                    con.innerText += ">> [FATAL] Connection Failed.";
-                    btn.disabled = false;
-                    btn.innerText = "RETRY CONNECTION";
-                }
-            }
-        </script>
-    </body>
-    </html>
-    `;
-    res.send(html);
-});
-
-// =================================================================================================
-// SECTION 12: SYSTEM INITIALIZATION (NON-BLOCKING STARTUP)
+// SECTION 11: SYSTEM INITIALIZATION (NON-BLOCKING STARTUP)
 // =================================================================================================
 
 /**
@@ -1288,12 +1113,12 @@ app.get('/admin/generator', (req, res) => {
  */
 async function startSystem() {
     console.clear();
-    logSystem('OK', 'Initializing BrainTest Titan Engine v7.2.1...');
-    logSystem('INFO', 'Starting Non-Blocking Database Connections...');
+    logSystem('OK', `Initializing BrainTest Titan Engine v7.1.1...`);
+    logSystem('INFO', `Starting Non-Blocking Database Connections...`);
 
     // 1. Trigger Database Connections (Background Process)
-    initPostgres();
-    initMongo();
+    initPostgres(); 
+    initMongo();    
 
     // 2. Start Web Server (Immediate)
     const server = app.listen(CONFIG.PORT, () => {
@@ -1303,7 +1128,6 @@ async function startSystem() {
         console.log('\n');
         console.log('===================================================');
         console.log(`   BRAINTEST BACKEND IS LIVE ON PORT ${CONFIG.PORT}   `);
-        console.log(`   ADMIN GENERATOR: /admin/generator               `);
         console.log('===================================================');
         console.log('\n');
     });
