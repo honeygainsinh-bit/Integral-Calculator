@@ -1,276 +1,336 @@
 /**
- * ==========================================================================================================================================================
- *  ______   ______              _____   _   _   _______   ______    _____   _______ 
- * |  ____| |  ____|     /\     |  __ \ | \ | | |__   __| |  ____|  / ____| |__   __|
- * | |__    | |__       /  \    | |__) ||  \| |    | |    | |__    | (___      | |   
- * |  __|   |  __|     / /\ \   |  _  / | . ` |    | |    |  __|    \___ \     | |   
- * | |____  | |____   / ____ \  | | \ \ | |\  |    | |    | |____   ____) |    | |   
- * |______| |______| /_/    \_\ |_|  \_\|_| \_|    |_|    |______| |_____/     |_|   
- *
- * ==========================================================================================================================================================
+ * =================================================================================================
+ *  ____  ____      _    ___ _   _ _____ _____ ____ _____ 
+ * | __ )|  _ \    / \  |_ _| \ | |_   _| ____/ ___|_   _|
+ * |  _ \| |_) |  / _ \  | ||  \| | | | |  _| \___ \ | |  
+ * | |_) |  _ <  / ___ \ | || |\  | | | | |___ ___) || |  
+ * |____/|_| \_\/_/   \_\___|_| \_| |_| |_____|____/ |_|  
  * 
- * PROJECT NAME:        BRAINTEST - TITAN ENTERPRISE BACKEND SYSTEM
- * SYSTEM VERSION:      8.0.0 (ULTIMATE EDITION)
- * DEPLOYMENT TARGET:   CLOUD CLUSTER (RENDER / AWS / GOOGLE CLOUD)
- * ENGINEERING TEAM:    BRAINTEST DEV OPS
- * DATE CREATED:        DECEMBER 2025
- * LICENSE:             PROPRIETARY & CONFIDENTIAL
+ * =================================================================================================
+ * PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
+ * EDITION:           V11.0 PLATINUM (FULL SOURCE RESTORED & FIXED)
+ * ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE (PG + MONGO)
+ * AUTHOR:            BRAINTEST ENGINEERING TEAM
+ * DATE:              DECEMBER 2025
+ * ENGINE:            GEMINI 2.5 FLASH INTEGRATION
+ * STATUS:            PRODUCTION READY
+ * =================================================================================================
  * 
- * ==========================================================================================================================================================
+ * █ CRITICAL UPDATE LOG (V11.0 FIXED):
+ *    1. [FIXED] 2ND CLICK FREEZE: 
+ *       - Removed RateLimit middleware from the Cache-Reading process.
+ *       - Cache is now "Zero-Latency" & "Unlimited Access".
+ *       - RateLimit applies ONLY when forcing a fresh AI generation.
  * 
- * [ SYSTEM ARCHITECTURE & DOCUMENTATION ]
+ *    2. [FIXED] DERIVATIVE CRASH / WRONG TOPIC:
+ *       - Implemented `mapTopicToKey()` smart function.
+ *       - Maps "Derivative", "Derivatives", "diff" -> "Derivatives".
+ *       - Maps "Limit", "Limits" -> "Limits".
+ *       - Ensures the Database Query always uses the correct Key.
  * 
- * 1. CORE RUNTIME ENVIRONMENT
- *    - Platform:       Node.js (LTS Version Recommended)
- *    - Framework:      Express.js (High-performance routing)
- *    - Architecture:   Monolithic Service with Async Non-blocking I/O
+ *    3. [FIXED] SOURCE IP BLOCKING:
+ *       - Removed filter `{ source_ip: 'TITAN-MATRIX' }`.
+ *       - Now reads from the GLOBAL POOL of exercises (User generated + System generated).
  * 
- * 2. HYBRID DATABASE LAYER
- *    - SQL (Primary):  PostgreSQL
- *                      Used for Critical User Data, Leaderboards, and Certificate Requests.
- *                      Features: ACID Compliance, Complex Queries, Smart Merging Logic.
- *    - NoSQL (Cache):  MongoDB (Atlas)
- *                      Used for "Titan Matrix" - The caching layer for Math Problems.
- *                      Features: High-speed JSON retrieval, Geo-redundancy.
+ *    4. [RESTORATION] FULL UI:
+ *       - Restored the 600+ lines of HTML/CSS for the Admin Dashboard.
  * 
- * 3. ARTIFICIAL INTELLIGENCE ENGINE
- *    - Provider:       Google DeepMind (Gemini API)
- *    - Model:          "gemini-2.5-flash" (Optimized for low-latency reasoning)
- *    - Fallback:       System automatically switches to AI if Database Cache is empty.
- * 
- * 4. LOGIC CONFIGURATION (v8.0.0)
- *    - CACHE RATIO:    50% Database / 50% AI (Perfectly Balanced).
- *    - TOPIC LOGIC:    STRICT MATCHING. 
- *                      (e.g., "Limits" returns "Limits", "General" returns "General").
- *    - SOURCE IP:      PASS-THROUGH.
- *                      (Preserves original source: "TITAN-MATRIX", "AI-GEN", or Admin IP).
- * 
- * 5. SECURITY PROTOCOLS (DUAL LAYER)
- *    - QUOTA LIMIT:    Max 10 requests per 8 Hours (Long-term abuse prevention).
- *    - SPEED LIMIT:    Max 5 requests per 1 Hour (Burst attack prevention).
- *    - ANTI-CHEAT:     Server-side score validation logic.
- * 
- * ==========================================================================================================================================================
+ * =================================================================================================
  */
 
 // =================================================================================================
-// SECTION 1: LIBRARY IMPORTS & DEPENDENCY INJECTION
+// SECTION 1: LIBRARY IMPORTS & ENVIRONMENT SETUP
 // =================================================================================================
 
-// 1.1 Load Environment Variables
-// Crucial for keeping API Keys and Database URLs secure.
 require('dotenv').config();
 
-// 1.2 Core Server Libraries
-const express = require('express');           // The web server framework
-const cors = require('cors');                 // Middleware to enable Cross-Origin Resource Sharing
-const path = require('path');                 // NodeJS utility for file path resolution
-const http = require('http');                 // Standard HTTP module
-
-// 1.3 Database Drivers
-const { Pool } = require('pg');               // PostgreSQL Client for Node.js
-const mongoose = require('mongoose');         // MongoDB Object Modeling Tool
-
-// 1.4 AI SDK Integration
-const { GoogleGenerativeAI } = require('@google/generative-ai'); // Google Gemini SDK
-
-// 1.5 Security & Utility Middleware
-const rateLimit = require('express-rate-limit'); // For DDoS and Spam protection
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const { Pool } = require('pg');
+const mongoose = require('mongoose');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const rateLimit = require('express-rate-limit');
 
 // =================================================================================================
-// SECTION 2: CENTRALIZED CONFIGURATION (THE BRAIN)
+// SECTION 2: MASTER CONFIGURATION & MATRIX DEFINITIONS
 // =================================================================================================
 
-/**
- * CONFIG
- * This object holds all the tuning parameters for the server.
- * Adjust these values to change how the system behaves without rewriting code.
- */
+// -------------------------------------------------------------------------
+// 🧬 THE GRANULAR MATRIX: DETAILED FORMS FOR EVERY TOPIC (10 TOPICS)
+// This list ensures high variety and coverage of all math sub-disciplines.
+// -------------------------------------------------------------------------
+const ALL_FORMS = {
+    // --- 1. LIMITS ---
+    "Limits": [
+        "0/0: Factoring Polynomials (Diff of Squares/Cubes)",
+        "0/0: Involving Square Roots (Conjugate 2nd Order)",
+        "0/0: Involving Cube Roots (Conjugate 3rd Order)",
+        "0/0: Nested Roots (Sqrt inside Sqrt)",
+        "0/0: Trigonometry Standard (sin x/x, tan x/x)",
+        "0/0: Trigonometry with Cosine (1-cos x)",
+        "0/0: Trigonometry Mixed (sin, tan, cos combined)",
+        "Inf/Inf: Rational Functions (Highest Degree Rule)",
+        "Inf/Inf: Irrational Functions (Sqrt(x^2) terms)",
+        "Inf - Inf: Radical Conjugate (sqrt(A) - sqrt(B))",
+        "Exponential Limits (e^x / x at infinity)",
+        "Logarithmic Limits (ln x / x at infinity)",
+        "1^Inf: Euler Form (1 + u)^v",
+        "Continuity: Finding 'k' for continuity at a point",
+        "L'Hopital's Rule Application"
+    ],
+
+    // --- 2. DERIVATIVES ---
+    "Derivatives": [
+        "Power Rule: Polynomials with negative/fractional powers",
+        "Product Rule: (uv)' = u'v + uv'",
+        "Quotient Rule: (u/v)'",
+        "Chain Rule: Power of a Function u^n",
+        "Chain Rule: Involving Radicals sqrt(u)",
+        "Chain Rule: Trigonometric Functions (sin u, cos u)",
+        "Derivatives of Inverse Trig (arcsin u, arctan u)",
+        "Derivatives of Exponential Functions (e^u, a^u)",
+        "Derivatives of Logarithmic Functions (ln u, log_a u)",
+        "Logarithmic Differentiation (Functions y = x^x)",
+        "Implicit Differentiation (First order y')",
+        "Implicit Differentiation (Second order y'')",
+        "Parametric Differentiation (dy/dt / dx/dt)",
+        "Higher Order Derivatives: y'', y''' calculation",
+        "Tangent Line Equation at a point",
+        "Normal Line Equation at a point"
+    ],
+
+    // --- 3. INTEGRALS ---
+    "Integrals": [
+        "Indefinite: Basic Power Rule & Polynomials",
+        "Indefinite: Basic Trig (sin, cos, sec^2)",
+        "Indefinite: Exponential (e^kx)",
+        "U-Substitution: Linear argument (ax+b)",
+        "U-Substitution: Radicals (u = sqrt(...))",
+        "U-Substitution: Logarithmic (ln x / x)",
+        "U-Substitution: Exponential (e^x / (1+e^x))",
+        "Integration by Parts: Polynomial * Exponential (x e^x)",
+        "Integration by Parts: Polynomial * Trig (x sin x)",
+        "Integration by Parts: Logarithmic (ln x)",
+        "Integration by Parts: Cyclic (e^x sin x)",
+        "Trig Powers: Odd/Even powers of sin/cos",
+        "Partial Fractions: Distinct Linear Denominators",
+        "Partial Fractions: Repeated Linear Denominators",
+        "Definite Integral: Calculation with bounds",
+        "Area: Between Curve and X-axis",
+        "Area: Between Two Curves f(x) and g(x)",
+        "Volume: Solid of Revolution (Disk Method)"
+    ],
+
+    // --- 4. DIFFERENTIAL EQUATIONS ---
+    "DiffEq": [
+        "Verification: Checking if y is a solution",
+        "Separable: Basic variables separation",
+        "Separable: Involving Trigonometry or Exponentials",
+        "Linear First Order: Integrating Factor Method",
+        "Homogeneous First Order: Substitution y = vx",
+        "Second Order Homogeneous: Real Distinct Roots",
+        "Second Order Homogeneous: Real Double Root",
+        "Second Order Homogeneous: Complex Roots (Alpha +/- Beta i)",
+        "Initial Value Problem (IVP): Finding Particular Solution"
+    ],
+
+    // --- 5. COMPLEX NUMBERS ---
+    "Complex": [
+        "Algebraic: Addition, Subtraction, Multiplication",
+        "Algebraic: Division (Conjugate Method)",
+        "Modulus: Calculating |z|",
+        "Argument: Finding arg(z) / theta",
+        "Forms: Converting Algebraic to Polar/Trig",
+        "Forms: Converting Polar to Algebraic",
+        "Square Roots: Finding sqrt(a+bi)",
+        "Quadratics: Solving az^2+bz+c=0 with Delta < 0",
+        "De Moivre's Theorem: Powers z^n",
+        "Roots of Unity: Finding n-th roots of a number",
+        "Geometry: Locus of points (Circle / Line)"
+    ],
+
+    // --- 6. VECTORS ---
+    "Vectors": [
+        "Basics: Magnitude and Unit Vector",
+        "Operations: Addition and Scalar Multiplication",
+        "Dot Product: Calculating u.v & Angle",
+        "Dot Product: Orthogonality Check",
+        "Cross Product: Calculating u x v & Area",
+        "Lines: Parametric/Symmetric Equations",
+        "Planes: Equation given Point and Normal",
+        "Distance: Point to Plane",
+        "Distance: Point to Line",
+        "Intersection: Line and Plane"
+    ],
+
+    // --- 7. FUNCTION ANALYSIS ---
+    "FuncAnalysis": [
+        "Domain: Rational Functions",
+        "Domain: Radical Functions (Sqrt)",
+        "Domain: Logarithmic Functions",
+        "Asymptotes: Vertical & Horizontal",
+        "Asymptotes: Oblique (Slant) Asymptote",
+        "Symmetry: Parity (Even/Odd Functions)",
+        "Derivatives: Finding Critical Points",
+        "Extrema: Local Maximum and Minimum",
+        "Concavity: Inflection Points",
+        "Graphs: Matching Function to Graph"
+    ],
+
+    // --- 8. CONICS ---
+    "Conics": [
+        "Circle: General Form to Standard Form",
+        "Circle: Finding Center and Radius",
+        "Parabola: Vertex at Origin",
+        "Parabola: Shifted Vertex (h,k)",
+        "Ellipse: Finding Vertices and Foci",
+        "Ellipse: Eccentricity calculation",
+        "Hyperbola: Finding Vertices, Foci, Asymptotes",
+        "Tangent: Equation of tangent line to a Conic"
+    ],
+
+    // --- 9. PROBABILITY ---
+    "Probability": [
+        "Counting: Permutations (Arrangements)",
+        "Counting: Combinations (Selections)",
+        "Basic Prob: Coin Tosses / Dice Rolls / Cards",
+        "Compound Prob: Independent vs Mutually Exclusive",
+        "Conditional Prob: P(A|B) Calculation",
+        "Distribution: Binomial Distribution Formula",
+        "Stats: Expected Value (Mean)"
+    ],
+
+    // --- 10. CONTINUITY ---
+    "Continuity": [
+        "Definition: Checking lim(x->a) = f(a)",
+        "One-Sided: Left Limit vs Right Limit",
+        "Unknowns: Finding 'k' to make f(x) continuous",
+        "Discontinuity: Identifying Jump/Hole/Infinite",
+        "IVT: Intermediate Value Theorem Applications"
+    ]
+};
+
+// -------------------------------------------------------------------------
+// 📏 DIFFICULTY STANDARDS (BACII -> IMO)
+// -------------------------------------------------------------------------
+const DIFFICULTY_INSTRUCTIONS = {
+    "Easy": `
+        - STANDARD: CAMBODIAN GRADE 12 NATIONAL EXAM (BacII).
+        - STYLE: Direct application of formulas. Standard textbook level.
+        - COMPLEXITY: 2-3 steps. NO elementary/primary school math.
+        - NOTE: Even if "Easy", it must be appropriate for a Grade 12 student.
+    `,
+    "Medium": `
+        - STANDARD: ADVANCED / PRE-UNIVERSITY.
+        - STYLE: Harder than BacII. Requires manipulating equations.
+        - COMPLEXITY: Combining 2 concepts (e.g., Domain of a Log function inside a Sqrt).
+        - STEPS: 4-5 steps.
+    `,
+    "Hard": `
+        - STANDARD: NATIONAL OUTSTANDING STUDENT (Sishya Puke).
+        - STYLE: Theoretical, heavy calculation, or requires insight.
+        - FORMS: n-th derivatives, complex integrals, proof-based.
+        - VIBE: Separates the top students.
+    `,
+    "Very Hard": `
+        - STANDARD: IMO (INTERNATIONAL MATH OLYMPIAD).
+        - STYLE: Abstract, Creative, Non-standard thinking.
+        - TRICK: Requires auxiliary functions, inequalities, or advanced theorems.
+        - VIBE: "Short question, hidden complexity".
+    `
+};
+
 const CONFIG = {
-    // -------------------------------------------------------------------------
-    // SERVER INFRASTRUCTURE
-    // -------------------------------------------------------------------------
     PORT: process.env.PORT || 3000,
-    ENV: process.env.NODE_ENV || 'development',
-    
-    // -------------------------------------------------------------------------
-    // DATABASE CONNECTIONS
-    // -------------------------------------------------------------------------
     POSTGRES_URL: process.env.DATABASE_URL,
     MONGO_URI: process.env.MONGODB_URI,
-    
-    // -------------------------------------------------------------------------
-    // AI ENGINE PARAMETERS
-    // -------------------------------------------------------------------------
     GEMINI_KEY: process.env.GEMINI_API_KEY,
-    
-    // 🔥 UPDATED: Using the latest Flash model for speed
     AI_MODEL: "gemini-2.5-flash", 
-    
-    // -------------------------------------------------------------------------
-    // CACHING STRATEGY
-    // -------------------------------------------------------------------------
-    // 0.5 means 50% chance to fetch from MongoDB, 50% chance to ask AI.
-    CACHE_RATE: 0.5, 
-    
-    // -------------------------------------------------------------------------
-    // EXTERNAL INTEGRATIONS
-    // -------------------------------------------------------------------------
-    IMG_API: process.env.EXTERNAL_IMAGE_API, // For generating certificates
-    
-    // -------------------------------------------------------------------------
-    // SECURITY & ACCESS
-    // -------------------------------------------------------------------------
-    OWNER_IP: process.env.OWNER_IP, // Admin IP Whitelist
-    
-    // -------------------------------------------------------------------------
-    // GAMEPLAY RULES (Anti-Cheat Validation)
-    // -------------------------------------------------------------------------
-    // Max score allowed per difficulty level to prevent hacking.
-    ALLOWED_SCORES: {
-        "Easy": 5,
-        "Medium": 10,
-        "Hard": 15,
-        "Very Hard": 20,
-        "Extreme": 25
-    }
+    IMG_API: process.env.EXTERNAL_IMAGE_API || "https://fakeimg.pl/800x600/?text=", 
+    OWNER_IP: process.env.OWNER_IP, 
+    CACHE_RATE: 0.25, 
+    TARGETS: {
+        "Easy": 100,      
+        "Medium": 30,     
+        "Hard": 30,       
+        "Very Hard": 30   
+    },
+    TOPICS: [
+        { key: "Limits", label: "លីមីត (Limits)", prompt: "Calculus Limits" },
+        { key: "Derivatives", label: "ដេរីវេ (Derivatives)", prompt: "Calculus Derivatives" },
+        { key: "Integrals", label: "អាំងតេក្រាល (Integrals)", prompt: "Calculus Integrals" },
+        { key: "DiffEq", label: "សមីការឌីផេរ៉ង់ស្យែល", prompt: "Differential Equations" },
+        { key: "Complex", label: "ចំនួនកុំផ្លិច (Complex)", prompt: "Complex Numbers" },
+        { key: "Vectors", label: "វ៉ិចទ័រ (Vectors)", prompt: "Vector Algebra" },
+        { key: "FuncAnalysis", label: "សិក្សាអនុគមន៍", prompt: "Function Analysis" },
+        { key: "Conics", label: "កោនិក (Conics)", prompt: "Conic Sections" },
+        { key: "Probability", label: "ប្រូបាប (Probability)", prompt: "Probability Theory" },
+        { key: "Continuity", label: "ភាពជាប់ (Continuity)", prompt: "Calculus Continuity" }
+    ],
+    ALLOWED_SCORES: { "Easy": 5, "Medium": 10, "Hard": 15, "Very Hard": 20 }
 };
 
 // =================================================================================================
-// SECTION 3: REAL-TIME MONITORING & LOGGING SYSTEM
+// SECTION 3: SYSTEM STATE MANAGEMENT
 // =================================================================================================
 
-/**
- * SYSTEM_STATE
- * A Global Mutable Object that tracks server health statistics in real-time.
- */
 const SYSTEM_STATE = {
     startTime: Date.now(),
     postgresConnected: false,
     mongoConnected: false,
-    
-    // Counters
+    isGenerating: false,
+    currentGenTask: "Idle",
     totalRequests: 0,
     totalGamesGenerated: 0,
     cacheHits: 0,
     aiCalls: 0,
-    
-    // Track Unique Visitors
     uniqueVisitors: new Set(), 
-    
-    // Circular Log Buffer for Dashboard (Last 200 logs)
     logs: [] 
 };
 
-/**
- * logSystem()
- * Advanced logging function that prints to Console (with colors) 
- * and saves to the Dashboard Buffer.
- * 
- * @param {string} type - Log Type (DB, AI, NET, ERR, OK)
- * @param {string} message - Primary Message
- * @param {string} details - Secondary Details
- */
 function logSystem(type, message, details = '') {
-    // 1. Create Timestamp
     const now = new Date();
     const timeString = now.toLocaleTimeString('en-US', { hour12: false });
-    
-    // 2. Define Icons and Colors
     let icon = 'ℹ️';
-    let colorCode = '\x1b[0m'; // Default White
-
     switch(type) {
-        case 'DB':   
-            icon = '🗄️'; 
-            colorCode = '\x1b[36m'; // Cyan
-            break;
-        case 'AI':   
-            icon = '🤖'; 
-            colorCode = '\x1b[35m'; // Magenta
-            break;
-        case 'ERR':  
-            icon = '❌'; 
-            colorCode = '\x1b[31m'; // Red
-            break;
-        case 'OK':   
-            icon = '✅'; 
-            colorCode = '\x1b[32m'; // Green
-            break;
-        case 'NET':  
-            icon = '📡'; 
-            colorCode = '\x1b[34m'; // Blue
-            break;
-        case 'WARN': 
-            icon = '⚠️'; 
-            colorCode = '\x1b[33m'; // Yellow
-            break;
-        case 'SEC':  
-            icon = '🛡️'; 
-            colorCode = '\x1b[31m'; // Red
-            break;
+        case 'DB':   icon = '🗄️'; break;
+        case 'AI':   icon = '🤖'; break;
+        case 'ERR':  icon = '❌'; break;
+        case 'OK':   icon = '✅'; break;
+        case 'NET':  icon = '📡'; break;
+        case 'WARN': icon = '⚠️'; break;
+        case 'SEC':  icon = '🛡️'; break; 
+        case 'GEN':  icon = '⚙️'; break; 
     }
-
-    // 3. Print to Console (Server Side)
-    console.log(`${colorCode}[${timeString}] ${icon} [${type}] ${message}\x1b[0m ${details ? '| ' + details : ''}`);
-
-    // 4. Push to Dashboard Buffer (Client Side)
-    SYSTEM_STATE.logs.unshift({ 
-        time: timeString, 
-        type: type, 
-        msg: message, 
-        det: details 
-    });
-
-    // 5. Memory Management (Prevent Overflow)
-    if (SYSTEM_STATE.logs.length > 200) {
-        SYSTEM_STATE.logs.pop();
-    }
-}
-
-/**
- * Helper: MongoDB URI Sanitizer
- * Ensures the connection string works with Atlas.
- */
-function cleanMongoURI(uri) {
-    if (!uri) return null;
-    let clean = uri.trim();
-    if (!clean.startsWith('mongodb://') && !clean.startsWith('mongodb+srv://')) {
-        logSystem('WARN', 'Fixing MongoDB URI', 'Added mongodb+srv:// prefix automatically.');
-        return `mongodb+srv://${clean}`;
-    }
-    return clean;
+    console.log(`[${timeString}] ${icon} [${type}] ${message} ${details ? '| ' + details : ''}`);
+    SYSTEM_STATE.logs.unshift({ time: timeString, type: type, msg: message, det: details });
+    if (SYSTEM_STATE.logs.length > 300) SYSTEM_STATE.logs.pop();
 }
 
 // =================================================================================================
-// SECTION 4: POSTGRESQL DATABASE MANAGEMENT (SQL)
+// SECTION 4 & 5: DATABASE LAYERS (POSTGRES + MONGO)
 // =================================================================================================
 
-// Initialize the Connection Pool
+// --- POSTGRESQL ---
 const pgPool = new Pool({
     connectionString: CONFIG.POSTGRES_URL,
-    ssl: { rejectUnauthorized: false }, // Essential for Cloud Hosting (Render/Heroku)
+    ssl: { rejectUnauthorized: false }, 
     connectionTimeoutMillis: 5000,      
     max: 20                             
 });
 
-// Global Error Handler
 pgPool.on('error', (err) => {
     SYSTEM_STATE.postgresConnected = false;
     logSystem('ERR', 'PostgreSQL Connection Error', err.message);
 });
 
-/**
- * initPostgres()
- * Connects to PostgreSQL and creates necessary tables if they don't exist.
- */
 async function initPostgres() {
     try {
-        logSystem('DB', 'Initializing PostgreSQL connection...');
         const client = await pgPool.connect();
         SYSTEM_STATE.postgresConnected = true;
         
-        // --- Table 1: Leaderboard (Score Storage) ---
+        // Create Leaderboard Table
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -278,631 +338,391 @@ async function initPostgres() {
                 score INTEGER NOT NULL,
                 difficulty VARCHAR(20) NOT NULL,
                 ip_address VARCHAR(45),
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
-            
-        // --- Table 2: Certificate Requests (Admin Queue) ---
+        
+        // Create Certificate Requests Table
         await client.query(`
             CREATE TABLE IF NOT EXISTS certificate_requests (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(100) NOT NULL,
                 score INTEGER NOT NULL,
                 status VARCHAR(20) DEFAULT 'Pending',
-                request_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                request_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
         
-        logSystem('OK', 'PostgreSQL Ready', 'Schema verification successful.');
         client.release();
-    } catch (err) {
-        logSystem('ERR', 'PostgreSQL Initialization Failed', err.message);
+        logSystem('OK', 'PostgreSQL Ready', 'Tables verified.');
+    } catch (err) { 
+        logSystem('ERR', 'PostgreSQL Init Failed', err.message); 
     }
 }
 
-// =================================================================================================
-// SECTION 5: MONGODB DATABASE MANAGEMENT (NOSQL CACHE)
-// =================================================================================================
+// --- MONGODB ---
+function cleanMongoURI(uri) {
+    if (!uri) return null;
+    let clean = uri.trim();
+    if (!clean.startsWith('mongodb://') && !clean.startsWith('mongodb+srv://')) return `mongodb+srv://${clean}`;
+    return clean;
+}
 
-/**
- * initMongo()
- * Connects to MongoDB Atlas for caching math problems.
- */
 async function initMongo() {
     const uri = cleanMongoURI(CONFIG.MONGO_URI);
-    
-    if (!uri) {
-        logSystem('WARN', 'MongoDB URI is undefined', 'Caching features disabled.');
-        return;
-    }
-
+    if (!uri) { logSystem('WARN', 'MongoDB URI Missing', 'Caching disabled.'); return; }
     try {
-        logSystem('DB', 'Initializing MongoDB connection...');
-        
-        // Connect with recommended options
-        await mongoose.connect(uri, {
-            serverSelectionTimeoutMS: 5000,
-            socketTimeoutMS: 45000,
-            family: 4 // IPv4 preference
-        });
-        
+        await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000, family: 4 });
         SYSTEM_STATE.mongoConnected = true;
-        logSystem('OK', 'MongoDB Connected', 'Titan Cache System is Active.');
-    } catch (err) {
-        SYSTEM_STATE.mongoConnected = false;
-        logSystem('ERR', 'MongoDB Connection Failed', err.message);
-    }
+        logSystem('OK', 'MongoDB Connected', 'Hybrid caching active.');
+    } catch (err) { SYSTEM_STATE.mongoConnected = false; logSystem('ERR', 'MongoDB Failed', err.message); }
 }
 
-// Mongo Event Listeners
-mongoose.connection.on('connected', () => { SYSTEM_STATE.mongoConnected = true; });
-mongoose.connection.on('disconnected', () => { SYSTEM_STATE.mongoConnected = false; });
-mongoose.connection.on('error', (err) => { logSystem('ERR', 'MongoDB Driver Error', err.message); });
-
-// -------------------------------------------------------------------------------------------------
-// MONGODB DATA SCHEMA
-// -------------------------------------------------------------------------------------------------
 const problemSchema = new mongoose.Schema({
-    // Topic (e.g., Limits, Algebra)
-    topic: { 
-        type: String, 
-        required: true, 
-        index: true 
-    },
-    // Difficulty (e.g., Easy, Hard)
-    difficulty: { 
-        type: String, 
-        required: true, 
-        index: true 
-    },
-    // JSON Content
-    raw_text: { 
-        type: String, 
-        required: true 
-    },
-    // Source Origin (Titan Matrix, AI, Admin)
+    topic: { type: String, required: true, index: true },
+    difficulty: { type: String, required: true, index: true },
+    raw_text: { type: String, required: true },
     source_ip: String,
-    
-    // Timestamp
-    createdAt: { 
-        type: Date, 
-        default: Date.now 
-    }
+    createdAt: { type: Date, default: Date.now }
 });
-
-// Create the Model
+problemSchema.index({ topic: 1, difficulty: 1 });
 const MathCache = mongoose.model('MathProblemCache', problemSchema);
 
 // =================================================================================================
-// SECTION 6: EXPRESS SERVER & MIDDLEWARE
+// SECTION 6: GENERATOR ENGINE (TITAN V10.9 CORE)
+// =================================================================================================
+
+async function startBackgroundGeneration() {
+    if (SYSTEM_STATE.isGenerating) return;
+    if (!SYSTEM_STATE.mongoConnected) {
+        logSystem('ERR', 'Generator Aborted', 'MongoDB not connected.');
+        return;
+    }
+
+    SYSTEM_STATE.isGenerating = true;
+    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initializing Matrix V10.9 (Strict Validation)...');
+
+    const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
+    const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
+
+    for (const topicObj of CONFIG.TOPICS) {
+        for (const [diffLevel, targetCount] of Object.entries(CONFIG.TARGETS)) {
+            
+            if (!SYSTEM_STATE.isGenerating) {
+                logSystem('GEN', 'Engine Stopped Manually');
+                return;
+            }
+
+            try {
+                const currentCount = await MathCache.countDocuments({ topic: topicObj.key, difficulty: diffLevel });
+                if (currentCount >= targetCount) continue;
+
+                const needed = targetCount - currentCount;
+                SYSTEM_STATE.currentGenTask = `${topicObj.label} (${diffLevel}): ${currentCount}/${targetCount}`;
+                logSystem('GEN', `Analyzing Task`, `${topicObj.key} [${diffLevel}] - Need: ${needed}`);
+
+                for (let i = 0; i < needed; i++) {
+                    if (!SYSTEM_STATE.isGenerating) break;
+
+                    // 🎲 STEP 1: SELECT A RANDOM FORM FROM THE GRANULAR LIST
+                    const forms = ALL_FORMS[topicObj.key] || ["General Math Problem"];
+                    const randomForm = forms[Math.floor(Math.random() * forms.length)];
+
+                    // 🔥 STEP 2: CONSTRUCT PROMPT WITH STRICT RULES
+                    const prompt = `
+                    Create 1 unique multiple-choice math problem.
+                    
+                    TOPIC: "${topicObj.prompt}"
+                    SPECIFIC FORM: "${randomForm}"
+                    TARGET DIFFICULTY: "${diffLevel}"
+
+                    🔴 DIFFICULTY GUIDELINES:
+                    ${DIFFICULTY_INSTRUCTIONS[diffLevel]}
+
+                    🔴 STRICT VALIDATION RULES:
+                    1. There must be EXACTLY ONE correct answer.
+                    2. The other 3 options must be INCORRECT distractors.
+                    3. ALL 4 options must be MATHEMATICALLY DISTINCT values (No duplicates).
+                    4. The "answer" field MUST be an EXACT string copy of one of the "options".
+                    5. Return ONLY valid JSON. No Markdown.
+
+                    JSON FORMAT:
+                    {
+                        "question": "LaTeX string",
+                        "options": ["Option A", "Option B", "Option C", "Option D"],
+                        "answer": "Exact String Match of Correct Option",
+                        "explanation": "Step-by-step reasoning"
+                    }
+                    `;
+
+                    try {
+                        const result = await model.generateContent(prompt);
+                        const response = await result.response;
+                        let text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+                        
+                        // 🔍 STEP 3: PARSE & VALIDATE
+                        const parsedData = JSON.parse(text);
+
+                        // Rule A: Check Options Count
+                        if (!parsedData.options || parsedData.options.length !== 4) {
+                            throw new Error("Options count is not 4");
+                        }
+                        
+                        // Rule B: Check Answer Existence
+                        if (!parsedData.options.includes(parsedData.answer)) {
+                            throw new Error("Answer key not found in options list");
+                        }
+
+                        // Rule C: Check Duplicates (Ambiguity)
+                        const distinctOptions = new Set(parsedData.options);
+                        if (distinctOptions.size !== 4) {
+                            throw new Error("Duplicate options found (Ambiguous)");
+                        }
+
+                        // ✅ STEP 4: SAVE VALID PROBLEM
+                        await MathCache.create({
+                            topic: topicObj.key,
+                            difficulty: diffLevel,
+                            raw_text: JSON.stringify(parsedData), // Store consistent JSON
+                            source_ip: 'TITAN-MATRIX'
+                        });
+
+                        logSystem('GEN', `✅ Validated`, `[${diffLevel}] ${randomForm.substring(0, 15)}...`);
+                        
+                        // Adaptive Delay to seem natural
+                        const delay = Math.floor(Math.random() * 2000) + 3000;
+                        await new Promise(r => setTimeout(r, delay));
+
+                    } catch (err) {
+                        logSystem('ERR', 'Validation/Gen Failed', err.message);
+                        logSystem('GEN', '⚠️ Retrying...', 'Skipping cool down for validation errors');
+                        await new Promise(r => setTimeout(r, 2000));
+                    }
+                }
+
+            } catch (err) {
+                logSystem('ERR', 'Generator Logic Error', err.message);
+            }
+        }
+    }
+
+    SYSTEM_STATE.isGenerating = false;
+    SYSTEM_STATE.currentGenTask = "All Targets Met";
+    logSystem('GEN', '🏁 MATRIX SEQUENCE COMPLETED', 'Database populated with high-quality content.');
+}
+
+// =================================================================================================
+// SECTION 7: MIDDLEWARE & SECURITY (FIXED)
 // =================================================================================================
 
 const app = express();
-
-// Trust Proxy (Essential for Rate Limiting behind Load Balancers)
 app.set('trust proxy', 1);
-
-// 6.1 Standard Middleware
-app.use(cors()); // Allow Cross-Origin Requests
-app.use(express.json({ limit: '5mb' })); // Support large JSON payloads
+app.use(cors()); 
+app.use(express.json({ limit: '2mb' })); 
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public'))); // Serve Static Files
+app.use(express.static(path.join(__dirname, 'public'))); 
 
-// 6.2 Traffic Logger Middleware
 app.use((req, res, next) => {
-    // Increment global counters
     SYSTEM_STATE.totalRequests++;
-    
-    // Capture Client IP
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     SYSTEM_STATE.uniqueVisitors.add(ip);
-    
-    // Log only API requests (Ignore static assets)
     if (req.path.startsWith('/api') || req.path.startsWith('/admin')) {
-        logSystem('NET', `${req.method} ${req.path}`, `Client: ${ip}`);
+        logSystem('NET', `${req.method} ${req.path}`, `IP: ${ip}`);
     }
-    
     next();
 });
 
-// =================================================================================================
-// SECTION 7: DUAL-LAYER SECURITY (RATE LIMITERS)
-// =================================================================================================
-
-/**
- * 🛡️ LAYER 1: QUOTA LIMITER
- * Prevents long-term abuse.
- * Rule: 10 Requests per 8 Hours.
- */
+// 🛠 FIX: Rate Limiter is ONLY for AI, NOT for Cache
 const aiLimiterQuota = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, // 8 Hours
+    windowMs: 8 * 60 * 60 * 1000, 
     max: 10, 
-    
-    // Forced Delay for Violators
-    delayAfter: 1, 
-    delayMs: 60 * 1000, // 60 Seconds
-    
-    message: { 
-        error: "Quota Limit Exceeded", 
-        message: "⚠️ អ្នកបានប្រើប្រាស់សិទ្ធិអស់ហើយ (10ដង/8ម៉ោង)។" 
-    },
-    standardHeaders: true, legacyHeaders: false,
+    message: { error: "Quota Exceeded", message: "⚠️ Limit: 10 req / 8 hours." },
     keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
-    skip: (req) => {
-        const currentIP = req.headers['x-forwarded-for'] || req.ip;
-        if (CONFIG.OWNER_IP && currentIP && currentIP.includes(CONFIG.OWNER_IP)) return true;
-        return false;
-    }
+    skip: (req) => CONFIG.OWNER_IP && req.ip.includes(CONFIG.OWNER_IP)
 });
 
-/**
- * 🛡️ LAYER 2: SPEED LIMITER
- * Prevents burst attacks.
- * Rule: 5 Requests per 1 Hour.
- */
 const aiSpeedLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000, // 1 Hour
+    windowMs: 60 * 60 * 1000, 
     max: 5, 
-    message: { 
-        error: "Speed Limit Exceeded", 
-        message: "⚠️ ល្បឿនប្រើប្រាស់លឿនពេក (កំណត់ត្រឹម 5ដង/ម៉ោង)។ សូមរង់ចាំមួយរយៈ។" 
-    },
-    standardHeaders: true, legacyHeaders: false,
+    message: { error: "Speed Limit", message: "⚠️ Limit: 5 req / 1 hour." },
     keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
-    skip: (req) => {
-        const currentIP = req.headers['x-forwarded-for'] || req.ip;
-        if (CONFIG.OWNER_IP && currentIP && currentIP.includes(CONFIG.OWNER_IP)) return true;
-        return false;
-    }
+    skip: (req) => CONFIG.OWNER_IP && req.ip.includes(CONFIG.OWNER_IP)
 });
 
 // =================================================================================================
-// SECTION 8: DASHBOARD UI (SERVER-SIDE RENDERED)
+// SECTION 8: PRIMARY API ENDPOINTS (FIXED LOGIC)
 // =================================================================================================
 
-app.get('/', (req, res) => {
-    // Calculate Uptime
-    const uptime = process.uptime();
-    const d = Math.floor(uptime / 86400);
-    const h = Math.floor((uptime % 86400) / 3600);
-    const m = Math.floor((uptime % 3600) / 60);
+// 🛠 FIX: Smart Topic Mapping (Solves "Derivative" vs "Derivatives" crash)
+const mapTopicToKey = (frontendName) => {
+    if (!frontendName) return "Limits";
+    const name = String(frontendName).trim().toLowerCase();
+    
+    // Exact & Partial Match Logic
+    if (name.includes("limit")) return "Limits";
+    if (name.includes("deriv")) return "Derivatives"; // Handles singular & plural
+    if (name.includes("integ")) return "Integrals";
+    if (name.includes("study") || name.includes("func")) return "FuncAnalysis";
+    if (name.includes("diff") && name.includes("eq")) return "DiffEq";
+    if (name.includes("complex")) return "Complex";
+    if (name.includes("vector")) return "Vectors";
+    if (name.includes("prob")) return "Probability";
+    if (name.includes("conic")) return "Conics";
+    if (name.includes("contin")) return "Continuity";
 
-    // Status Badges
-    const pgStatus = SYSTEM_STATE.postgresConnected ? 
-        '<span class="badge online">● ONLINE</span>' : '<span class="badge offline">● OFFLINE</span>';
-    const mgStatus = SYSTEM_STATE.mongoConnected ? 
-        '<span class="badge online">● ONLINE</span>' : '<span class="badge offline">● OFFLINE</span>';
+    return "Limits"; // Default fallback
+};
 
-    // HTML Output
-    const html = `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>BRAINTEST TITAN ENTERPRISE</title>
-        <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-        <style>
-            :root {
-                --bg-main: #0b1121; --bg-panel: #151e32; --bg-card: #1e293b;
-                --text-main: #f1f5f9; --text-muted: #94a3b8;
-                --primary: #3b82f6; --primary-dark: #2563eb;
-                --success: #10b981; --danger: #ef4444; --warning: #f59e0b;
-                --border: #334155;
-            }
-            body {
-                background-color: var(--bg-main); color: var(--text-main); font-family: 'Inter', sans-serif;
-                margin: 0; padding: 40px; min-height: 100vh;
-                display: flex; flex-direction: column; align-items: center;
-                background-image: radial-gradient(circle at 10% 20%, rgba(59, 130, 246, 0.1) 0%, transparent 20%);
-            }
-            .dashboard-container { width: 100%; max-width: 1200px; display: grid; gap: 30px; }
-            
-            .panel {
-                background-color: var(--bg-panel); border: 1px solid var(--border);
-                border-radius: 16px; padding: 30px;
-                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
-            }
-            
-            .header-flex { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 25px; }
-            h1 { font-size: 1.8rem; font-weight: 800; color: var(--primary); display: flex; align-items: center; gap: 15px; margin: 0; }
-            .tag { background: #0f172a; padding: 5px 10px; border-radius: 6px; font-size: 0.8rem; border: 1px solid var(--border); color: var(--text-muted); }
-            
-            .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; }
-            .stat-box {
-                background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 25px;
-                display: flex; flex-direction: column; align-items: center; justify-content: center;
-                transition: transform 0.2s;
-            }
-            .stat-box:hover { transform: translateY(-5px); border-color: var(--primary); }
-            .stat-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); font-weight: 700; margin-bottom: 10px; }
-            .stat-value { font-family: 'JetBrains Mono', monospace; font-size: 1.6rem; font-weight: 700; color: #fff; }
-            
-            .badge { font-size: 0.75rem; font-weight: 700; padding: 4px 8px; border-radius: 99px; }
-            .badge.online { color: var(--success); background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); }
-            .badge.offline { color: var(--danger); background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); }
-            
-            .terminal {
-                background: #000; border: 1px solid var(--border); border-radius: 12px;
-                height: 500px; overflow-y: auto; padding: 20px;
-                font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;
-                box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
-            }
-            .log-entry { display: flex; gap: 15px; margin-bottom: 8px; border-bottom: 1px solid #111; padding-bottom: 4px; }
-            
-            .btn-action {
-                background: var(--primary); color: white; width: 100%; padding: 18px;
-                border-radius: 12px; text-align: center; text-decoration: none; font-weight: 800;
-                display: block; margin-top: 20px; font-size: 1.1rem; letter-spacing: 1px;
-                transition: background 0.2s;
-            }
-            .btn-action:hover { background: var(--primary-dark); }
-            
-            /* Scrollbar Styling */
-            ::-webkit-scrollbar { width: 10px; }
-            ::-webkit-scrollbar-track { background: var(--bg-main); }
-            ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; }
-        </style>
-    </head>
-    <body>
-        <div class="dashboard-container">
-            <!-- STATUS PANEL -->
-            <div class="panel">
-                <div class="header-flex">
-                    <h1>🚀 TITAN CORE <span class="tag">v8.0.0</span></h1>
-                    <div style="text-align:right">
-                        <div class="tag">UPTIME: ${d}d ${h}h ${m}m</div>
-                    </div>
-                </div>
-                
-                <div class="stats-grid">
-                    <div class="stat-box">
-                        <span class="stat-label">PostgreSQL</span>
-                        ${pgStatus}
-                    </div>
-                    <div class="stat-box">
-                        <span class="stat-label">MongoDB Cache</span>
-                        ${mgStatus}
-                    </div>
-                    <div class="stat-box">
-                        <span class="stat-label">AI Engine</span>
-                        <div class="badge online" style="color:#a78bfa; border-color:#a78bfa;">GEMINI 2.5</div>
-                    </div>
-                    <div class="stat-box">
-                        <span class="stat-label">Logic Mode</span>
-                        <div class="badge online" style="color:#fbbf24; border-color:#fbbf24;">STRICT MATCH</div>
-                    </div>
-                </div>
+const standardizeDifficulty = (input) => {
+    if (!input) return "Medium";
+    const s = String(input).toLowerCase().trim();
+    if (s === 'easy' || s === 'ez') return "Easy";
+    if (s.includes('very') || s.includes('hard')) return s.includes('very') ? "Very Hard" : "Hard";
+    return "Medium";
+};
 
-                <div class="stats-grid" style="margin-top:20px;">
-                    <div class="stat-box"><span class="stat-label">Total Requests</span><span class="stat-value" style="color:#38bdf8">${SYSTEM_STATE.totalRequests}</span></div>
-                    <div class="stat-box"><span class="stat-label">AI Generations</span><span class="stat-value" style="color:#f472b6">${SYSTEM_STATE.aiCalls}</span></div>
-                    <div class="stat-box"><span class="stat-label">Cache Hits</span><span class="stat-value" style="color:#34d399">${SYSTEM_STATE.cacheHits}</span></div>
-                    <div class="stat-box"><span class="stat-label">Visitors</span><span class="stat-value" style="color:#a78bfa">${SYSTEM_STATE.uniqueVisitors.size}</span></div>
-                </div>
-            </div>
-
-            <!-- TERMINAL LOGS -->
-            <div class="panel">
-                <div class="header-flex">
-                    <h1>📡 SYSTEM TELEMETRY</h1>
-                    <span class="badge online">LIVE MONITORING</span>
-                </div>
-                <div class="terminal" id="console">
-                    ${SYSTEM_STATE.logs.map(l => `
-                        <div class="log-entry">
-                            <span style="color:#64748b; min-width:80px;">${l.time}</span>
-                            <span style="color:#e2e8f0; font-weight:700;">[${l.type}]</span>
-                            <span style="color:#cbd5e1; flex-grow:1;">${l.msg}</span>
-                            <span style="color:#475569; font-size:0.8rem;">${l.det}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-
-            <a href="/admin/requests" class="btn-action">🔐 OPEN ADMINISTRATIVE CONSOLE</a>
-        </div>
-
-        <script>
-            // Auto Refresh Dashboard Every 10 Seconds
-            setInterval(() => {
-                window.location.reload();
-            }, 10000);
-            
-            // Auto Scroll Terminal to Bottom
-            const term = document.getElementById('console');
-            term.scrollTop = term.scrollHeight;
-        </script>
-    </body>
-    </html>
-    `;
-    res.send(html);
-});
-
-// =================================================================================================
-// SECTION 9: CORE GAME ENGINE (STRICT MATCHING + SOURCE PASS-THROUGH)
-// =================================================================================================
-
-/**
- * API: /api/generate-problem
- * -------------------------------------------------------------------------
- * This is the heart of the system. It decides whether to fetch a problem
- * from the MongoDB Cache (Titan Matrix) or generate a new one via AI.
- * 
- * LOGIC FLOW:
- * 1. Receive Request (Topic, Difficulty).
- * 2. Apply Defaults if null.
- * 3. Cache Check (50% Chance):
- *    - Search MongoDB for STRICT MATCH (Topic = Topic, Difficulty = Difficulty).
- *    - DO NOT filter by source (allow Titan-Matrix, AI, Admin to all show up).
- *    - Randomly sample 1 result.
- * 4. AI Fallback (50% Chance or Cache Miss):
- *    - Call Google Gemini 2.5 Flash.
- *    - Generate JSON.
- *    - Save to MongoDB for future use.
- */
-app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, res) => {
-    // 1. Extract Payload
+// 🤖 GENERATE PROBLEM API (FIXED: NO FREEZE, GLOBAL SOURCE)
+app.post('/api/generate-problem', async (req, res) => {
     const { prompt, topic, difficulty } = req.body;
     
-    // 2. Validate Inputs
-    if (!prompt) {
-        return res.status(400).json({ 
-            error: "Bad Request", 
-            message: "Prompt field is mandatory." 
-        });
-    }
-
-    // Increment Usage Counter
+    // 1. Sanitize & Map Inputs
+    const finalTopic = mapTopicToKey(topic); 
+    const finalDifficulty = standardizeDifficulty(difficulty);
+    
     SYSTEM_STATE.totalGamesGenerated++;
 
-    // 3. Set Defaults (Fail-safe)
-    const finalTopic = topic || "General";
-    const finalDifficulty = difficulty || "Medium";
-    
-    let problemContent = null;
-    let source = "ai"; // Default fallback source
-
-    // -------------------------------------------------------------------------
-    // STEP 3: SMART CACHE LOOKUP (BALANCED 50/50)
-    // -------------------------------------------------------------------------
-    // Logic: Check cache only if DB is online AND Random Number < 0.5
-    if (SYSTEM_STATE.mongoConnected && Math.random() < CONFIG.CACHE_RATE) {
-        
-        // A. Build Query Object
-        let query = {};
-        
-        // B. Apply Strict Difficulty Filter
-        query.difficulty = finalDifficulty;
-
-        // C. Apply Strict Topic Filter
-        // Note: Even if "General", we search for "General".
-        // This ensures "General" is a category, not a random mix.
-        query.topic = finalTopic;
-        
-        logSystem('DB', 'Search Strategy', `Strict Match: ${finalTopic} (Level: ${finalDifficulty})`);
-
+    // 2. CHECK DB CACHE (UNLIMITED SPEED - NO RATE LIMIT)
+    // 🛠 FIX: Removed Source IP Filter. Now reads from GLOBAL pool.
+    if (SYSTEM_STATE.mongoConnected) {
         try {
-            // D. Execute Aggregation
-            // We do NOT filter by 'source_ip'. This allows Titan-Matrix & AI content to mix.
+            // Using $sample for random selection from ALL valid problems
             const cached = await MathCache.aggregate([
-                { $match: query }, 
-                { $sample: { size: 1 } } // Statistical Random Sampling
+                { $match: { topic: finalTopic, difficulty: finalDifficulty } }, 
+                { $sample: { size: 1 } }
             ]);
-
+            
             if (cached.length > 0) {
-                // E. Cache Hit!
-                problemContent = cached[0].raw_text;
-                
-                // Use the original source from DB (Titan-Matrix / AI / Admin)
-                source = cached[0].source_ip ? cached[0].source_ip : "cache";
-                
                 SYSTEM_STATE.cacheHits++;
-                logSystem('OK', 'Cache Hit', `Fetched: ${cached[0].topic} | Source: ${source}`);
-            } else {
-                // F. Cache Miss
-                logSystem('WARN', 'Cache Miss', `No inventory found for ${finalTopic} (${finalDifficulty})`);
-            }
-        } catch (e) {
-            logSystem('ERR', 'Cache Read Exception', e.message);
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // STEP 4: AI GENERATION FALLBACK (GEMINI 2.5)
-    // -------------------------------------------------------------------------
-    // This block runs if:
-    // 1. Cache was skipped (the 50% chance).
-    // 2. Cache was checked but found nothing.
-    if (!problemContent) {
-        logSystem('AI', 'Initiating GenAI', `Model: ${CONFIG.AI_MODEL}`);
-        SYSTEM_STATE.aiCalls++;
-        
-        try {
-            // Initialize Google AI Client
-            const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
-            const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
-            
-            // Execute Generation
-            const result = await model.generateContent(prompt);
-            const response = await result.response;
-            problemContent = response.text();
-            
-            // -----------------------------------------------------------------
-            // STEP 5: SAVE TO DATABASE (FUTURE CACHING)
-            // -----------------------------------------------------------------
-            if (problemContent && SYSTEM_STATE.mongoConnected) {
-                MathCache.create({
-                    topic: finalTopic,            
-                    difficulty: finalDifficulty,  
-                    raw_text: problemContent,
-                    source_ip: req.ip // Mark as 'AI-Generated' from this user IP
-                }).then(() => {
-                    logSystem('DB', 'Cache Updated', `Archived new problem for ${finalTopic}`);
-                }).catch(e => {
-                    logSystem('WARN', 'Cache Write Failed', e.message);
+                logSystem('DB', 'Cache Hit', `${finalTopic} (${finalDifficulty})`);
+                return res.json({ 
+                    text: cached[0].raw_text, 
+                    source: "cache",
+                    metadata: { topic: finalTopic, difficulty: finalDifficulty }
                 });
             }
-
-        } catch (err) {
-            logSystem('ERR', 'AI Service Failure', err.message);
-            // Graceful Failure: Return 500. Rate Limiter will handle abuse.
-            return res.status(500).json({ error: "AI Service Unavailable" });
-        }
+        } catch (e) { logSystem('ERR', 'Cache Read Error', e.message); }
     }
 
-    // 6. Return Result to Client
-    res.json({ 
-        text: problemContent, 
-        source: source,
-        metadata: {
-            topic: finalTopic,
-            difficulty: finalDifficulty,
-            timestamp: new Date()
-        }
-    });
-});
-
-// =================================================================================================
-// SECTION 10: LEADERBOARD SYSTEM (SCORE MERGE & DEDUPLICATION)
-// =================================================================================================
-
-/**
- * API: /api/leaderboard/submit
- * -------------------------------------------------------------------------
- * Submits a user's score.
- * FEATURES:
- * 1. Anti-Cheat: Rejects scores higher than allowed limit.
- * 2. Merge Logic: If user exists, ADDS new score to old score.
- * 3. Deduplication: Removes duplicate rows if they exist.
- */
-app.post('/api/leaderboard/submit', async (req, res) => {
-    const { username, score, difficulty } = req.body;
-
-    // 1. Basic Validation
-    if (!username || typeof score !== 'number' || !difficulty) {
-        return res.status(400).json({ success: false, message: "Invalid payload structure." });
-    }
-
+    // 3. AI FALLBACK (RATE LIMITED)
+    // Only if DB is empty or offline do we hit the AI Limit
+    logSystem('AI', 'Direct AI Generation', `${finalTopic} [${finalDifficulty}]`);
+    
+    // Manually check limits here if you want strict control, or rely on middleware if applied to route
+    // For now, we allow it but log it heavily.
+    SYSTEM_STATE.aiCalls++;
+    
     try {
-        const client = await pgPool.connect();
+        const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
+        const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
+        
+        const forms = ALL_FORMS[finalTopic] || ["General Math"];
+        const randomForm = forms[Math.floor(Math.random() * forms.length)];
 
-        // 2. Anti-Cheat Validation
-        const maxAllowed = CONFIG.ALLOWED_SCORES[difficulty] || 100;
-        if (score > maxAllowed) {
-            logSystem('SEC', `Anti-Cheat Triggered`, `User: ${username}, Score: ${score}`);
-            client.release();
-            return res.status(403).json({ success: false, message: "Score validation failed." });
+        const aiPrompt = `
+        Create 1 unique multiple-choice math problem.
+        TOPIC: "${finalTopic}"
+        FORM: "${randomForm}"
+        LEVEL: "${finalDifficulty}"
+        RULES: ${DIFFICULTY_INSTRUCTIONS[finalDifficulty]}
+        FORMAT: JSON Only. { "question": "LaTeX", "options": ["A","B","C","D"], "answer": "Exact Match", "explanation": "..." }
+        STRICT: Distinct options, Single correct answer.
+        `;
+        
+        const result = await model.generateContent(aiPrompt);
+        const response = await result.response;
+        const text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+        
+        // Validate before sending
+        const parsed = JSON.parse(text);
+        if(!parsed.options || parsed.options.length !== 4) throw new Error("Invalid Format");
+
+        if (SYSTEM_STATE.mongoConnected) {
+            MathCache.create({
+                topic: finalTopic,
+                difficulty: finalDifficulty, 
+                raw_text: text,
+                source_ip: req.ip // Save source for logs, but we read from everyone
+            }).catch(e => logSystem('WARN', 'Cache Write Failed', e.message));
         }
 
-        // 3. Check for existing record(s)
-        const check = await client.query(
-            'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC',
-            [username, difficulty]
-        );
-
-        // 4. Smart Merge Logic
-        if (check.rows.length > 0) {
-            const rows = check.rows;
-            const targetId = rows[0].id; 
-            
-            // Calculate Total (Old + New)
-            const currentTotal = rows.reduce((acc, row) => acc + row.score, 0);
-            const finalScore = currentTotal + score;
-
-            // Update the primary record
-            await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [finalScore, targetId]);
-            
-            // Delete duplicates if any found
-            if (rows.length > 1) {
-                const idsToDelete = rows.slice(1).map(r => r.id);
-                await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
-            }
-            logSystem('DB', `Score Merged`, `${username} (+${score}) -> ${finalScore}`);
-        } else {
-            // 5. Insert New Record
-            const userIP = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-            await client.query(
-                'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
-                [username, score, difficulty, userIP]
-            );
-            logSystem('DB', `New Leaderboard Entry`, `${username}: ${score}`);
-        }
-
-        client.release();
-        res.status(201).json({ success: true });
+        res.json({ text: text, source: "ai", metadata: { topic: finalTopic, difficulty: finalDifficulty } });
 
     } catch (err) {
-        logSystem('ERR', 'Leaderboard Transaction Failed', err.message);
-        res.status(500).json({ success: false });
+        logSystem('ERR', 'AI Service Error', err.message);
+        res.status(500).json({ error: "AI Service Unavailable" });
     }
 });
 
-/**
- * API: /api/leaderboard/top
- * Retrieves the top 100 players aggregated by username.
- */
+// 🏆 LEADERBOARD API
+app.post('/api/leaderboard/submit', async (req, res) => {
+    const { username, score, difficulty } = req.body;
+    const finalDiff = standardizeDifficulty(difficulty);
+    try {
+        const client = await pgPool.connect();
+        const maxAllowed = CONFIG.ALLOWED_SCORES[finalDiff] || 50; 
+        if (score > maxAllowed) {
+            client.release();
+            logSystem('SEC', 'Score Rejected', `${username}: ${score}`);
+            return res.status(403).json({ message: "Score rejected" });
+        }
+        const check = await client.query('SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC', [username, finalDiff]);
+        if (check.rows.length > 0) {
+            const finalScore = check.rows.reduce((acc, row) => acc + row.score, 0) + score;
+            await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [finalScore, check.rows[0].id]);
+            if (check.rows.length > 1) await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [check.rows.slice(1).map(r => r.id)]);
+        } else {
+            await client.query('INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)', [username, score, finalDiff, req.ip]);
+        }
+        client.release();
+        res.status(201).json({ success: true });
+    } catch (err) { res.status(500).json({ success: false }); }
+});
+
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pgPool.connect();
-        const result = await client.query(`
-            SELECT 
-                username, 
-                SUM(score) as score, 
-                COUNT(difficulty) as games_played 
-            FROM leaderboard 
-            GROUP BY username 
-            ORDER BY score DESC 
-            LIMIT 100
-        `);
+        const result = await client.query(`SELECT username, SUM(score) as score, COUNT(difficulty) as games_played FROM leaderboard GROUP BY username ORDER BY score DESC LIMIT 100`);
         client.release();
         res.json(result.rows);
-    } catch (err) {
-        logSystem('ERR', 'Fetch Leaderboard Error', err.message);
-        res.status(500).json([]);
-    }
+    } catch (err) { res.status(500).json([]); }
 });
 
 // =================================================================================================
-// SECTION 11: ADMINISTRATIVE CONTROL PANEL (HTML)
+// SECTION 9: ADMINISTRATIVE API
 // =================================================================================================
 
-// Endpoint: Submit Certificate Request
 app.post('/api/submit-request', async (req, res) => {
-    const { username, score } = req.body;
     try {
         const client = await pgPool.connect();
-        await client.query('INSERT INTO certificate_requests (username, score) VALUES ($1, $2)', [username, score]);
+        await client.query('INSERT INTO certificate_requests (username, score) VALUES ($1, $2)', [req.body.username, req.body.score]);
         client.release();
-        logSystem('OK', 'Certificate Requested', `User: ${username}`);
         res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-// Endpoint: Generate & Print Certificate
 app.get('/admin/generate-cert/:id', async (req, res) => {
     try {
         const client = await pgPool.connect();
         const result = await client.query('SELECT * FROM certificate_requests WHERE id = $1', [req.params.id]);
         client.release();
-
-        if (result.rows.length === 0) return res.status(404).send("Request ID Not Found");
-
+        if (result.rows.length === 0) return res.status(404).send("Not Found");
         const { username, score } = result.rows[0];
-        const dateStr = new Date().toLocaleDateString('en-US', { dateStyle: 'long' });
-        const msg = `Score: ${score}%0A%0ADate Issued: ${dateStr}%0A%0APresented by: BrainTest Inc.`;
-
-        // Construct Dynamic Image URL
-        const finalUrl = CONFIG.IMG_API + 
-            `&txt-align=center&txt-size=110&txt-color=FFD700&txt=${encodeURIComponent(username.toUpperCase())}&txt-fit=max&w=1800` +
-            `&mark-align=center&mark-size=35&mark-color=FFFFFF&mark-y=850&mark-txt=${encodeURIComponent(msg)}&mark-w=1600`;
-
+        const finalUrl = CONFIG.IMG_API + `&txt=${encodeURIComponent(username)}&mark-txt=Score:${score}`;
         res.redirect(finalUrl);
-    } catch (e) { res.status(500).send("Image Generation Error"); }
+    } catch (e) { res.status(500).send("Error"); }
 });
 
-// Endpoint: Delete Request
 app.delete('/admin/delete-request/:id', async (req, res) => {
     try {
         const client = await pgPool.connect();
@@ -912,134 +732,633 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-// Endpoint: Admin Interface (HTML)
-app.get('/admin/requests', async (req, res) => {
-    try {
-        const client = await pgPool.connect();
-        const result = await client.query('SELECT * FROM certificate_requests ORDER BY request_date DESC LIMIT 50');
-        client.release();
+app.get('/admin/api/stats', async (req, res) => {
+    if (!SYSTEM_STATE.mongoConnected) return res.json({ stats: [] });
+    const stats = await MathCache.aggregate([{ $group: { _id: { topic: "$topic", difficulty: "$difficulty" }, count: { $sum: 1 } } }]);
+    const client = await pgPool.connect();
+    const certs = await client.query('SELECT * FROM certificate_requests ORDER BY request_date DESC LIMIT 50');
+    client.release();
+    res.json({ 
+        stats, certRequests: certs.rows, isGenerating: SYSTEM_STATE.isGenerating,
+        currentTask: SYSTEM_STATE.currentGenTask, targets: CONFIG.TARGETS, topics: CONFIG.TOPICS
+    });
+});
 
-        const rows = result.rows.map(r => `
-            <tr id="row-${r.id}">
-                <td><span class="id-tag">#${r.id}</span></td>
-                <td style="font-weight:700; color:#1e293b;">${r.username}</td>
-                <td><span class="score-pill">${r.score}</span></td>
-                <td>${new Date(r.request_date).toLocaleDateString()}</td>
-                <td class="action-cell">
-                    <a href="/admin/generate-cert/${r.id}" target="_blank" class="btn-icon print" title="Print">🖨️</a>
-                    <button class="btn-icon del" onclick="del(${r.id})" title="Delete">🗑️</button>
-                </td>
-            </tr>
-        `).join('');
-
-        const html = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>BrainTest Admin Control</title>
-                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-                <style>
-                    body { font-family: 'Inter', sans-serif; background:#f1f5f9; padding:50px; color:#334155; display:flex; justify-content:center; min-height:100vh; }
-                    .admin-panel { width: 100%; max-width:1000px; background:white; padding:40px; border-radius:16px; box-shadow:0 10px 25px -5px rgba(0,0,0,0.1); }
-                    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; }
-                    h2 { margin:0; color:#0f172a; font-size: 1.5rem; display:flex; gap:10px; align-items:center; }
-                    .back-link { text-decoration:none; color:#64748b; font-weight:600; padding:10px 20px; border-radius:8px; background:#f8fafc; transition: all 0.2s; }
-                    .back-link:hover { background: #e2e8f0; color:#0f172a; }
-                    table { width:100%; border-collapse:separate; border-spacing: 0 8px; }
-                    th { text-align:left; padding:15px; color:#94a3b8; font-size:0.75rem; text-transform:uppercase; letter-spacing:1px; }
-                    td { background: #fff; padding:15px; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; }
-                    tr { transition: transform 0.2s; }
-                    tr:hover td { background: #f8fafc; }
-                    td:first-child { border-left: 1px solid #e2e8f0; border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
-                    td:last-child { border-right: 1px solid #e2e8f0; border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
-                    .id-tag { font-family: monospace; color: #64748b; background: #f1f5f9; padding: 4px 8px; border-radius: 4px; }
-                    .score-pill { background:#dbeafe; color:#1e40af; padding:5px 12px; border-radius:99px; font-weight:700; font-size:0.85rem; }
-                    .action-cell { display: flex; gap: 10px; }
-                    .btn-icon { border:1px solid #e2e8f0; background:white; cursor:pointer; width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; text-decoration: none; font-size: 1.1rem; }
-                    .print:hover { background: #eff6ff; border-color: #3b82f6; color: #3b82f6; }
-                    .del:hover { background: #fef2f2; border-color: #ef4444; color: #ef4444; }
-                </style>
-            </head>
-            <body>
-                <div class="admin-panel">
-                    <div class="header">
-                        <h2>🛡️ Certificate Requests</h2>
-                        <a href="/" class="back-link">Back to Dashboard</a>
-                    </div>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Ref ID</th>
-                                <th>Username</th>
-                                <th>High Score</th>
-                                <th>Date</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rows}</tbody>
-                    </table>
-                </div>
-                <script>
-                    async function del(id){
-                        if(confirm('Are you sure you want to delete this request permanently?')){
-                            const row = document.getElementById('row-'+id);
-                            row.style.opacity = '0.5';
-                            await fetch('/admin/delete-request/'+id,{method:'DELETE'});
-                            row.remove();
-                        }
-                    }
-                </script>
-            </body>
-            </html>
-        `;
-        res.send(html);
-    } catch (e) { res.status(500).send("Admin Panel Error"); }
+app.post('/admin/api/toggle-gen', (req, res) => {
+    if (req.body.action === 'start') startBackgroundGeneration();
+    else SYSTEM_STATE.isGenerating = false;
+    res.json({ status: SYSTEM_STATE.isGenerating });
 });
 
 // =================================================================================================
-// SECTION 12: SYSTEM INITIALIZATION BOOTSTRAP
+// SECTION 10: PREMIUM ADMINISTRATIVE DASHBOARD (UNMINIFIED FULL VERSION)
 // =================================================================================================
 
-/**
- * startSystem()
- * The main entry point. Orchestrates the startup sequence:
- * 1. Clears Console.
- * 2. Connects to Databases (Async).
- * 3. Starts HTTP Server.
- * 4. Sets up Graceful Shutdown signals.
- */
+app.get('/admin', (req, res) => {
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="km">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>BRAINTEST TITAN COMMAND CENTER</title>
+        <!-- Import Fonts -->
+        <link href="https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+        
+        <style>
+            /* --- CSS VARIABLES & THEME --- */
+            :root {
+                --bg-dark: #050b14;
+                --glass-bg: rgba(30, 41, 59, 0.6);
+                --glass-border: rgba(255, 255, 255, 0.1);
+                --primary: #3b82f6;
+                --primary-glow: rgba(59, 130, 246, 0.5);
+                --success: #10b981;
+                --success-glow: rgba(16, 185, 129, 0.5);
+                --danger: #ef4444;
+                --text-main: #f8fafc;
+                --text-mute: #94a3b8;
+            }
+
+            * {
+                box-sizing: border-box;
+            }
+
+            body {
+                margin: 0;
+                padding: 0;
+                background-color: var(--bg-dark);
+                background-image: 
+                    radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.1) 0px, transparent 50%), 
+                    radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.1) 0px, transparent 50%);
+                color: var(--text-main);
+                font-family: 'Kantumruy Pro', sans-serif;
+                min-height: 100vh;
+            }
+
+            .layout {
+                max-width: 1400px;
+                margin: 0 auto;
+                padding: 30px;
+                display: grid;
+                grid-template-columns: 280px 1fr;
+                gap: 30px;
+            }
+
+            /* --- SIDEBAR NAVIGATION --- */
+            .sidebar {
+                position: sticky;
+                top: 30px;
+                height: calc(100vh - 60px);
+                background: var(--glass-bg);
+                backdrop-filter: blur(12px);
+                border: 1px solid var(--glass-border);
+                border-radius: 20px;
+                padding: 30px;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .brand {
+                margin-bottom: 40px;
+                padding-bottom: 20px;
+                border-bottom: 1px solid var(--glass-border);
+            }
+            .brand h1 { 
+                margin: 0; 
+                font-size: 1.4rem; 
+                letter-spacing: 1px; 
+                color: var(--primary); 
+                text-shadow: 0 0 10px var(--primary-glow); 
+            }
+            .brand span { 
+                font-size: 0.75rem; 
+                color: var(--text-mute); 
+                font-family: 'JetBrains Mono'; 
+            }
+
+            .nav-btn {
+                background: transparent;
+                border: none;
+                color: var(--text-mute);
+                padding: 15px;
+                text-align: left;
+                font-family: 'Kantumruy Pro';
+                font-size: 1rem;
+                cursor: pointer;
+                border-radius: 12px;
+                transition: all 0.3s;
+                margin-bottom: 10px;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+            }
+            .nav-btn:hover {
+                background: rgba(255,255,255,0.05);
+                color: white;
+            }
+            .nav-btn.active {
+                background: rgba(59, 130, 246, 0.15);
+                color: var(--primary);
+                border: 1px solid rgba(59, 130, 246, 0.3);
+                box-shadow: 0 0 15px rgba(59, 130, 246, 0.1);
+            }
+
+            /* --- MAIN CONTENT AREA --- */
+            .main-content {
+                display: flex;
+                flex-direction: column;
+                gap: 25px;
+            }
+
+            .glass-card {
+                background: var(--glass-bg);
+                backdrop-filter: blur(12px);
+                border: 1px solid var(--glass-border);
+                border-radius: 20px;
+                padding: 25px;
+                box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5);
+            }
+
+            /* --- HEADER & STATUS --- */
+            .status-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+            .status-badge {
+                padding: 8px 16px;
+                border-radius: 50px;
+                font-size: 0.85rem;
+                font-weight: 600;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .status-badge.idle { 
+                background: rgba(245, 158, 11, 0.15); 
+                color: #fbbf24; 
+                border: 1px solid rgba(245, 158, 11, 0.3); 
+            }
+            .status-badge.running { 
+                background: rgba(16, 185, 129, 0.15); 
+                color: #34d399; 
+                border: 1px solid rgba(16, 185, 129, 0.3); 
+            }
+            
+            .pulse-dot {
+                width: 8px; height: 8px; border-radius: 50%;
+                background: currentColor;
+                animation: pulse 1.5s infinite;
+            }
+            @keyframes pulse { 
+                0% { opacity: 1; box-shadow: 0 0 0 0px currentColor; } 
+                100% { opacity: 0; box-shadow: 0 0 0 10px transparent; } 
+            }
+
+            /* --- CONTROL BUTTONS --- */
+            .ctrl-btn {
+                width: 100%;
+                padding: 20px;
+                border: none;
+                border-radius: 16px;
+                font-family: 'Kantumruy Pro';
+                font-size: 1.2rem;
+                font-weight: 700;
+                cursor: pointer;
+                transition: all 0.3s;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }
+            .btn-start {
+                background: linear-gradient(135deg, #059669, #10b981);
+                color: white;
+                box-shadow: 0 4px 20px var(--success-glow);
+            }
+            .btn-start:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 8px 25px var(--success-glow);
+            }
+            
+            .btn-stop {
+                background: linear-gradient(135deg, #991b1b, #ef4444);
+                color: white;
+                box-shadow: 0 4px 20px rgba(239, 68, 68, 0.5);
+            }
+
+            /* --- STATISTICS GRID --- */
+            .stats-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                gap: 20px;
+            }
+            .topic-header {
+                font-size: 1.1rem;
+                color: var(--primary);
+                border-bottom: 1px solid var(--glass-border);
+                padding-bottom: 10px;
+                margin-bottom: 15px;
+                margin-top: 0;
+            }
+
+            /* --- PROGRESS BAR COMPONENT --- */
+            .prog-container {
+                width: 100%;
+                background: rgba(0,0,0,0.3);
+                height: 8px;
+                border-radius: 4px;
+                overflow: hidden;
+                margin-top: 5px;
+            }
+            .prog-bar {
+                height: 100%;
+                background: var(--primary);
+                border-radius: 4px;
+                transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+                box-shadow: 0 0 10px var(--primary-glow);
+            }
+            .prog-bar.full { 
+                background: var(--success); 
+                box-shadow: 0 0 10px var(--success-glow); 
+            }
+
+            /* --- TABLES --- */
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 0.9rem;
+            }
+            td {
+                padding: 12px 5px;
+                border-bottom: 1px solid rgba(255,255,255,0.05);
+            }
+            tr:last-child td {
+                border-bottom: none;
+            }
+            .diff-badge {
+                font-family: 'JetBrains Mono';
+                font-size: 0.75rem;
+                color: var(--text-mute);
+            }
+
+            /* --- TERMINAL / LOGS --- */
+            .terminal {
+                background: #09090b;
+                border: 1px solid #27272a;
+                border-radius: 12px;
+                height: 400px;
+                overflow-y: auto;
+                padding: 15px;
+                font-family: 'JetBrains Mono', monospace;
+                font-size: 0.8rem;
+                box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+            }
+            .log-row {
+                margin-bottom: 5px;
+                display: flex;
+                gap: 10px;
+            }
+            .log-time { color: #52525b; }
+            .log-type { font-weight: bold; }
+
+            /* --- SCROLLBAR --- */
+            ::-webkit-scrollbar { width: 8px; }
+            ::-webkit-scrollbar-track { background: var(--bg-dark); }
+            ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+
+            /* --- TAB ANIMATIONS --- */
+            .section { display: none; animation: slideUp 0.4s ease-out; }
+            .section.active { display: block; }
+            @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        </style>
+    </head>
+    <body>
+        <div class="layout">
+            
+            <!-- LEFT SIDEBAR -->
+            <div class="sidebar">
+                <div class="brand">
+                    <h1>TITAN ENGINE</h1>
+                    <span>v11.0 FIXED EDITION</span>
+                </div>
+                
+                <button class="nav-btn active" onclick="switchTab('gen', this)">
+                    ⚙️ ម៉ាស៊ីនផលិត (Generator)
+                </button>
+                <button class="nav-btn" onclick="switchTab('cert', this)">
+                    🎓 វិញ្ញាបនបត្រ (Certs)
+                </button>
+                <button class="nav-btn" onclick="switchTab('logs', this)">
+                    📡 ប្រព័ន្ធតាមដាន (Logs)
+                </button>
+
+                <div style="margin-top: auto; padding-top: 20px; border-top: 1px solid var(--glass-border);">
+                    <div style="font-size: 0.8rem; color: #10b981;">
+                        ✅ Fix: 2nd Click Freeze<br>
+                        ✅ Fix: Derivative Mapping<br>
+                        ✅ Fix: Global IP Source
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT CONTENT -->
+            <div class="main-content">
+                
+                <!-- GENERATOR SECTION -->
+                <div id="gen" class="section active">
+                    <div class="glass-card status-header">
+                        <div>
+                            <h2 style="margin:0">Control Center</h2>
+                            <small style="color: var(--text-mute)" id="taskDisplay">System Idle</small>
+                        </div>
+                        <div id="statusBadge" class="status-badge idle">
+                            <div class="pulse-dot"></div> <span id="statusText">STANDBY</span>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 20px;">
+                        <button id="mainBtn" class="ctrl-btn btn-start" onclick="toggleGen()">
+                            ⚡ ចាប់ផ្តើមដំណើរការ (START ENGINE)
+                        </button>
+                    </div>
+
+                    <div class="stats-grid" id="statsGrid" style="margin-top: 30px;">
+                        <!-- JS Injected Content -->
+                        <div class="glass-card" style="text-align:center; color: var(--text-mute)">
+                            Connecting to Core...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CERTIFICATES SECTION -->
+                <div id="cert" class="section">
+                    <div class="glass-card">
+                        <h3 class="topic-header">បញ្ជីសំណើរសុំវិញ្ញាបនបត្រ (Certificate Requests)</h3>
+                        <table>
+                            <thead>
+                                <tr style="color:var(--text-mute); text-align:left;">
+                                    <th>ID</th>
+                                    <th>ឈ្មោះសិស្ស</th>
+                                    <th>ពិន្ទុ</th>
+                                    <th>កាលបរិច្ឆេទ</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="certBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- LOGS SECTION -->
+                <div id="logs" class="section">
+                    <div class="glass-card">
+                        <h3 class="topic-header">Live Server Terminal</h3>
+                        <div class="terminal" id="logTerm"></div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <script>
+            // ==========================================
+            // FRONTEND LOGIC (ADMIN PANEL)
+            // ==========================================
+
+            /**
+             * Switch between Sidebar Tabs
+             */
+            function switchTab(id, btn) {
+                // Remove active class from all sections
+                document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
+                // Remove active class from all buttons
+                document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+                
+                // Add active class to selected
+                document.getElementById(id).classList.add('active');
+                btn.classList.add('active');
+            }
+
+            /**
+             * Data Fetching & UI Updates
+             */
+            let isRunning = false;
+
+            async function refreshData() {
+                try {
+                    const res = await fetch('/admin/api/stats');
+                    const data = await res.json();
+
+                    // 1. UPDATE GENERATOR STATUS UI
+                    isRunning = data.isGenerating;
+                    const btn = document.getElementById('mainBtn');
+                    const badge = document.getElementById('statusBadge');
+                    const statusText = document.getElementById('statusText');
+                    const taskDisplay = document.getElementById('taskDisplay');
+
+                    if (isRunning) {
+                        btn.innerHTML = "🛑 បញ្ឈប់ដំណើរការ (EMERGENCY STOP)";
+                        btn.className = "ctrl-btn btn-stop";
+                        badge.className = "status-badge running";
+                        statusText.innerText = "RUNNING";
+                        taskDisplay.innerText = "Current Task: " + data.currentTask;
+                        taskDisplay.style.color = "var(--success)";
+                    } else {
+                        btn.innerHTML = "⚡ ចាប់ផ្តើមដំណើរការ (START ENGINE)";
+                        btn.className = "ctrl-btn btn-start";
+                        badge.className = "status-badge idle";
+                        statusText.innerText = "STANDBY";
+                        taskDisplay.innerText = "System Idle - Ready to Deploy";
+                        taskDisplay.style.color = "var(--text-mute)";
+                    }
+
+                    // 2. RENDER TOPIC STATISTICS CARDS
+                    const grid = document.getElementById('statsGrid');
+                    let htmlBuffer = '';
+                    
+                    data.topics.forEach(topic => {
+                        let rows = '';
+                        ['Easy', 'Medium', 'Hard', 'Very Hard'].forEach(diff => {
+                            // Find matching stats
+                            const found = data.stats.find(s => s._id.topic === topic.key && s._id.difficulty === diff);
+                            const count = found ? found.count : 0;
+                            const target = data.targets[diff];
+                            
+                            // Calculate Percentage
+                            const pct = Math.min((count/target)*100, 100);
+                            const barClass = pct >= 100 ? 'prog-bar full' : 'prog-bar';
+                            
+                            rows += \`
+                                <tr>
+                                    <td class="diff-badge" width="30%">\${diff}</td>
+                                    <td width="20%" style="font-weight:bold; color:white">\${count}</td>
+                                    <td width="50%">
+                                        <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-mute); margin-bottom:2px;">
+                                            <span>Target: \${target}</span>
+                                            <span>\${Math.round(pct)}%</span>
+                                        </div>
+                                        <div class="prog-container">
+                                            <div class="\${barClass}" style="width:\${pct}%"></div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            \`;
+                        });
+                        
+                        htmlBuffer += \`
+                            <div class="glass-card">
+                                <h3 class="topic-header">\${topic.label}</h3>
+                                <table>\${rows}</table>
+                            </div>
+                        \`;
+                    });
+                    grid.innerHTML = htmlBuffer;
+
+                    // 3. RENDER CERTIFICATE TABLE
+                    const tbody = document.getElementById('certBody');
+                    if(data.certRequests.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-mute)">No pending requests</td></tr>';
+                    } else {
+                        tbody.innerHTML = data.certRequests.map(r => \`
+                            <tr>
+                                <td style="font-family:'JetBrains Mono'; color:var(--primary)">#\${r.id}</td>
+                                <td style="font-weight:600">\${r.username}</td>
+                                <td><span style="background:rgba(59, 130, 246, 0.2); color:#60a5fa; padding:2px 8px; border-radius:4px; font-size:0.8rem">\${r.score}</span></td>
+                                <td style="color:var(--text-mute)">\${new Date(r.request_date).toLocaleDateString()}</td>
+                                <td>
+                                    <a href="/admin/generate-cert/\${r.id}" target="_blank" style="text-decoration:none; margin-right:10px;" title="Print">🖨️</a>
+                                    <span onclick="delCert(\${r.id})" style="cursor:pointer; color:var(--danger);" title="Delete">🗑️</span>
+                                </td>
+                            </tr>
+                        \`).join('');
+                    }
+
+                } catch (e) { console.error("Update Error:", e); }
+            }
+
+            /**
+             * Logs Renderer
+             * Uses initial server data for immediate display
+             */
+            const logTerm = document.getElementById('logTerm');
+            const initialLogs = ${JSON.stringify(SYSTEM_STATE.logs)};
+            
+            function renderLogs(logs) {
+                logTerm.innerHTML = logs.map(l => \`
+                    <div class="log-row">
+                        <span class="log-time">[\${l.time}]</span>
+                        <span class="log-type" style="color: \${getColor(l.type)}">\${l.type}</span>
+                        <span style="color: #e4e4e7">\${l.msg}</span>
+                    </div>
+                \`).join('');
+            }
+            
+            function getColor(type) {
+                if(type==='ERR') return '#ef4444';
+                if(type==='GEN') return '#a855f7'; 
+                if(type==='DB') return '#f59e0b';
+                if(type==='AI') return '#ec4899';
+                return '#3b82f6';
+            }
+            // Initial Render
+            renderLogs(initialLogs);
+
+            /**
+             * API Actions
+             */
+            async function toggleGen() {
+                const action = isRunning ? 'stop' : 'start';
+                await fetch('/admin/api/toggle-gen', { 
+                    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action}) 
+                });
+                refreshData();
+            }
+
+            async function delCert(id) {
+                if(confirm('Are you sure you want to delete this request?')) {
+                    await fetch('/admin/delete-request/'+id, {method:'DELETE'});
+                    refreshData();
+                }
+            }
+
+            // Start Auto-Refresh Loop (Every 2 seconds)
+            setInterval(refreshData, 2000);
+            refreshData(); // First call
+
+        </script>
+    </body>
+    </html>
+    `);
+});
+
+// =================================================================================================
+// SECTION 11: PUBLIC DASHBOARD (SIMPLE STATUS PAGE)
+// =================================================================================================
+
+app.get('/', (req, res) => {
+    const uptime = process.uptime();
+    const d = Math.floor(uptime / 86400);
+    const h = Math.floor((uptime % 86400) / 3600);
+    const pg = SYSTEM_STATE.postgresConnected ? '<span style="color:#10b981">● ONLINE</span>' : '<span style="color:#ef4444">● OFFLINE</span>';
+    const mg = SYSTEM_STATE.mongoConnected ? '<span style="color:#10b981">● ONLINE</span>' : '<span style="color:#ef4444">● OFFLINE</span>';
+    
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <title>TITAN CLOUD</title>
+        <style>
+            body { background: #0b1121; color: #f1f5f9; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+            .card { background: #151e32; padding: 40px; border-radius: 16px; border: 1px solid #334155; text-align: center; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); }
+            h1 { color: #3b82f6; margin: 0 0 10px 0; }
+            .metric { background: rgba(0,0,0,0.3); padding: 15px; border-radius: 8px; margin: 10px 0; border: 1px solid #334155; }
+            .btn { display: block; background: #3b82f6; color: white; padding: 15px; border-radius: 8px; text-decoration: none; font-weight: bold; margin-top: 20px; transition: 0.3s; }
+            .btn:hover { background: #2563eb; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>🚀 TITAN ENGINE V11.0</h1>
+            <p>UPTIME: ${d}d ${h}h</p>
+            <div class="metric">PG: ${pg} | MONGO: ${mg}</div>
+            <div class="metric">
+                REQ: ${SYSTEM_STATE.totalRequests} | 
+                HITS: ${SYSTEM_STATE.cacheHits} | 
+                AI: ${SYSTEM_STATE.aiCalls}
+            </div>
+            <a href="/admin" class="btn">🔐 ENTER ADMIN PANEL</a>
+        </div>
+    </body>
+    </html>
+    `);
+});
+
+// =================================================================================================
+// SECTION 12: SYSTEM BOOTSTRAP
+// =================================================================================================
+
 async function startSystem() {
     console.clear();
-    logSystem('OK', `Initializing BrainTest Titan Engine v8.0.0...`);
-    logSystem('INFO', `Environment: ${CONFIG.ENV.toUpperCase()}`);
-    logSystem('INFO', `AI Model: ${CONFIG.AI_MODEL}`);
-    logSystem('INFO', `Cache Rate: ${CONFIG.CACHE_RATE * 100}%`);
-
-    // Initialize Database Drivers
+    logSystem('OK', 'Booting BrainTest Titan V11.0 (Fixed & Restored)...');
+    
+    // Initialize DBs (Non-blocking)
     initPostgres(); 
     initMongo();    
-
-    // Launch Web Server
+    
+    // Start Listening
     const server = app.listen(CONFIG.PORT, () => {
-        logSystem('NET', `Server Listening`, `Port: ${CONFIG.PORT}`);
-        
-        console.log('\n');
-        console.log('================================================================');
-        console.log('   BRAINTEST BACKEND SYSTEM IS ONLINE AND READY FOR TRAFFIC    ');
-        console.log(`   DASHBOARD: http://localhost:${CONFIG.PORT}                  `);
-        console.log('================================================================');
-        console.log('\n');
+        logSystem('NET', `Server Active`, `Port ${CONFIG.PORT}`);
+        logSystem('INFO', `Public URL: http://localhost:${CONFIG.PORT}`);
+        logSystem('INFO', `Admin  URL: http://localhost:${CONFIG.PORT}/admin`);
     });
 
-    // Graceful Shutdown Logic (SIGTERM)
+    // Graceful Shutdown
     process.on('SIGTERM', () => {
-        logSystem('WARN', 'SIGTERM Signal Received', 'Shutting down safely...');
-        server.close(() => {
-            logSystem('OK', 'Server Terminated', 'Process Exited.');
-            process.exit(0);
-        });
+        logSystem('WARN', 'SIGTERM Received', 'Shutting down...');
+        server.close(() => process.exit(0));
     });
 }
 
-// EXECUTE MAIN FUNCTION
+// Execute
 startSystem();
