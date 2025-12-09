@@ -8,7 +8,7 @@
  * 
  * =================================================================================================
  * PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
- * EDITION:           V10.9.1 PLATINUM (HOTFIX: KHMER MAPPING & ANTI-FREEZE)
+ * EDITION:           V10.9.3 PLATINUM (FULL SOURCE - UNMINIFIED)
  * ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE (PG + MONGO)
  * AUTHOR:            BRAINTEST ENGINEERING TEAM
  * DATE:              DECEMBER 2025
@@ -16,12 +16,19 @@
  * STATUS:            PRODUCTION READY
  * =================================================================================================
  * 
- * █ CRITICAL UPDATE LOG (V10.9.1):
- *    1. [FIX] LANGUAGE MAPPING: Added full support for Khmer topic names (e.g., "ដេរីវេ" -> "Derivatives").
- *       This fixes the issue where cached items were ignored because of name mismatch.
- *    2. [STABILITY] ANTI-FREEZE: Added 'maxTimeMS' to MongoDB queries to prevent infinite loading.
- *    3. [MATRIX] FULL GRANULAR FORMS: Retained detailed sub-topic lists for ALL 10 TOPICS.
- *    4. [SECURITY] STRICT ANSWER VALIDATION: Retained strict 1-correct-answer logic.
+ * █ CRITICAL UPDATE LOG (V10.9.3):
+ *    1. [LOGIC] TRAFFIC SPLIT: 
+ *       - 75% of requests attempt to fetch from CACHE first.
+ *       - 25% of requests go directly to AI (to keep content fresh).
+ *    2. [FAILOVER] CASCADE SYSTEM (The "Safety Net"):
+ *       - If Cache (75%) fails -> Fallback to AI.
+ *       - If AI fails -> Force fetch ANY valid problem from Cache.
+ *       - If DB is dead -> Serve Emergency Static Problem.
+ *    3. [LEADERBOARD] SCORE ACCUMULATION:
+ *       - Same user on same difficulty will have their score ADDED, not replaced.
+ *       - Duplicate IDs are automatically cleaned up.
+ *    4. [UI] FULL ADMIN PANEL: 
+ *       - Restored full HTML/CSS/JS for the dashboard.
  * 
  * =================================================================================================
  */
@@ -46,6 +53,7 @@ const rateLimit = require('express-rate-limit');
 
 // -------------------------------------------------------------------------
 // 🧬 THE GRANULAR MATRIX: DETAILED FORMS FOR EVERY TOPIC (10 TOPICS)
+// This list ensures high variety and coverage of all math sub-disciplines.
 // -------------------------------------------------------------------------
 const ALL_FORMS = {
     // --- 1. LIMITS ---
@@ -243,7 +251,6 @@ const CONFIG = {
         "Hard": 30,       
         "Very Hard": 30   
     },
-    // Used for Admin Panel & Generation Loop
     TOPICS: [
         { key: "Limits", label: "លីមីត (Limits)", prompt: "Calculus Limits" },
         { key: "Derivatives", label: "ដេរីវេ (Derivatives)", prompt: "Calculus Derivatives" },
@@ -378,7 +385,7 @@ problemSchema.index({ topic: 1, difficulty: 1 });
 const MathCache = mongoose.model('MathProblemCache', problemSchema);
 
 // =================================================================================================
-// SECTION 6: GENERATOR ENGINE (TITAN V10.9 CORE)
+// SECTION 6: GENERATOR ENGINE (BACKGROUND WORKER - FILLING THE BUCKET)
 // =================================================================================================
 
 async function startBackgroundGeneration() {
@@ -473,7 +480,7 @@ async function startBackgroundGeneration() {
                             topic: topicObj.key,
                             difficulty: diffLevel,
                             raw_text: JSON.stringify(parsedData), // Store consistent JSON
-                            source_ip: 'TITAN-MATRIX'
+                            source_ip: 'TITAN-BG'
                         });
 
                         logSystem('GEN', `✅ Validated`, `[${diffLevel}] ${randomForm.substring(0, 15)}...`);
@@ -541,40 +548,34 @@ const aiSpeedLimiter = rateLimit({
 // SECTION 8: PRIMARY API ENDPOINTS
 // =================================================================================================
 
-// 🛡️ HELPER: KHMER LANGUAGE MAPPING FIXED
-// This function ensures "ដេរីវេ" maps correctly to "Derivatives" in the DB
+// Helper: Map Frontend Names to Backend Keys (FIXED for Khmer Support)
 const mapTopicToKey = (frontendName) => {
     if (!frontendName) return "Limits";
     const name = String(frontendName).trim();
     
-    // Mapping both English and Khmer to Database Keys
     const mapping = {
         // Limits
         "Limit": "Limits", "Limits": "Limits", "លីមីត": "Limits",
-        
         // Derivatives
         "Derivative": "Derivatives", "Derivatives": "Derivatives", "ដេរីវេ": "Derivatives",
-        
         // Integrals
         "Integral": "Integrals", "Integrals": "Integrals", "អាំងតេក្រាល": "Integrals",
-        
+        // Function Analysis
+        "Study of Functions": "FuncAnalysis", "FuncAnalysis": "FuncAnalysis", "សិក្សាអនុគមន៍": "FuncAnalysis",
         // Diff Eq
         "Differential Equation": "DiffEq", "DiffEq": "DiffEq", "សមីការឌីផេរ៉ង់ស្យែល": "DiffEq",
-        
         // Complex
         "Complex Number": "Complex", "Complex": "Complex", "ចំនួនកុំផ្លិច": "Complex",
-        
         // Vectors
         "Vectors in Space": "Vectors", "Vectors": "Vectors", "វ៉ិចទ័រ": "Vectors",
-        
-        // Func Analysis
-        "Study of Functions": "FuncAnalysis", "FuncAnalysis": "FuncAnalysis", "សិក្សាអនុគមន៍": "FuncAnalysis",
-        
-        // Others
-        "Conics": "Conics", "កោនិក": "Conics",
+        // Probability
         "Probability": "Probability", "ប្រូបាប": "Probability",
+        // Conics
+        "Conics": "Conics", "កោនិក": "Conics",
+        // Continuity
         "Continuity": "Continuity", "ភាពជាប់": "Continuity"
     };
+    
     return mapping[name] || name;
 };
 
@@ -586,51 +587,51 @@ const standardizeDifficulty = (input) => {
     return "Medium";
 };
 
-// 🤖 GENERATE PROBLEM API (WITH FREEZE PROTECTION)
+// Emergency Backup (Hardcoded Failsafe)
+const EMERGENCY_PROBLEMS = {
+    "Derivatives": { "question": "\\text{គណនាដេរីវេនៃ } f(x) = x^2 + 2x", "options": ["2x + 2", "2x", "x + 2", "2x - 2"], "answer": "2x + 2", "explanation": "Simple Power Rule." },
+    "Limits": { "question": "\\lim_{x \\to 0} \\frac{\\sin x}{x}", "options": ["1", "0", "\\infty", "-1"], "answer": "1", "explanation": "Standard Limit." }
+};
+
+// 🤖 GENERATE PROBLEM API (LOGIC: 75% CACHE / 25% AI)
 app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, res) => {
     const { prompt, topic, difficulty } = req.body;
-    const finalTopic = mapTopicToKey(topic); // Fixes the Khmer lookup issue
+    const finalTopic = mapTopicToKey(topic); 
     const finalDifficulty = standardizeDifficulty(difficulty);
     
     SYSTEM_STATE.totalGamesGenerated++;
 
-    let useCache = false;
-    let dbCount = 0;
+    // 🎲 LOGIC SPLIT: 75% CACHE | 25% AI
+    // We do NOT rely on "is DB full?". We just roll the dice.
+    // If Cache is chosen (75%) but fails/empty, it automatically falls through to AI.
+    let tryCache = Math.random() < 0.75; 
 
-    if (SYSTEM_STATE.mongoConnected) {
+    // --- PATH 1: TRY CACHE (75%) ---
+    if (tryCache && SYSTEM_STATE.mongoConnected) {
         try {
-            dbCount = await MathCache.countDocuments({ topic: finalTopic, difficulty: finalDifficulty });
-            const target = CONFIG.TARGETS[finalDifficulty] || 30;
-            if (dbCount >= target) {
-                useCache = true; // 100% Cache if target met
-            } else {
-                useCache = Math.random() < 0.25 && dbCount > 0; // 25% Cache if building
-            }
-        } catch (e) { console.error(e); }
-    }
-
-    if (useCache) {
-        try {
-            // FIX: Added maxTimeMS option to prevent hanging if DB is slow
+            // FIX: Added maxTimeMS to prevent freeze
             const cached = await MathCache.aggregate([
                 { $match: { topic: finalTopic, difficulty: finalDifficulty } }, 
                 { $sample: { size: 1 } }
-            ]).option({ maxTimeMS: 2000 }); 
+            ]).option({ maxTimeMS: 1500 }); 
 
             if (cached.length > 0) {
                 SYSTEM_STATE.cacheHits++;
                 return res.json({ 
                     text: cached[0].raw_text, 
-                    source: "cache",
+                    source: "cache_hit_75", 
                     metadata: { topic: finalTopic, difficulty: finalDifficulty }
                 });
             } else {
-                logSystem('WARN', 'Cache Miss', `DB has count, but sample failed for ${finalTopic}`);
+                logSystem('WARN', 'Cache Miss (Empty)', `Falling through to AI for ${finalTopic}`);
             }
-        } catch (e) { logSystem('ERR', 'Cache Read Error', e.message); }
+        } catch (e) { 
+            logSystem('ERR', 'Cache Read Error', e.message); 
+            // Don't stop here, let it fall to AI
+        }
     }
 
-    // Direct AI Fallback (Uses Granular Logic too)
+    // --- PATH 2: AI GENERATION (25% OR FAILOVER) ---
     logSystem('AI', 'Direct AI Generation', `${finalTopic} [${finalDifficulty}]`);
     SYSTEM_STATE.aiCalls++;
     
@@ -665,18 +666,42 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
                 difficulty: finalDifficulty, 
                 raw_text: text,
                 source_ip: req.ip
-            }).catch(e => logSystem('WARN', 'Cache Write Failed', e.message));
+            }).catch(e => {});
         }
 
-        res.json({ text: text, source: "ai", metadata: { topic: finalTopic, difficulty: finalDifficulty } });
+        return res.json({ text: text, source: "ai_live", metadata: { topic: finalTopic, difficulty: finalDifficulty } });
 
     } catch (err) {
-        logSystem('ERR', 'AI Service Error', err.message);
-        res.status(500).json({ error: "AI Service Unavailable" });
+        // --- PATH 3: TOTAL FAILURE SAFETY NET ---
+        // If AI fails (timeout/quota/error), we FORCE fetch from Cache (no random sample, just grab one)
+        logSystem('ERR', 'AI Failed', err.message);
+        
+        if (SYSTEM_STATE.mongoConnected) {
+            try {
+                // FindOne is faster than Aggregate Sample
+                const fallback = await MathCache.findOne({ topic: finalTopic, difficulty: finalDifficulty });
+                if (fallback) {
+                    return res.json({ 
+                        text: fallback.raw_text, 
+                        source: "emergency_cache_fallback", 
+                        metadata: { topic: finalTopic } 
+                    });
+                }
+            } catch (e) {}
+        }
+
+        // --- PATH 4: ULTIMATE BACKUP (STATIC) ---
+        // If DB is also dead or empty
+        const backup = EMERGENCY_PROBLEMS[finalTopic] || EMERGENCY_PROBLEMS["Derivatives"];
+        return res.json({ 
+            text: JSON.stringify(backup), 
+            source: "static_emergency", 
+            metadata: { topic: finalTopic } 
+        });
     }
 });
 
-// 🏆 LEADERBOARD API
+// 🏆 LEADERBOARD API (ACCUMULATION LOGIC)
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
     const finalDiff = standardizeDifficulty(difficulty);
@@ -688,12 +713,23 @@ app.post('/api/leaderboard/submit', async (req, res) => {
             logSystem('SEC', 'Score Rejected', `${username}: ${score}`);
             return res.status(403).json({ message: "Score rejected" });
         }
+
+        // 1. Check existing records
         const check = await client.query('SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC', [username, finalDiff]);
+        
         if (check.rows.length > 0) {
+            // 2. Accumulate Score
             const finalScore = check.rows.reduce((acc, row) => acc + row.score, 0) + score;
+            
+            // 3. Update the oldest record
             await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [finalScore, check.rows[0].id]);
-            if (check.rows.length > 1) await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [check.rows.slice(1).map(r => r.id)]);
+            
+            // 4. Delete duplicates if any
+            if (check.rows.length > 1) {
+                await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [check.rows.slice(1).map(r => r.id)]);
+            }
         } else {
+            // 5. Insert New
             await client.query('INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)', [username, score, finalDiff, req.ip]);
         }
         client.release();
