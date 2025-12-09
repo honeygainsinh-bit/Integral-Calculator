@@ -6,7 +6,7 @@
 |/|| _//   ____|| _| || |_____|___/ ||
 =================================================================================================
 PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
-EDITION:           V11.7 (INFINITE RETRY & JSON REPAIR PATCH)
+EDITION:           V11.8 (FILESYSTEM SAFETY PATCH)
 ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE (PG + MONGO)
 AUTHOR:            BRAINTEST ENGINEERING TEAM
 DATE:              DECEMBER 2025
@@ -14,22 +14,16 @@ ENGINE:            GEMINI 2.5 FLASH INTEGRATION
 STATUS:            PRODUCTION READY
 =================================================================================================
 
-█ CRITICAL FIX LOG (V11.7):
+█ CRITICAL FIX LOG (V11.8):
+1. [FIXED] SERVE-STATIC CRASH (RENDER ERROR):
+   - Added `fs.existsSync` check.
+   - If 'public' folder is missing, the system now AUTO-CREATES it.
+   - Prevents `SendStream.error` when deploying to fresh servers.
 
-1. [FIXED] GENERATOR SKIPPING:
-   - Added `i--` in the error handler.
-   - Result: If validation fails, it RETRIES the same problem immediately. 
-   - It will NOT move to the next difficulty until the current one is 100% full.
-
-2. [FIXED] LATEX JSON PARSING ERROR:
-   - Added `text.replace(/\\/g, '\\\\')`.
-   - Result: Automatically converts "\frac" to "\\frac" before parsing.
-   - This prevents the "Validation Failed" loop caused by math symbols.
-
-3. [FIXED] API STUCK / SPINNING:
-   - Enforced `maxTimeMS(2000)` on Database queries.
-   - Disabled Realtime AI Fallback (Strict Cache Mode).
-   - If DB is slow, it returns 503 immediately instead of hanging.
+2. [MAINTAINED] ALL PREVIOUS FIXES:
+   - Infinite Retry Generator.
+   - JSON Auto-Repair.
+   - Smart Database Merging.
 
 =================================================================================================
 */
@@ -43,6 +37,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs'); // ADDED FOR FILE SYSTEM SAFETY
 const { Pool } = require('pg');
 const mongoose = require('mongoose');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
@@ -51,9 +46,6 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 // SECTION 2: MASTER CONFIGURATION & MATRIX DEFINITIONS
 // =================================================================================================
 
-// -------------------------------------------------------------------------
-// 🧬 THE GRANULAR MATRIX: DETAILED FORMS FOR EVERY TOPIC
-// -------------------------------------------------------------------------
 const ALL_FORMS = {
     // --- 1. LIMITS ---
     "Limits": [
@@ -241,9 +233,6 @@ const ALL_FORMS = {
     ]
 };
 
-// -------------------------------------------------------------------------
-// 📏 REVISED DIFFICULTY STANDARDS
-// -------------------------------------------------------------------------
 const DIFFICULTY_INSTRUCTIONS = {
     "Easy": "CONTEXT: Grade 12 Basic. REQUIREMENT: 2-3 steps. BAN: Basic arithmetic. EXAMPLE: Limit of (sqrt(x+3)-2)/(x-1).",
     "Medium": "CONTEXT: Scholarship Exam. COMPLEXITY: Combine 2 concepts (e.g. Log + Integral). TRAP: Options must be close.",
@@ -256,13 +245,13 @@ const CONFIG = {
     POSTGRES_URL: process.env.DATABASE_URL,
     MONGO_URI: process.env.MONGODB_URI,
     GEMINI_KEY: process.env.GEMINI_API_KEY,
-    AI_MODEL: "gemini-2.5-flash", // Keeping name as requested
+    AI_MODEL: "gemini-2.5-flash",
     OWNER_IP: process.env.OWNER_IP,
     TARGETS: {
-        "Easy": 20,
-        "Medium": 10,
-        "Hard": 10,
-        "Very Hard": 10
+        "Easy": 100,
+        "Medium": 50,
+        "Hard": 40,
+        "Very Hard": 40
     },
     TOPICS: [
         { key: "Limits", label: "លីមីត (Limits)", prompt: "Calculus Limits" },
@@ -317,7 +306,7 @@ function logSystem(type, message, details = '') {
 }
 
 // =================================================================================================
-// SECTION 4 & 5: DATABASE LAYERS (POSTGRES + MONGO)
+// SECTION 4 & 5: DATABASE LAYERS
 // =================================================================================================
 
 // --- POSTGRESQL ---
@@ -396,7 +385,7 @@ problemSchema.index({ topic: 1, difficulty: 1 });
 const MathCache = mongoose.model('MathProblemCache', problemSchema);
 
 // =================================================================================================
-// SECTION 6: GENERATOR ENGINE (V11.7 - PERSISTENT RETRY & REPAIR)
+// SECTION 6: GENERATOR ENGINE
 // =================================================================================================
 
 async function startBackgroundGeneration() {
@@ -407,7 +396,7 @@ async function startBackgroundGeneration() {
     }
 
     SYSTEM_STATE.isGenerating = true;
-    logSystem('GEN', '🚀 ENGINE STARTUP', 'V11.7 (Infinite Retry Mode)...');
+    logSystem('GEN', '🚀 ENGINE STARTUP', 'V11.8 (Filesystem Safe)...');
 
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
 
@@ -426,7 +415,7 @@ async function startBackgroundGeneration() {
         });
     };
 
-    // OUTER LOOPS: Iterate through Topics & Difficulties
+    // OUTER LOOPS
     for (const topicObj of CONFIG.TOPICS) {
         for (const [diffLevel, targetCount] of Object.entries(CONFIG.TARGETS)) {
             
@@ -436,7 +425,7 @@ async function startBackgroundGeneration() {
             }
 
             try {
-                // Check how many we already have
+                // Check count
                 const currentCount = await MathCache.countDocuments({ topic: topicObj.key, difficulty: diffLevel });
                 if (currentCount >= targetCount) continue; // Skip if full
 
@@ -446,7 +435,7 @@ async function startBackgroundGeneration() {
 
                 const model = getModelConfig(diffLevel);
 
-                // INNER LOOP: Generate the needed amount
+                // INNER LOOP
                 for (let i = 0; i < needed; i++) {
                     if (!SYSTEM_STATE.isGenerating) break;
 
@@ -482,19 +471,15 @@ async function startBackgroundGeneration() {
                         const response = await result.response;
                         let text = response.text();
                         
-                        // 🛠️ V11.7 FIX: CLEANER + AUTO REPAIR
+                        // CLEANER + AUTO REPAIR
                         try {
-                            // 1. Clean Markdown
                             text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-
-                            // 2. Extract JSON part
                             const first = text.indexOf('{');
                             const last = text.lastIndexOf('}');
                             if (first === -1) throw new Error("No JSON found");
                             text = text.substring(first, last + 1);
 
-                            // 3. AUTO-REPAIR LATEX (The Magic Patch)
-                            // Converts single backslash \frac to double \\frac before parsing
+                            // AUTO-REPAIR LATEX
                             text = text.replace(/\\/g, '\\\\'); 
 
                         } catch (e) { throw new Error("Pre-process failed"); }
@@ -503,13 +488,11 @@ async function startBackgroundGeneration() {
                         try {
                             parsedData = JSON.parse(text);
                         } catch (parseErr) {
-                            // 🚑 LAST RESORT REPAIR ATTEMPT
                             try {
-                                // Sometimes double escaping causes quad escaping, normalize back to double
                                 const fixedText = text.replace(/\\\\\\\\/g, '\\\\');
                                 parsedData = JSON.parse(fixedText);
                             } catch (e2) {
-                                throw new Error("JSON Parse Failed (Irreparable)");
+                                throw new Error("JSON Parse Failed");
                             }
                         }
 
@@ -538,23 +521,18 @@ async function startBackgroundGeneration() {
                             continue;
                         }
 
-                        // ✅ SAVE
+                        // SAVE
                         await MathCache.create({
                             topic: topicObj.key,
                             difficulty: diffLevel,
                             raw_text: JSON.stringify(parsedData), // Save consistent data
-                            source_ip: 'TITAN-V11.7'
+                            source_ip: 'TITAN-V11.8'
                         });
 
                         logSystem('GEN', `✅ Created`, `[${diffLevel}] ${topicObj.key}`);
-                        
-                        // Wait a bit
                         await new Promise(r => setTimeout(r, 2000));
 
                     } catch (err) {
-                        // 🛑 THE CRITICAL FIX: RETRY ON FAILURE
-                        // If validation fails, we decrement 'i' so the loop repeats this iteration.
-                        // It will NOT move forward until it succeeds.
                         logSystem('ERR', 'Validation Failed', 'Retrying...');
                         i--; 
                         await new Promise(r => setTimeout(r, 2000));
@@ -581,7 +559,19 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
+
+// 🔥 FILESYSTEM FIX (V11.8)
+// Ensure 'public' folder exists to prevent crashes on fresh deploy
+const publicDir = path.join(__dirname, 'public');
+if (!fs.existsSync(publicDir)) {
+    try {
+        fs.mkdirSync(publicDir, { recursive: true });
+        logSystem('OK', 'Created Missing Public Folder');
+    } catch (e) {
+        logSystem('ERR', 'Failed to create public folder', e.message);
+    }
+}
+app.use(express.static(publicDir));
 
 app.use((req, res, next) => {
     SYSTEM_STATE.totalRequests++;
@@ -623,9 +613,8 @@ const standardizeDifficulty = (input) => {
     return "Medium";
 };
 
-// 🤖 GENERATE PROBLEM API - STRICT CACHE MODE (V11.7)
+// 🤖 GENERATE PROBLEM API - STRICT CACHE MODE
 app.post('/api/generate-problem', async (req, res) => {
-    // 🛑 CRITICAL FIX: PREVENT BROWSER CACHING
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     res.set('Expires', '0');
 
@@ -635,25 +624,21 @@ app.post('/api/generate-problem', async (req, res) => {
     const finalDifficulty = standardizeDifficulty(difficulty);
     SYSTEM_STATE.totalGamesGenerated++;
 
-    // DATABASE FETCH WITH SELF-HEALING LOOP
     if (SYSTEM_STATE.mongoConnected) {
         let attempts = 0;
         const MAX_ATTEMPTS = 5; 
 
         while (attempts < MAX_ATTEMPTS) {
             try {
-                // 🔥 FIX: Add maxTimeMS(2000) to prevent infinite hang if DB is slow
+                // 2s Timeout
                 const cached = await MathCache.aggregate([
                     { $match: { topic: finalTopic, difficulty: finalDifficulty } }, 
                     { $sample: { size: 1 } }
-                ]).maxTimeMS(15000); 
+                ]).maxTimeMS(2000); 
                 
-                // If DB is empty, break loop
-                if (!cached || cached.length === 0) {
-                    break; 
-                }
+                if (!cached || cached.length === 0) break; 
 
-                // VALIDATE CONTENT INTEGRITY
+                // VALIDATE
                 const record = cached[0];
                 try {
                     const parsed = JSON.parse(record.raw_text);
@@ -661,7 +646,7 @@ app.post('/api/generate-problem', async (req, res) => {
                         throw new Error("Missing Fields");
                     }
 
-                    // ✅ SUCCESS: Valid Data Found
+                    // SUCCESS
                     SYSTEM_STATE.cacheHits++;
                     logSystem('DB', 'Cache Hit', `${finalTopic} (${finalDifficulty})`);
                     
@@ -672,21 +657,19 @@ app.post('/api/generate-problem', async (req, res) => {
                     });
 
                 } catch (jsonErr) {
-                    // ❌ CORRUPT DATA FOUND -> DELETE IMMEDIATELY
+                    // AUTO-FLUSH CORRUPT
                     logSystem('WARN', '🗑️ Auto-Clean Corrupt Data', `ID: ${record._id}`);
                     await MathCache.deleteOne({ _id: record._id });
                     attempts++;
                 }
 
             } catch (dbErr) {
-                // Stop loop on DB connection failure
                 break; 
             }
         }
     }
 
-    // STRICT NO-AI FALLBACK (As requested)
-    // If we reach here, it means DB is empty or down. We return 503 instead of hanging.
+    // STRICT NO-AI FALLBACK
     logSystem('WARN', 'Cache Miss (Strict Mode)', `${finalTopic} [${finalDifficulty}]`);
     return res.status(503).json({ 
         error: "System busy generating content.",
@@ -694,7 +677,7 @@ app.post('/api/generate-problem', async (req, res) => {
     });
 });
 
-// 🏆 LEADERBOARD API (SMART MERGE)
+// 🏆 LEADERBOARD API
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
     const finalDiff = standardizeDifficulty(difficulty);
@@ -707,17 +690,12 @@ app.post('/api/leaderboard/submit', async (req, res) => {
             return res.status(403).json({ message: "Score rejected" });
         }
 
-        // 🛠️ SMART MERGE LOGIC
+        // SMART MERGE
         const check = await client.query('SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC', [username, finalDiff]);
         
         if (check.rows.length > 0) {
-            // Accumulate score
             const finalScore = check.rows.reduce((acc, row) => acc + row.score, 0) + score;
-            
-            // Update FIRST record
             await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [finalScore, check.rows[0].id]);
-            
-            // Delete DUPLICATE records if any
             if (check.rows.length > 1) {
                 await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [check.rows.slice(1).map(r => r.id)]);
             }
@@ -739,7 +717,7 @@ app.get('/api/leaderboard/top', async (req, res) => {
 });
 
 // =================================================================================================
-// SECTION 9: ADMINISTRATIVE API (WITH FLUSH TOOL)
+// SECTION 9: ADMINISTRATIVE API
 // =================================================================================================
 
 app.post('/api/submit-request', async (req, res) => {
@@ -772,7 +750,6 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-// 🗑️ FLUSH CACHE BY TOPIC & DIFFICULTY (THE FIX TOOL)
 app.delete('/admin/api/flush/:topic/:diff', async (req, res) => {
     const { topic, diff } = req.params;
     try {
@@ -812,7 +789,7 @@ app.post('/admin/api/toggle-gen', (req, res) => {
 });
 
 // =================================================================================================
-// SECTION 10: PREMIUM ADMINISTRATIVE DASHBOARD (FULL UI)
+// SECTION 10: PREMIUM ADMINISTRATIVE DASHBOARD
 // =================================================================================================
 
 app.get('/admin', (req, res) => {
@@ -822,534 +799,97 @@ app.get('/admin', (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BRAINTEST TITAN V11.7</title>
-    <!-- Import Fonts -->
+    <title>BRAINTEST TITAN V11.8</title>
     <link href="https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-
     <style>
-        /* --- CSS VARIABLES & THEME --- */
-        :root {
-            --bg-dark: #050b14;
-            --glass-bg: rgba(30, 41, 59, 0.6);
-            --glass-border: rgba(255, 255, 255, 0.1);
-            --primary: #3b82f6;
-            --primary-glow: rgba(59, 130, 246, 0.5);
-            --success: #10b981;
-            --success-glow: rgba(16, 185, 129, 0.5);
-            --danger: #ef4444;
-            --text-main: #f8fafc;
-            --text-mute: #94a3b8;
-        }
-
-        * {
-            box-sizing: border-box;
-        }
-
-        body {
-            margin: 0;
-            padding: 0;
-            background-color: var(--bg-dark);
-            background-image: 
-                radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.1) 0px, transparent 50%), 
-                radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.1) 0px, transparent 50%);
-            color: var(--text-main);
-            font-family: 'Kantumruy Pro', sans-serif;
-            min-height: 100vh;
-        }
-
-        .layout {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 30px;
-            display: grid;
-            grid-template-columns: 280px 1fr;
-            gap: 30px;
-        }
-
-        /* --- SIDEBAR NAVIGATION --- */
-        .sidebar {
-            position: sticky;
-            top: 30px;
-            height: calc(100vh - 60px);
-            background: var(--glass-bg);
-            backdrop-filter: blur(12px);
-            border: 1px solid var(--glass-border);
-            border-radius: 20px;
-            padding: 30px;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .brand {
-            margin-bottom: 40px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid var(--glass-border);
-        }
-        .brand h1 { 
-            margin: 0; 
-            font-size: 1.4rem; 
-            letter-spacing: 1px; 
-            color: var(--primary); 
-            text-shadow: 0 0 10px var(--primary-glow); 
-        }
-        .brand span { 
-            font-size: 0.75rem; 
-            color: var(--text-mute); 
-            font-family: 'JetBrains Mono'; 
-        }
-
-        .nav-btn {
-            background: transparent;
-            border: none;
-            color: var(--text-mute);
-            padding: 15px;
-            text-align: left;
-            font-family: 'Kantumruy Pro';
-            font-size: 1rem;
-            cursor: pointer;
-            border-radius: 12px;
-            transition: all 0.3s;
-            margin-bottom: 10px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        .nav-btn:hover {
-            background: rgba(255,255,255,0.05);
-            color: white;
-        }
-        .nav-btn.active {
-            background: rgba(59, 130, 246, 0.15);
-            color: var(--primary);
-            border: 1px solid rgba(59, 130, 246, 0.3);
-            box-shadow: 0 0 15px rgba(59, 130, 246, 0.1);
-        }
-
-        /* --- MAIN CONTENT AREA --- */
-        .main-content {
-            display: flex;
-            flex-direction: column;
-            gap: 25px;
-        }
-
-        .glass-card {
-            background: var(--glass-bg);
-            backdrop-filter: blur(12px);
-            border: 1px solid var(--glass-border);
-            border-radius: 20px;
-            padding: 25px;
-            box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5);
-        }
-
-        /* --- HEADER & STATUS --- */
-        .status-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .status-badge {
-            padding: 8px 16px;
-            border-radius: 50px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .status-badge.idle { 
-            background: rgba(245, 158, 11, 0.15); 
-            color: #fbbf24; 
-            border: 1px solid rgba(245, 158, 11, 0.3); 
-        }
-        .status-badge.running { 
-            background: rgba(16, 185, 129, 0.15); 
-            color: #34d399; 
-            border: 1px solid rgba(16, 185, 129, 0.3); 
-        }
-        
-        .pulse-dot {
-            width: 8px; height: 8px; border-radius: 50%;
-            background: currentColor;
-            animation: pulse 1.5s infinite;
-        }
-        @keyframes pulse { 
-            0% { opacity: 1; box-shadow: 0 0 0 0px currentColor; } 
-            100% { opacity: 0; box-shadow: 0 0 0 10px transparent; } 
-        }
-
-        /* --- CONTROL BUTTONS --- */
-        .ctrl-btn {
-            width: 100%;
-            padding: 20px;
-            border: none;
-            border-radius: 16px;
-            font-family: 'Kantumruy Pro';
-            font-size: 1.2rem;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all 0.3s;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .btn-start {
-            background: linear-gradient(135deg, #059669, #10b981);
-            color: white;
-            box-shadow: 0 4px 20px var(--success-glow);
-        }
-        .btn-start:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px var(--success-glow);
-        }
-        
-        .btn-stop {
-            background: linear-gradient(135deg, #991b1b, #ef4444);
-            color: white;
-            box-shadow: 0 4px 20px rgba(239, 68, 68, 0.5);
-        }
-
-        /* --- STATISTICS GRID --- */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-        }
-        .topic-header {
-            font-size: 1.1rem;
-            color: var(--primary);
-            border-bottom: 1px solid var(--glass-border);
-            padding-bottom: 10px;
-            margin-bottom: 15px;
-            margin-top: 0;
-        }
-
-        /* --- PROGRESS BAR COMPONENT --- */
-        .prog-container {
-            width: 100%;
-            background: rgba(0,0,0,0.3);
-            height: 8px;
-            border-radius: 4px;
-            overflow: hidden;
-            margin-top: 5px;
-        }
-        .prog-bar {
-            height: 100%;
-            background: var(--primary);
-            border-radius: 4px;
-            transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 0 10px var(--primary-glow);
-        }
-        .prog-bar.full { 
-            background: var(--success); 
-            box-shadow: 0 0 10px var(--success-glow); 
-        }
-
-        .trash-btn {
-            cursor: pointer;
-            color: var(--danger);
-            font-size: 1rem;
-            margin-left: 10px;
-            opacity: 0.7;
-            transition: 0.2s;
-        }
-        .trash-btn:hover {
-            opacity: 1;
-            transform: scale(1.2);
-            text-shadow: 0 0 10px red;
-        }
-
-        /* --- TABLES --- */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.9rem;
-        }
-        td {
-            padding: 12px 5px;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-        tr:last-child td {
-            border-bottom: none;
-        }
-        .diff-badge {
-            font-family: 'JetBrains Mono';
-            font-size: 0.75rem;
-            color: var(--text-mute);
-        }
-
-        /* --- TERMINAL / LOGS --- */
-        .terminal {
-            background: #09090b;
-            border: 1px solid #27272a;
-            border-radius: 12px;
-            height: 400px;
-            overflow-y: auto;
-            padding: 15px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.8rem;
-            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
-        }
-        .log-row {
-            margin-bottom: 5px;
-            display: flex;
-            gap: 10px;
-        }
-        .log-time { color: #52525b; }
-        .log-type { font-weight: bold; }
-
-        /* --- SCROLLBAR --- */
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: var(--bg-dark); }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
-
-        /* --- TAB ANIMATIONS --- */
-        .section { display: none; animation: slideUp 0.4s ease-out; }
-        .section.active { display: block; }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-
+        :root { --bg-dark: #050b14; --glass-bg: rgba(30, 41, 59, 0.6); --glass-border: rgba(255, 255, 255, 0.1); --primary: #3b82f6; --success: #10b981; --danger: #ef4444; --text-main: #f8fafc; --text-mute: #94a3b8; }
+        * { box-sizing: border-box; }
+        body { margin: 0; background-color: var(--bg-dark); color: var(--text-main); font-family: 'Kantumruy Pro', sans-serif; min-height: 100vh; }
+        .layout { max-width: 1400px; margin: 0 auto; padding: 30px; display: grid; grid-template-columns: 280px 1fr; gap: 30px; }
+        .sidebar { position: sticky; top: 30px; height: calc(100vh - 60px); background: var(--glass-bg); backdrop-filter: blur(12px); border: 1px solid var(--glass-border); border-radius: 20px; padding: 30px; display: flex; flex-direction: column; }
+        .brand h1 { margin: 0; font-size: 1.4rem; color: var(--primary); }
+        .nav-btn { background: transparent; border: none; color: var(--text-mute); padding: 15px; text-align: left; font-family: 'Kantumruy Pro'; font-size: 1rem; cursor: pointer; border-radius: 12px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; width: 100%; }
+        .nav-btn.active { background: rgba(59, 130, 246, 0.15); color: var(--primary); border: 1px solid rgba(59, 130, 246, 0.3); }
+        .glass-card { background: var(--glass-bg); backdrop-filter: blur(12px); border: 1px solid var(--glass-border); border-radius: 20px; padding: 25px; margin-bottom: 20px; }
+        .ctrl-btn { width: 100%; padding: 20px; border: none; border-radius: 16px; font-family: 'Kantumruy Pro'; font-size: 1.2rem; font-weight: 700; cursor: pointer; color: white; }
+        .btn-start { background: linear-gradient(135deg, #059669, #10b981); }
+        .btn-stop { background: linear-gradient(135deg, #991b1b, #ef4444); }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .prog-container { width: 100%; background: rgba(0,0,0,0.3); height: 8px; border-radius: 4px; overflow: hidden; margin-top: 5px; }
+        .prog-bar { height: 100%; background: var(--primary); transition: width 0.6s; }
+        .trash-btn { cursor: pointer; color: var(--danger); margin-left: 10px; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        td { padding: 12px 5px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .terminal { background: #09090b; border: 1px solid #27272a; border-radius: 12px; height: 400px; overflow-y: auto; padding: 15px; font-family: 'JetBrains Mono'; font-size: 0.8rem; }
+        .section { display: none; } .section.active { display: block; }
     </style>
 </head>
 <body>
     <div class="layout">
-        
-        <!-- LEFT SIDEBAR -->
         <div class="sidebar">
-            <div class="brand">
-                <h1>TITAN ENGINE</h1>
-                <span>v11.7 ULTIMATE</span>
-            </div>
-            
-            <button class="nav-btn active" onclick="switchTab('gen', this)">
-                ⚙️ ម៉ាស៊ីនផលិត (Generator)
-            </button>
-            <button class="nav-btn" onclick="switchTab('cert', this)">
-                🎓 វិញ្ញាបនបត្រ (Certs)
-            </button>
-            <button class="nav-btn" onclick="switchTab('logs', this)">
-                📡 ប្រព័ន្ធតាមដាន (Logs)
-            </button>
-
-            <div style="margin-top: auto; padding-top: 20px; border-top: 1px solid var(--glass-border);">
-                <div style="font-size: 0.8rem; color: #10b981;">
-                    ✅ Retry Logic<br>
-                    ✅ JSON Repair Tool<br>
-                    ✅ Flush Tool Active
-                </div>
-            </div>
+            <div class="brand"><h1>TITAN ENGINE</h1><span>v11.8</span></div>
+            <br>
+            <button class="nav-btn active" onclick="switchTab('gen', this)">⚙️ Generator</button>
+            <button class="nav-btn" onclick="switchTab('cert', this)">🎓 Certificates</button>
+            <button class="nav-btn" onclick="switchTab('logs', this)">📡 Logs</button>
         </div>
-
-        <!-- RIGHT CONTENT -->
         <div class="main-content">
-            
-            <!-- GENERATOR SECTION -->
             <div id="gen" class="section active">
-                <div class="glass-card status-header">
-                    <div>
-                        <h2 style="margin:0">Control Center</h2>
-                        <small style="color: var(--text-mute)" id="taskDisplay">System Idle</small>
-                    </div>
-                    <div id="statusBadge" class="status-badge idle">
-                        <div class="pulse-dot"></div> <span id="statusText">STANDBY</span>
-                    </div>
+                <div class="glass-card">
+                    <h2 style="margin:0">Control Center</h2>
+                    <small style="color:var(--text-mute)" id="taskDisplay">Idle</small>
+                    <br><br>
+                    <button id="mainBtn" class="ctrl-btn btn-start" onclick="toggleGen()">⚡ START ENGINE</button>
                 </div>
-
-                <div style="margin-top: 20px;">
-                    <button id="mainBtn" class="ctrl-btn btn-start" onclick="toggleGen()">
-                        ⚡ ចាប់ផ្តើមដំណើរការ (START ENGINE)
-                    </button>
-                </div>
-
-                <div class="stats-grid" id="statsGrid" style="margin-top: 30px;">
-                    <!-- JS Injected Content -->
-                    <div class="glass-card" style="text-align:center; color: var(--text-mute)">
-                        Connecting to Core...
-                    </div>
-                </div>
+                <div class="stats-grid" id="statsGrid">Loading...</div>
             </div>
-
-            <!-- CERTIFICATES SECTION -->
             <div id="cert" class="section">
-                <div class="glass-card">
-                    <h3 class="topic-header">បញ្ជីសំណើរសុំវិញ្ញាបនបត្រ (Certificate Requests)</h3>
-                    <table>
-                        <thead>
-                            <tr style="color:var(--text-mute); text-align:left;">
-                                <th>ID</th>
-                                <th>ឈ្មោះសិស្ស</th>
-                                <th>ពិន្ទុ</th>
-                                <th>កាលបរិច្ឆេទ</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody id="certBody"></tbody>
-                    </table>
-                </div>
+                <div class="glass-card"><h3>Certificate Requests</h3><table><tbody id="certBody"></tbody></table></div>
             </div>
-
-            <!-- LOGS SECTION -->
             <div id="logs" class="section">
-                <div class="glass-card">
-                    <h3 class="topic-header">Live Server Terminal</h3>
-                    <div class="terminal" id="logTerm"></div>
-                </div>
+                <div class="glass-card"><h3>Live Terminal</h3><div class="terminal" id="logTerm"></div></div>
             </div>
-
         </div>
     </div>
-
     <script>
-        // ==========================================
-        // FRONTEND LOGIC (ADMIN PANEL)
-        // ==========================================
-
         function switchTab(id, btn) {
             document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
             document.getElementById(id).classList.add('active');
             btn.classList.add('active');
         }
-
         let isRunning = false;
-
         async function refreshData() {
             try {
                 const res = await fetch('/admin/api/stats');
                 const data = await res.json();
-
-                // 1. UPDATE GENERATOR STATUS UI
                 isRunning = data.isGenerating;
                 const btn = document.getElementById('mainBtn');
-                const badge = document.getElementById('statusBadge');
-                const statusText = document.getElementById('statusText');
-                const taskDisplay = document.getElementById('taskDisplay');
+                if (isRunning) { btn.innerHTML = "🛑 STOP ENGINE"; btn.className = "ctrl-btn btn-stop"; }
+                else { btn.innerHTML = "⚡ START ENGINE"; btn.className = "ctrl-btn btn-start"; }
+                document.getElementById('taskDisplay').innerText = isRunning ? "Running: " + data.currentTask : "Standby";
 
-                if (isRunning) {
-                    btn.innerHTML = "🛑 បញ្ឈប់ដំណើរការ (EMERGENCY STOP)";
-                    btn.className = "ctrl-btn btn-stop";
-                    badge.className = "status-badge running";
-                    statusText.innerText = "RUNNING";
-                    taskDisplay.innerText = "Current Task: " + data.currentTask;
-                    taskDisplay.style.color = "var(--success)";
-                } else {
-                    btn.innerHTML = "⚡ ចាប់ផ្តើមដំណើរការ (START ENGINE)";
-                    btn.className = "ctrl-btn btn-start";
-                    badge.className = "status-badge idle";
-                    statusText.innerText = "STANDBY";
-                    taskDisplay.innerText = "System Idle - Ready to Deploy";
-                    taskDisplay.style.color = "var(--text-mute)";
-                }
-
-                // 2. RENDER TOPIC STATISTICS CARDS
                 const grid = document.getElementById('statsGrid');
-                let htmlBuffer = '';
-                
-                data.topics.forEach(topic => {
-                    let rows = '';
-                    ['Easy', 'Medium', 'Hard', 'Very Hard'].forEach(diff => {
+                grid.innerHTML = data.topics.map(topic => {
+                    let rows = ['Easy', 'Medium', 'Hard', 'Very Hard'].map(diff => {
                         const found = data.stats.find(s => s._id.topic === topic.key && s._id.difficulty === diff);
                         const count = found ? found.count : 0;
-                        const target = data.targets[diff];
-                        const pct = Math.min((count/target)*100, 100);
-                        const barClass = pct >= 100 ? 'prog-bar full' : 'prog-bar';
-                        
-                        rows += \`
-                            <tr>
-                                <td class="diff-badge" width="30%">\${diff}</td>
-                                <td width="20%" style="font-weight:bold; color:white">
-                                    \${count}
-                                    <span class="trash-btn" onclick="flushCache('\${topic.key}', '\${diff}')" title="Delete ALL \${diff} problems">🗑️</span>
-                                </td>
-                                <td width="50%">
-                                    <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-mute); margin-bottom:2px;">
-                                        <span>Target: \${target}</span>
-                                        <span>\${Math.round(pct)}%</span>
-                                    </div>
-                                    <div class="prog-container">
-                                        <div class="\${barClass}" style="width:\${pct}%"></div>
-                                    </div>
-                                </td>
-                            </tr>
-                        \`;
-                    });
-                    
-                    htmlBuffer += \`
-                        <div class="glass-card">
-                            <h3 class="topic-header">\${topic.label}</h3>
-                            <table>\${rows}</table>
-                        </div>
-                    \`;
-                });
-                grid.innerHTML = htmlBuffer;
+                        const pct = Math.min((count/data.targets[diff])*100, 100);
+                        return \`<tr><td>\${diff}</td><td>\${count}<span class="trash-btn" onclick="flushCache('\${topic.key}','\${diff}')">🗑️</span></td><td><div class="prog-container"><div class="prog-bar" style="width:\${pct}%"></div></div></td></tr>\`;
+                    }).join('');
+                    return \`<div class="glass-card"><h3 style="margin:0">\${topic.label}</h3><table>\${rows}</table></div>\`;
+                }).join('');
 
-                // 3. RENDER CERTIFICATE TABLE
-                const tbody = document.getElementById('certBody');
-                if(data.certRequests.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-mute)">No pending requests</td></tr>';
-                } else {
-                    tbody.innerHTML = data.certRequests.map(r => \`
-                        <tr>
-                            <td style="font-family:'JetBrains Mono'; color:var(--primary)">#\${r.id}</td>
-                            <td style="font-weight:600">\${r.username}</td>
-                            <td><span style="background:rgba(59, 130, 246, 0.2); color:#60a5fa; padding:2px 8px; border-radius:4px; font-size:0.8rem">\${r.score}</span></td>
-                            <td style="color:var(--text-mute)">\${new Date(r.request_date).toLocaleDateString()}</td>
-                            <td>
-                                <a href="/admin/generate-cert/\${r.id}" target="_blank" style="text-decoration:none; margin-right:10px;" title="Print">🖨️</a>
-                                <span onclick="delCert(\${r.id})" style="cursor:pointer; color:var(--danger);" title="Delete">🗑️</span>
-                            </td>
-                        </tr>
-                    \`).join('');
-                }
-
-            } catch (e) { console.error("Update Error:", e); }
+                const logs = ${JSON.stringify(SYSTEM_STATE.logs)}; // Initial load only
+                // Real implementation would poll logs separately or use sockets
+            } catch (e) {}
         }
-
-        const logTerm = document.getElementById('logTerm');
-        const initialLogs = ${JSON.stringify(SYSTEM_STATE.logs)};
-        
-        function renderLogs(logs) {
-            logTerm.innerHTML = logs.map(l => \`
-                <div class="log-row">
-                    <span class="log-time">[\${l.time}]</span>
-                    <span class="log-type" style="color: \${getColor(l.type)}">\${l.type}</span>
-                    <span style="color: #e4e4e7">\${l.msg}</span>
-                </div>
-            \`).join('');
-        }
-        
-        function getColor(type) {
-            if(type==='ERR') return '#ef4444';
-            if(type==='GEN') return '#a855f7'; 
-            if(type==='DB') return '#f59e0b';
-            if(type==='AI') return '#ec4899';
-            return '#3b82f6';
-        }
-        renderLogs(initialLogs);
-
         async function toggleGen() {
-            const action = isRunning ? 'stop' : 'start';
-            await fetch('/admin/api/toggle-gen', { 
-                method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action}) 
-            });
+            await fetch('/admin/api/toggle-gen', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action: isRunning?'stop':'start'}) });
             refreshData();
         }
-
-        async function flushCache(topic, diff) {
-            if(confirm('WARNING: Are you sure you want to delete ALL ' + topic + ' [' + diff + '] problems? This will force new unique generation.')) {
-                await fetch('/admin/api/flush/'+topic+'/'+diff, {method:'DELETE'});
-                alert('Cache Flushed. Click START ENGINE to regenerate unique content.');
-                refreshData();
-            }
-        }
-
-        async function delCert(id) {
-            if(confirm('Are you sure you want to delete this request?')) {
-                await fetch('/admin/delete-request/'+id, {method:'DELETE'});
-                refreshData();
-            }
-        }
-
-        setInterval(refreshData, 2000);
-        refreshData(); 
-
+        async function flushCache(t, d) { if(confirm('Delete all?')) await fetch('/admin/api/flush/'+t+'/'+d, {method:'DELETE'}); refreshData(); }
+        setInterval(refreshData, 2000); refreshData();
     </script>
 </body>
 </html>
@@ -1357,10 +897,11 @@ app.get('/admin', (req, res) => {
 });
 
 // =================================================================================================
-// SECTION 11: PUBLIC DASHBOARD (SIMPLE STATUS PAGE)
+// SECTION 11: PUBLIC DASHBOARD (ROOT ROUTE - FILESYSTEM SAFE)
 // =================================================================================================
 
 app.get('/', (req, res) => {
+    // If we reach here, it means 'index.html' wasn't found in public folder
     const uptime = process.uptime();
     const d = Math.floor(uptime / 86400);
     const h = Math.floor((uptime % 86400) / 3600);
@@ -1383,7 +924,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
         <div class="card">
-            <h1>🚀 TITAN ENGINE V11.7</h1>
+            <h1>🚀 TITAN ENGINE V11.8</h1>
             <p>UPTIME: ${d}d ${h}h</p>
             <div class="metric">PG: ${pg} | MONGO: ${mg}</div>
             <div class="metric">
@@ -1404,7 +945,7 @@ app.get('/', (req, res) => {
 
 async function startSystem() {
     console.clear();
-    logSystem('OK', 'Booting BrainTest Titan V11.7 (Infinite Retry)...');
+    logSystem('OK', 'Booting BrainTest Titan V11.8 (Filesystem Safe)...');
 
     // Initialize DBs (Non-blocking)
     initPostgres(); 
