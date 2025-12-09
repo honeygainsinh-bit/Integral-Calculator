@@ -257,10 +257,10 @@ const CONFIG = {
     OWNER_IP: process.env.OWNER_IP, 
     CACHE_RATE: 0.25, 
     TARGETS: {
-        "Easy": 100,      
-        "Medium": 50,     
-        "Hard": 30,       
-        "Very Hard": 20   
+        "Easy": 20,      
+        "Medium": 10,     
+        "Hard": 10,       
+        "Very Hard": 10,   
     },
     TOPICS: [
         { key: "Limits", label: "លីមីត (Limits)", prompt: "Calculus Limits" },
