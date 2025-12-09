@@ -428,7 +428,7 @@ function validateProblemIntegrity(jsonString) {
 }
 
 // =================================================================================================
-// SECTION 6: GENERATOR ENGINE (V11.5 SMART CORE)
+// SECTION 6: GENERATOR ENGINE (V11.6 SMART QUOTA MANAGER)
 // =================================================================================================
 
 async function startBackgroundGeneration() {
@@ -439,7 +439,7 @@ async function startBackgroundGeneration() {
     }
 
     SYSTEM_STATE.isGenerating = true;
-    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initialized with Validation Guard & Anti-Duplicate System.');
+    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initialized with Smart Quota Management.');
 
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
     const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
@@ -453,6 +453,7 @@ async function startBackgroundGeneration() {
             }
 
             try {
+                // Check quota before starting loop
                 const currentCount = await MathCache.countDocuments({ topic: topicObj.key, difficulty: diffLevel });
                 if (currentCount >= targetCount) continue;
 
@@ -466,7 +467,6 @@ async function startBackgroundGeneration() {
                     const forms = ALL_FORMS[topicObj.key] || ["General Math Problem"];
                     const randomForm = forms[Math.floor(Math.random() * forms.length)];
 
-                    // 🔥 SMART PROMPT (CONTEXT AWARE)
                     const prompt = `
                     Generate 1 unique multiple-choice math problem.
                     TOPIC: "${topicObj.prompt}"
@@ -474,7 +474,7 @@ async function startBackgroundGeneration() {
                     DIFFICULTY: "${diffLevel}" (${DIFFICULTY_INSTRUCTIONS[diffLevel]})
                     
                     CRITICAL RULES:
-                    1. Use RANDOM constants/numbers every time. Do not repeat standard examples.
+                    1. Use RANDOM constants/numbers every time.
                     2. STRICTLY JSON output. No Markdown.
                     3. LaTeX format for math expressions.
                     4. Options must be numerically distinct.
@@ -493,14 +493,12 @@ async function startBackgroundGeneration() {
                         const response = await result.response;
                         let text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
                         
-                        // 🔍 1. VALIDATION GUARD
                         const validated = validateProblemIntegrity(text);
                         if (!validated) {
                             logSystem('GEN', '⚠️ Invalid Data', 'Bad JSON/Logic discarded.');
-                            continue; // Skip without saving
+                            continue; 
                         }
 
-                        // 🔍 2. SAVE WITH HASH (DUPLICATE PROTECTION)
                         try {
                             await MathCache.create({
                                 topic: topicObj.key,
@@ -509,21 +507,29 @@ async function startBackgroundGeneration() {
                                 content_hash: validated.hash,
                                 source_ip: 'TITAN-MATRIX'
                             });
-                            logSystem('GEN', `✅ Saved`, `[${diffLevel}] Unique hash: ${validated.hash.substring(0,8)}...`);
+                            logSystem('GEN', `✅ Saved`, `[${diffLevel}] Hash: ${validated.hash.substring(0,6)}...`);
                         } catch (dbErr) {
                             if (dbErr.code === 11000) {
-                                logSystem('GEN', '♻️ Duplicate', 'Hash conflict. Skipping.');
-                            } else {
-                                logSystem('ERR', 'DB Write Error', dbErr.message);
+                                logSystem('GEN', '♻️ Duplicate', 'Skipping.');
                             }
                         }
                         
-                        // Cool-down to prevent rate limits
-                        await new Promise(r => setTimeout(r, 3000));
+                        // 🟢 NORMAL DELAY: 4 Seconds (To stay under 15 RPM limit)
+                        await new Promise(r => setTimeout(r, 4000));
 
                     } catch (err) {
-                        logSystem('ERR', 'Gen Logic Error', err.message);
-                        await new Promise(r => setTimeout(r, 2000));
+                        // 🔴 SMART ERROR HANDLING FOR QUOTA
+                        if (err.message.includes('429') || err.message.includes('quota')) {
+                            logSystem('WARN', '⏳ QUOTA HIT', 'Pausing for 60 seconds to cool down...');
+                            SYSTEM_STATE.currentGenTask = "Cooling Down (Quota)...";
+                            // Wait 60 Seconds
+                            await new Promise(r => setTimeout(r, 60000));
+                            logSystem('GEN', '▶️ RESUMING', 'Quota cooldown finished.');
+                            i--; // Retry the same iteration
+                        } else {
+                            logSystem('ERR', 'Gen Logic Error', err.message);
+                            await new Promise(r => setTimeout(r, 2000));
+                        }
                     }
                 }
 
@@ -535,7 +541,7 @@ async function startBackgroundGeneration() {
 
     SYSTEM_STATE.isGenerating = false;
     SYSTEM_STATE.currentGenTask = "All Targets Met";
-    logSystem('GEN', '🏁 SEQUENCE COMPLETED', 'Database populated with unique content.');
+    logSystem('GEN', '🏁 SEQUENCE COMPLETED', 'Database populated.');
 }
 
 // =================================================================================================
