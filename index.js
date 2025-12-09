@@ -514,8 +514,8 @@ async function startBackgroundGeneration() {
                             }
                         }
                         
-                        // 🟢 NORMAL DELAY: 4 Seconds (To stay under 15 RPM limit)
-                        await new Promise(r => setTimeout(r, 4000));
+                        // 🟢 NORMAL DELAY: 10 Seconds (To stay under 15 RPM limit)
+                        await new Promise(r => setTimeout(r, 10000));
 
                     } catch (err) {
                         // 🔴 SMART ERROR HANDLING FOR QUOTA
