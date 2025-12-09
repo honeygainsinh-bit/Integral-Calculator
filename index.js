@@ -290,10 +290,10 @@ const CONFIG = {
     IMG_API: process.env.EXTERNAL_IMAGE_API || "https://fakeimg.pl/800x600/?text=", 
     OWNER_IP: process.env.OWNER_IP, 
     TARGETS: {
-        "Easy": 100,      
-        "Medium": 50,     
-        "Hard": 40,       
-        "Very Hard": 40   
+        "Easy": 50,      
+        "Medium": 20,     
+        "Hard": 20,       
+        "Very Hard": 20   
     },
     TOPICS: [
         { key: "Limits", label: "លីមីត (Limits)", prompt: "Calculus Limits" },
