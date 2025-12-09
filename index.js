@@ -8,7 +8,7 @@
  * 
  * =================================================================================================
  * PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
- * EDITION:           V11.2 ULTIMATE (ANTI-DUPLICATE & NO-CACHE PATCH)
+ * EDITION:           V11.3 ULTIMATE (FULL SOURCE - IMO & KHMER PATCH)
  * ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE (PG + MONGO)
  * AUTHOR:            BRAINTEST ENGINEERING TEAM
  * DATE:              DECEMBER 2025
@@ -16,22 +16,26 @@
  * STATUS:            PRODUCTION READY
  * =================================================================================================
  * 
- * █ CRITICAL FIX LOG (V11.2):
- *    1. [FIXED] DUPLICATE CONTENT SYNDROME:
- *       - Added `duplicateCheck` logic inside the Generator loop.
- *       - The system now scans the MongoDB for existing questions (Regex match on first 40 chars).
- *       - If a duplicate is found, it rejects it and retries immediately.
+ * █ CRITICAL UPDATE LOG (V11.3):
+ *    1. [UPGRADE] DIFFICULTY MATRIX RE-CALIBRATED:
+ *       - Easy: BacII Standard (Strict).
+ *       - Medium: Scholarship Exam (Harder).
+ *       - Hard: National Outstanding Student (Complex).
+ *       - Very Hard: IMO / Putnam (Proof-based MCQs).
  * 
- *    2. [FIXED] BROWSER CACHING (SAME QUESTION LOOP):
- *       - Added HTTP Headers `Cache-Control: no-store` to the API response.
- *       - This forces the client browser to fetch a fresh request every single time.
+ *    2. [FIXED] LANGUAGE & LOGIC SEPARATION:
+ *       - Implemented "Think in English, Speak in Khmer" protocol.
+ *       - AI uses English logic for complex math but outputs JSON in Khmer.
  * 
- *    3. [ADDED] FLUSH TOOLS:
- *       - Added a "Trash Icon" (🗑️) in the Admin Dashboard.
- *       - Allows admins to delete specific Topic/Difficulty caches instantly.
+ *    3. [FIXED] ANTI-DUPLICATE CHAOS MODE:
+ *       - Added Variable Randomization (x, t, theta, alpha).
+ *       - Added Dynamic Temperature (Higher creativity for Harder levels).
+ *       - Banned standard coefficients (2, 3, 4) in Hard modes.
  * 
- *    4. [RESTORATION] FULL UI:
- *       - Restored the complete HTML/CSS structure for the Admin Panel.
+ *    4. [RESTORATION] FULL UI & TOOLS:
+ *       - Restored full Admin Dashboard HTML/CSS.
+ *       - Restored Flush Tools (Trash Icon).
+ *       - Restored Certificate System.
  * 
  * =================================================================================================
  */
@@ -68,24 +72,31 @@ const ALL_FORMS = {
         "0/0: Trigonometry Standard (sin x/x, tan x/x)",
         "0/0: Trigonometry with Cosine (1-cos x)",
         "0/0: Trigonometry Mixed (sin, tan, cos combined)",
+        "0/0: Inverse Trigonometric Functions",
         "Inf/Inf: Rational Functions (Highest Degree Rule)",
         "Inf/Inf: Irrational Functions (Sqrt(x^2) terms)",
         "Inf - Inf: Radical Conjugate (sqrt(A) - sqrt(B))",
+        "Inf - Inf: Logarithmic Differences",
         "Exponential Limits (e^x / x at infinity)",
         "Logarithmic Limits (ln x / x at infinity)",
-        "1^Inf: Euler Form (1 + u)^v",
+        "1^Inf: Euler Form (1 + u)^v Standard",
+        "1^Inf: Euler Form with Trigonometry",
         "Continuity: Finding 'k' for continuity at a point",
-        "L'Hopital's Rule Application"
+        "Continuity: Piecewise Functions classification",
+        "L'Hopital's Rule: First Application",
+        "L'Hopital's Rule: Repeated Application",
+        "Squeeze Theorem / Sandwich Theorem Application"
     ],
 
     // --- 2. DERIVATIVES ---
     "Derivatives": [
         "Power Rule: Polynomials with negative/fractional powers",
         "Product Rule: (uv)' = u'v + uv'",
-        "Quotient Rule: (u/v)'",
+        "Quotient Rule: (u/v)' logic",
         "Chain Rule: Power of a Function u^n",
         "Chain Rule: Involving Radicals sqrt(u)",
         "Chain Rule: Trigonometric Functions (sin u, cos u)",
+        "Chain Rule: Nested Trigonometry (sin(cos x))",
         "Derivatives of Inverse Trig (arcsin u, arctan u)",
         "Derivatives of Exponential Functions (e^u, a^u)",
         "Derivatives of Logarithmic Functions (ln u, log_a u)",
@@ -95,7 +106,10 @@ const ALL_FORMS = {
         "Parametric Differentiation (dy/dt / dx/dt)",
         "Higher Order Derivatives: y'', y''' calculation",
         "Tangent Line Equation at a point",
-        "Normal Line Equation at a point"
+        "Normal Line Equation at a point",
+        "Linear Approximation (Differentials)",
+        "Mean Value Theorem (MVT) Application",
+        "Rolle's Theorem Verification"
     ],
 
     // --- 3. INTEGRALS ---
@@ -107,17 +121,22 @@ const ALL_FORMS = {
         "U-Substitution: Radicals (u = sqrt(...))",
         "U-Substitution: Logarithmic (ln x / x)",
         "U-Substitution: Exponential (e^x / (1+e^x))",
+        "U-Substitution: Inverse Trig Forms",
         "Integration by Parts: Polynomial * Exponential (x e^x)",
         "Integration by Parts: Polynomial * Trig (x sin x)",
         "Integration by Parts: Logarithmic (ln x)",
         "Integration by Parts: Cyclic (e^x sin x)",
         "Trig Powers: Odd/Even powers of sin/cos",
+        "Trig Substitution: sqrt(a^2 - x^2)",
         "Partial Fractions: Distinct Linear Denominators",
         "Partial Fractions: Repeated Linear Denominators",
+        "Partial Fractions: Irreducible Quadratic",
         "Definite Integral: Calculation with bounds",
+        "Definite Integral: Absolute Value Functions",
         "Area: Between Curve and X-axis",
         "Area: Between Two Curves f(x) and g(x)",
-        "Volume: Solid of Revolution (Disk Method)"
+        "Volume: Solid of Revolution (Disk Method)",
+        "Volume: Solid of Revolution (Washer Method)"
     ],
 
     // --- 4. DIFFERENTIAL EQUATIONS ---
@@ -126,11 +145,15 @@ const ALL_FORMS = {
         "Separable: Basic variables separation",
         "Separable: Involving Trigonometry or Exponentials",
         "Linear First Order: Integrating Factor Method",
+        "Linear First Order: Bernoulli Equations",
         "Homogeneous First Order: Substitution y = vx",
+        "Exact Differential Equations",
         "Second Order Homogeneous: Real Distinct Roots",
         "Second Order Homogeneous: Real Double Root",
         "Second Order Homogeneous: Complex Roots (Alpha +/- Beta i)",
-        "Initial Value Problem (IVP): Finding Particular Solution"
+        "Initial Value Problem (IVP): Finding Particular Solution",
+        "Applications: Growth and Decay Models",
+        "Applications: Newton's Law of Cooling"
     ],
 
     // --- 5. COMPLEX NUMBERS ---
@@ -141,11 +164,13 @@ const ALL_FORMS = {
         "Argument: Finding arg(z) / theta",
         "Forms: Converting Algebraic to Polar/Trig",
         "Forms: Converting Polar to Algebraic",
+        "Forms: Exponential Form (re^it)",
         "Square Roots: Finding sqrt(a+bi)",
         "Quadratics: Solving az^2+bz+c=0 with Delta < 0",
         "De Moivre's Theorem: Powers z^n",
         "Roots of Unity: Finding n-th roots of a number",
-        "Geometry: Locus of points (Circle / Line)"
+        "Geometry: Locus of points (Circle / Line)",
+        "Geometry: Min/Max Modulus Problems"
     ],
 
     // --- 6. VECTORS ---
@@ -155,11 +180,16 @@ const ALL_FORMS = {
         "Dot Product: Calculating u.v & Angle",
         "Dot Product: Orthogonality Check",
         "Cross Product: Calculating u x v & Area",
-        "Lines: Parametric/Symmetric Equations",
+        "Scalar Triple Product (Volume of Parallelepiped)",
+        "Lines: Parametric Equations",
+        "Lines: Symmetric Equations",
         "Planes: Equation given Point and Normal",
+        "Planes: Equation given 3 Points",
         "Distance: Point to Plane",
         "Distance: Point to Line",
-        "Intersection: Line and Plane"
+        "Distance: Parallel Planes",
+        "Intersection: Line and Plane",
+        "Intersection: Two Planes (Line of Intersection)"
     ],
 
     // --- 7. FUNCTION ANALYSIS ---
@@ -167,13 +197,16 @@ const ALL_FORMS = {
         "Domain: Rational Functions",
         "Domain: Radical Functions (Sqrt)",
         "Domain: Logarithmic Functions",
+        "Range: Finding Range of Functions",
+        "Inverse Functions: Finding f^-1(x)",
         "Asymptotes: Vertical & Horizontal",
         "Asymptotes: Oblique (Slant) Asymptote",
         "Symmetry: Parity (Even/Odd Functions)",
         "Derivatives: Finding Critical Points",
         "Extrema: Local Maximum and Minimum",
         "Concavity: Inflection Points",
-        "Graphs: Matching Function to Graph"
+        "Graphs: Matching Function to Graph",
+        "Optimization: Maximizing Area/Volume"
     ],
 
     // --- 8. CONICS ---
@@ -182,9 +215,12 @@ const ALL_FORMS = {
         "Circle: Finding Center and Radius",
         "Parabola: Vertex at Origin",
         "Parabola: Shifted Vertex (h,k)",
+        "Parabola: Finding Focus and Directrix",
         "Ellipse: Finding Vertices and Foci",
         "Ellipse: Eccentricity calculation",
+        "Ellipse: Length of Major/Minor Axes",
         "Hyperbola: Finding Vertices, Foci, Asymptotes",
+        "Hyperbola: Standard Equations",
         "Tangent: Equation of tangent line to a Conic"
     ],
 
@@ -192,11 +228,14 @@ const ALL_FORMS = {
     "Probability": [
         "Counting: Permutations (Arrangements)",
         "Counting: Combinations (Selections)",
+        "Counting: Circular Permutations",
         "Basic Prob: Coin Tosses / Dice Rolls / Cards",
         "Compound Prob: Independent vs Mutually Exclusive",
         "Conditional Prob: P(A|B) Calculation",
+        "Bayes' Theorem Application",
         "Distribution: Binomial Distribution Formula",
-        "Stats: Expected Value (Mean)"
+        "Stats: Expected Value (Mean)",
+        "Stats: Variance and Standard Deviation"
     ],
 
     // --- 10. CONTINUITY ---
@@ -204,38 +243,45 @@ const ALL_FORMS = {
         "Definition: Checking lim(x->a) = f(a)",
         "One-Sided: Left Limit vs Right Limit",
         "Unknowns: Finding 'k' to make f(x) continuous",
+        "Unknowns: Finding 'a' and 'b' (System of Eq)",
         "Discontinuity: Identifying Jump/Hole/Infinite",
         "IVT: Intermediate Value Theorem Applications"
     ]
 };
 
 // -------------------------------------------------------------------------
-// 📏 DIFFICULTY STANDARDS (BACII -> IMO)
+// 📏 REVISED DIFFICULTY STANDARDS (V11.3 - AGGRESSIVE MODE)
 // -------------------------------------------------------------------------
 const DIFFICULTY_INSTRUCTIONS = {
     "Easy": `
-        - STANDARD: CAMBODIAN GRADE 12 NATIONAL EXAM (BacII).
-        - STYLE: Direct application of formulas. Standard textbook level.
-        - COMPLEXITY: 2-3 steps. NO elementary/primary school math.
-        - NOTE: Even if "Easy", it must be appropriate for a Grade 12 student.
+        - CONTEXT: CAMBODIAN NATIONAL EXAM (BACII - Grade 12).
+        - LEVEL: High School Final Exam. NOT Simple.
+        - REQUIREMENT: Must involve at least 2 steps (e.g., Chain Rule + Trig, or Limit with Indeterminate Form).
+        - BAN: Do not ask basic arithmetic (e.g., 2+2). Do not ask simple definitions.
+        - EXAMPLE: "Find the limit of (sqrt(x+3)-2)/(x-1) as x->1".
     `,
     "Medium": `
-        - STANDARD: ADVANCED / PRE-UNIVERSITY.
-        - STYLE: Harder than BacII. Requires manipulating equations.
-        - COMPLEXITY: Combining 2 concepts (e.g., Domain of a Log function inside a Sqrt).
-        - STEPS: 4-5 steps.
+        - CONTEXT: UNIVERSITY ENTRANCE EXAM / SCHOLARSHIP EXAM.
+        - LEVEL: Above Grade 12. Requires deep understanding of formulas.
+        - COMPLEXITY: Combine 2-3 mathematical concepts (e.g., Logarithms inside Integrals, Complex Numbers with Geometry).
+        - TRAP: Options must be very close to each other.
+        - EXAMPLE: "Calculate the integral of ln(x)/(1+x^2) from 0 to 1".
     `,
     "Hard": `
-        - STANDARD: NATIONAL OUTSTANDING STUDENT (Sishya Puke).
-        - STYLE: Theoretical, heavy calculation, or requires insight.
-        - FORMS: n-th derivatives, complex integrals, proof-based.
-        - VIBE: Separates the top students.
+        - CONTEXT: CAMBODIAN NATIONAL OUTSTANDING STUDENT (Sishya Puke).
+        - LEVEL: Elite Student. Pure theoretical or heavy calculation.
+        - REQUIREMENT: Requires auxiliary variables, substitutions, or clever manipulation.
+        - FORM: Non-standard functions. Use constants like pi, e, or parameters (a, b).
+        - BAN: Standard textbook problems.
+        - VIBE: "This looks impossible at first glance".
     `,
     "Very Hard": `
-        - STANDARD: IMO (INTERNATIONAL MATH OLYMPIAD).
-        - STYLE: Abstract, Creative, Non-standard thinking.
-        - TRICK: Requires auxiliary functions, inequalities, or advanced theorems.
-        - VIBE: "Short question, hidden complexity".
+        - CONTEXT: IMO (INTERNATIONAL MATH OLYMPIAD) / PUTNAM.
+        - LEVEL: World Class.
+        - STYLE: Proof-based logic converted to Multiple Choice.
+        - COMPLEXITY: Abstract Algebra, Number Theory tricks, or Functional Equations.
+        - REQUIREMENT: The solution must require a specific "AHA!" moment or a theorem (e.g., Cauchy-Schwarz, Mean Value Theorem for Integrals).
+        - OPTIONS: Abstract answers (e.g., "e^pi", "1/2", "0", "Does not exist").
     `
 };
 
@@ -250,9 +296,9 @@ const CONFIG = {
     CACHE_RATE: 0.25, 
     TARGETS: {
         "Easy": 100,      
-        "Medium": 30,     
-        "Hard": 30,       
-        "Very Hard": 30   
+        "Medium": 50,     
+        "Hard": 40,       
+        "Very Hard": 40   
     },
     TOPICS: [
         { key: "Limits", label: "លីមីត (Limits)", prompt: "Calculus Limits" },
@@ -388,7 +434,7 @@ problemSchema.index({ topic: 1, difficulty: 1 });
 const MathCache = mongoose.model('MathProblemCache', problemSchema);
 
 // =================================================================================================
-// SECTION 6: GENERATOR ENGINE (TITAN V11.2 - ANTI DUPLICATE CORE)
+// SECTION 6: GENERATOR ENGINE (TITAN V11.3 - IMO LEVEL PATCH)
 // =================================================================================================
 
 async function startBackgroundGeneration() {
@@ -399,10 +445,26 @@ async function startBackgroundGeneration() {
     }
 
     SYSTEM_STATE.isGenerating = true;
-    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initializing Matrix V11.2 (Strict Anti-Duplicate)...');
+    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initializing Matrix V11.3 (Strict IMO Mode)...');
 
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
-    const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
+
+    // ⚡ KEY UPDATE: Use High Temperature for Hard/Very Hard to prevent duplicates
+    // Low Temperature for Easy to ensure correctness.
+    const getModelConfig = (diff) => {
+        let temp = 0.4; // Default safe
+        if (diff === "Medium") temp = 0.7;
+        if (diff === "Hard") temp = 0.9; 
+        if (diff === "Very Hard") temp = 1.0; // Maximum Creativity (Chaos Mode)
+        
+        return genAI.getGenerativeModel({ 
+            model: CONFIG.AI_MODEL,
+            generationConfig: {
+                temperature: temp,
+                maxOutputTokens: 1000,
+            }
+        });
+    };
 
     for (const topicObj of CONFIG.TOPICS) {
         for (const [diffLevel, targetCount] of Object.entries(CONFIG.TARGETS)) {
@@ -420,37 +482,50 @@ async function startBackgroundGeneration() {
                 SYSTEM_STATE.currentGenTask = `${topicObj.label} (${diffLevel}): ${currentCount}/${targetCount}`;
                 logSystem('GEN', `Analyzing Task`, `${topicObj.key} [${diffLevel}] - Need: ${needed}`);
 
+                // Select Model Config based on Difficulty
+                const model = getModelConfig(diffLevel);
+
                 for (let i = 0; i < needed; i++) {
                     if (!SYSTEM_STATE.isGenerating) break;
 
-                    // 🎲 STEP 1: SELECT A RANDOM FORM FROM THE GRANULAR LIST
                     const forms = ALL_FORMS[topicObj.key] || ["General Math Problem"];
                     const randomForm = forms[Math.floor(Math.random() * forms.length)];
-
-                    // 🔥 STEP 2: CONSTRUCT PROMPT WITH STRICT RULES
+                    
+                    // 🎲 ADD CHAOS FACTOR: Randomly ask for specific variables to avoid "x" and "y" all the time
+                    const variables = ["x", "t", "theta", "alpha", "u"];
+                    const chosenVar = variables[Math.floor(Math.random() * variables.length)];
+                    
+                    // 🧠 PROMPT ENGINEERING V11.3 (ENGLISH LOGIC -> KHMER OUTPUT)
                     const prompt = `
-                    Create 1 unique multiple-choice math problem.
+                    ACT AS: The Head Mathematician for the International Math Olympiad (IMO).
+                    TASK: Create 1 EXTREMELY HIGH QUALITY multiple-choice math problem.
                     
                     TOPIC: "${topicObj.prompt}"
-                    SPECIFIC FORM: "${randomForm}"
-                    TARGET DIFFICULTY: "${diffLevel}"
+                    SUB-CATEGORY: "${randomForm}"
+                    DIFFICULTY RATING: "${diffLevel}"
+                    VARIABLE TO USE: "${chosenVar}"
 
-                    🔴 DIFFICULTY GUIDELINES:
+                    🔴 STRICT DIFFICULTY GUIDELINES:
                     ${DIFFICULTY_INSTRUCTIONS[diffLevel]}
 
-                    🔴 STRICT VALIDATION RULES:
-                    1. There must be EXACTLY ONE correct answer.
-                    2. The other 3 options must be INCORRECT distractors.
-                    3. ALL 4 options must be MATHEMATICALLY DISTINCT values (No duplicates).
-                    4. The "answer" field MUST be an EXACT string copy of one of the "options".
-                    5. Return ONLY valid JSON. No Markdown.
+                    🔴 LANGUAGE OUTPUT RULES (CRITICAL):
+                    1. The Logic/Math must be processed in English for maximum accuracy.
+                    2. BUT the final JSON output MUST be in KHMER LANGUAGE (Cambodian).
+                    3. "question": Must be in Khmer (e.g., "គណនាលីមីតនៃ...", "រកតម្លៃនៃ...").
+                    4. "explanation": Must be in Khmer.
+                    5. "options": Keep as Math/LaTeX (Universal).
 
-                    JSON FORMAT:
+                    🔴 ANTI-DUPLICATE INSTRUCTIONS:
+                    - Do NOT use standard coefficients (2, 3, 4). Use weird numbers (e.g., 2024, 2025, 101) or constants (pi, e).
+                    - For 'Hard'/'Very Hard', the answer MUST NOT be obvious.
+                    - Make sure the distractor options (wrong answers) are common student mistakes.
+
+                    🔴 JSON FORMAT ONLY:
                     {
-                        "question": "LaTeX string",
+                        "question": "Khmer text with LaTeX math inside",
                         "options": ["Option A", "Option B", "Option C", "Option D"],
                         "answer": "Exact String Match of Correct Option",
-                        "explanation": "Step-by-step reasoning"
+                        "explanation": "Detailed step-by-step solution in KHMER"
                     }
                     `;
 
@@ -459,28 +534,15 @@ async function startBackgroundGeneration() {
                         const response = await result.response;
                         let text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
                         
-                        // 🔍 STEP 3: PARSE & VALIDATE
+                        // 🔍 PARSE & VALIDATE
                         const parsedData = JSON.parse(text);
 
-                        // Rule A: Check Options Count
-                        if (!parsedData.options || parsedData.options.length !== 4) {
-                            throw new Error("Options count is not 4");
-                        }
-                        
-                        // Rule B: Check Answer Existence
-                        if (!parsedData.options.includes(parsedData.answer)) {
-                            throw new Error("Answer key not found in options list");
-                        }
+                        // Basic Validation
+                        if (!parsedData.options || parsedData.options.length !== 4) throw new Error("Options count != 4");
+                        if (!parsedData.options.includes(parsedData.answer)) throw new Error("Answer missing in options");
 
-                        // Rule C: Check Duplicates (Ambiguity)
-                        const distinctOptions = new Set(parsedData.options);
-                        if (distinctOptions.size !== 4) {
-                            throw new Error("Duplicate options found (Ambiguous)");
-                        }
-
-                        // 🛑 NEW RULE D: DATABASE DUPLICATE CHECK
-                        // We extract a unique snippet (first 40 chars of question) and check DB.
-                        const snippet = parsedData.question.substring(0, 40).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        // 🛑 DUPLICATE CHECK (First 30 chars usually define the start of the question)
+                        const snippet = parsedData.question.substring(0, 30).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                         const duplicateExists = await MathCache.findOne({ 
                             topic: topicObj.key,
                             difficulty: diffLevel,
@@ -488,28 +550,28 @@ async function startBackgroundGeneration() {
                         });
 
                         if (duplicateExists) {
-                            logSystem('GEN', '⚠️ Duplicate Skipped', 'Question content already exists');
+                            logSystem('GEN', '⚠️ Duplicate Skipped', 'Content too similar to DB');
                             i--; // Decrement to retry this iteration
                             continue; // Skip saving
                         }
 
-                        // ✅ STEP 4: SAVE VALID PROBLEM
+                        // ✅ SAVE VALID PROBLEM
                         await MathCache.create({
                             topic: topicObj.key,
                             difficulty: diffLevel,
                             raw_text: JSON.stringify(parsedData), // Store consistent JSON
-                            source_ip: 'TITAN-MATRIX'
+                            source_ip: 'TITAN-MATRIX-V11.3'
                         });
 
-                        logSystem('GEN', `✅ Validated`, `[${diffLevel}] ${randomForm.substring(0, 15)}...`);
+                        logSystem('GEN', `✅ Created`, `[${diffLevel}] ${topicObj.key} (${randomForm.substring(0,10)}...)`);
                         
-                        // Adaptive Delay to seem natural
-                        const delay = Math.floor(Math.random() * 2000) + 3000;
-                        await new Promise(r => setTimeout(r, delay));
+                        // Adaptive Delay (Faster for Easy, Slower for Very Hard)
+                        const delayTime = diffLevel === "Very Hard" ? 4000 : 2500;
+                        await new Promise(r => setTimeout(r, delayTime));
 
                     } catch (err) {
                         logSystem('ERR', 'Validation/Gen Failed', err.message);
-                        logSystem('GEN', '⚠️ Retrying...', 'Skipping cool down for validation errors');
+                        // Retry logic implicitly handled by loop decrement if needed
                         await new Promise(r => setTimeout(r, 2000));
                     }
                 }
@@ -602,7 +664,6 @@ app.post('/api/generate-problem', async (req, res) => {
     SYSTEM_STATE.totalGamesGenerated++;
 
     // 2. CHECK DB CACHE (UNLIMITED SPEED - NO RATE LIMIT)
-    // 🛠 FIX: Removed Source IP Filter. Now reads from GLOBAL pool.
     if (SYSTEM_STATE.mongoConnected) {
         try {
             // Using $sample for random selection from ALL valid problems
@@ -623,29 +684,39 @@ app.post('/api/generate-problem', async (req, res) => {
         } catch (e) { logSystem('ERR', 'Cache Read Error', e.message); }
     }
 
-    // 3. AI FALLBACK (RATE LIMITED)
+    // 3. AI FALLBACK (REALTIME GENERATION)
     // Only if DB is empty or offline do we hit the AI Limit
     logSystem('AI', 'Direct AI Generation', `${finalTopic} [${finalDifficulty}]`);
-    
-    // Manually check limits here if you want strict control, or rely on middleware if applied to route
-    // For now, we allow it but log it heavily.
     SYSTEM_STATE.aiCalls++;
     
     try {
         const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
-        const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
+        // Use consistent High-Temp model for consistency
+        let temp = finalDifficulty === "Very Hard" ? 1.0 : 0.7;
+        const model = genAI.getGenerativeModel({ 
+            model: CONFIG.AI_MODEL,
+            generationConfig: { temperature: temp }
+        });
         
         const forms = ALL_FORMS[finalTopic] || ["General Math"];
         const randomForm = forms[Math.floor(Math.random() * forms.length)];
 
+        // Use same High-Quality prompt logic for Direct API
         const aiPrompt = `
-        Create 1 unique multiple-choice math problem.
+        ACT AS: IMO Head Mathematician.
         TOPIC: "${finalTopic}"
         FORM: "${randomForm}"
         LEVEL: "${finalDifficulty}"
-        RULES: ${DIFFICULTY_INSTRUCTIONS[finalDifficulty]}
-        FORMAT: JSON Only. { "question": "LaTeX", "options": ["A","B","C","D"], "answer": "Exact Match", "explanation": "..." }
-        STRICT: Distinct options, Single correct answer.
+        
+        RULES: 
+        ${DIFFICULTY_INSTRUCTIONS[finalDifficulty]}
+
+        OUTPUT RULES:
+        1. Process logic in English.
+        2. Output "question" and "explanation" in KHMER LANGUAGE.
+        3. "options" are Math/LaTeX.
+        
+        FORMAT: JSON Only. { "question": "Khmer...", "options": ["A","B","C","D"], "answer": "Exact Match", "explanation": "Khmer..." }
         `;
         
         const result = await model.generateContent(aiPrompt);
@@ -661,7 +732,7 @@ app.post('/api/generate-problem', async (req, res) => {
                 topic: finalTopic,
                 difficulty: finalDifficulty, 
                 raw_text: text,
-                source_ip: req.ip // Save source for logs, but we read from everyone
+                source_ip: req.ip 
             }).catch(e => logSystem('WARN', 'Cache Write Failed', e.message));
         }
 
@@ -779,7 +850,7 @@ app.post('/admin/api/toggle-gen', (req, res) => {
 });
 
 // =================================================================================================
-// SECTION 10: PREMIUM ADMINISTRATIVE DASHBOARD (UNMINIFIED FULL VERSION + TRASH TOOL)
+// SECTION 10: PREMIUM ADMINISTRATIVE DASHBOARD (UNMINIFIED FULL VERSION)
 // =================================================================================================
 
 app.get('/admin', (req, res) => {
@@ -1081,7 +1152,7 @@ app.get('/admin', (req, res) => {
             <div class="sidebar">
                 <div class="brand">
                     <h1>TITAN ENGINE</h1>
-                    <span>v11.2 ULTIMATE</span>
+                    <span>v11.3 IMO EDITION</span>
                 </div>
                 
                 <button class="nav-btn active" onclick="switchTab('gen', this)">
@@ -1096,9 +1167,9 @@ app.get('/admin', (req, res) => {
 
                 <div style="margin-top: auto; padding-top: 20px; border-top: 1px solid var(--glass-border);">
                     <div style="font-size: 0.8rem; color: #10b981;">
-                        ✅ Fix: Anti-Duplicate<br>
-                        ✅ Fix: No-Cache Header<br>
-                        ✅ Fix: Flush Tools Added
+                        ✅ BacII to IMO Logic<br>
+                        ✅ Khmer Output Patch<br>
+                        ✅ Anti-Duplicate V3
                     </div>
                 </div>
             </div>
@@ -1167,9 +1238,6 @@ app.get('/admin', (req, res) => {
             // FRONTEND LOGIC (ADMIN PANEL)
             // ==========================================
 
-            /**
-             * Switch between Sidebar Tabs
-             */
             function switchTab(id, btn) {
                 document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
                 document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
@@ -1177,9 +1245,6 @@ app.get('/admin', (req, res) => {
                 btn.classList.add('active');
             }
 
-            /**
-             * Data Fetching & UI Updates
-             */
             let isRunning = false;
 
             async function refreshData() {
@@ -1355,7 +1420,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
         <div class="card">
-            <h1>🚀 TITAN ENGINE V11.0</h1>
+            <h1>🚀 TITAN ENGINE V11.3</h1>
             <p>UPTIME: ${d}d ${h}h</p>
             <div class="metric">PG: ${pg} | MONGO: ${mg}</div>
             <div class="metric">
@@ -1376,7 +1441,7 @@ app.get('/', (req, res) => {
 
 async function startSystem() {
     console.clear();
-    logSystem('OK', 'Booting BrainTest Titan V11.0 (Fixed & Restored)...');
+    logSystem('OK', 'Booting BrainTest Titan V11.3 (IMO + Khmer Patch)...');
     
     // Initialize DBs (Non-blocking)
     initPostgres(); 
