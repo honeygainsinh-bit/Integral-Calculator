@@ -512,17 +512,20 @@ async function startBackgroundGeneration() {
     logSystem('GEN', '🏁 MATRIX SEQUENCE COMPLETED', 'Database populated with high-quality content.');
 }
 
+(score > maxAllowed) {
+    
 // =================================================================================================
-// SECTION 7: MIDDLEWARE & SECURITY (FIXED)
+// SECTION 7: MIDDLEWARE & SECURITY (UPGRADED V11.0)
 // =================================================================================================
 
 const app = express();
-app.set('trust proxy', 1);
+app.set('trust proxy', 1); // ចាំបាច់សម្រាប់ Heroku/Vercel/Proxies
 app.use(cors()); 
 app.use(express.json({ limit: '2mb' })); 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public'))); 
 
+// 1. GLOBAL TRACKING (រាប់ចំនួនអ្នកចូលមើល)
 app.use((req, res, next) => {
     SYSTEM_STATE.totalRequests++;
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
@@ -533,45 +536,62 @@ app.use((req, res, next) => {
     next();
 });
 
-// 🛠 FIX: Rate Limiter is ONLY for AI, NOT for Cache
+// 2. 🛡️ GLOBAL GAME LIMITER (ការពារ Server ពីការវាយលុក)
+// អនុញ្ញាតឲ្យស្នើសុំបាន 300 ដង/នាទី (សម្រាប់គ្រប់ករណី ទាំង Cache និង AI)
+const globalGameLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 នាទី
+    max: 300, // 300 Requests
+    message: { 
+        error: "Server Protection", 
+        message: "⚠️ Traffic ខ្ពស់ពេក! សូមរង់ចាំបន្តិច។" 
+    },
+    keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// 3. 💰 AI COST LIMITER (គ្រប់គ្រងការចំណាយលើ Gemini)
+// អនុញ្ញាតឲ្យប្រើ AI តែ 10 ដងប៉ុណ្ណោះ ក្នុង 8 ម៉ោង
 const aiLimiterQuota = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, 
-    max: 10, 
-    message: { error: "Quota Exceeded", message: "⚠️ Limit: 10 req / 8 hours." },
+    windowMs: 8 * 60 * 60 * 1000, // 8 ម៉ោង
+    max: 10, // 10 Requests
+    message: { error: "Quota Exceeded", message: "⚠️ Limit: 10 AI-Gen / 8 hours." },
     keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
-    skip: (req) => CONFIG.OWNER_IP && req.ip.includes(CONFIG.OWNER_IP)
+    skip: (req) => CONFIG.OWNER_IP && req.ip.includes(CONFIG.OWNER_IP) // លើកលែងម្ចាស់
 });
 
-const aiSpeedLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000, 
-    max: 5, 
-    message: { error: "Speed Limit", message: "⚠️ Limit: 5 req / 1 hour." },
-    keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
-    skip: (req) => CONFIG.OWNER_IP && req.ip.includes(CONFIG.OWNER_IP)
-});
+// 🛠️ HELPER: មុខងារសម្រាប់ដំណើរការ Middleware ដោយដៃ (Conditional Middleware)
+// ប្រើសម្រាប់ហៅ aiLimiterQuota តែពេលណាដែលមិនមាន Cache ប៉ុណ្ណោះ
+function runMiddleware(req, res, fn) {
+    return new Promise((resolve, reject) => {
+        fn(req, res, (result) => {
+            if (result instanceof Error) return reject(result);
+            return resolve(result);
+        });
+    });
+}
 
 // =================================================================================================
-// SECTION 8: PRIMARY API ENDPOINTS (FIXED LOGIC)
+// SECTION 8: PRIMARY API ENDPOINTS (FULL LOGIC RESTORED)
 // =================================================================================================
 
-// 🛠 FIX: Smart Topic Mapping (Solves "Derivative" vs "Derivatives" crash)
+// 🛠 SMART TOPIC MAPPING (ការពារ Error "Derivative" vs "Derivatives")
 const mapTopicToKey = (frontendName) => {
     if (!frontendName) return "Limits";
     const name = String(frontendName).trim().toLowerCase();
     
-    // Exact & Partial Match Logic
     if (name.includes("limit")) return "Limits";
-    if (name.includes("deriv")) return "Derivatives"; // Handles singular & plural
+    if (name.includes("deriv") || name.includes("diff")) return "Derivatives"; 
     if (name.includes("integ")) return "Integrals";
     if (name.includes("study") || name.includes("func")) return "FuncAnalysis";
-    if (name.includes("diff") && name.includes("eq")) return "DiffEq";
+    if (name.includes("eq") && name.includes("diff")) return "DiffEq";
     if (name.includes("complex")) return "Complex";
     if (name.includes("vector")) return "Vectors";
     if (name.includes("prob")) return "Probability";
     if (name.includes("conic")) return "Conics";
     if (name.includes("contin")) return "Continuity";
 
-    return "Limits"; // Default fallback
+    return "Limits"; // Default
 };
 
 const standardizeDifficulty = (input) => {
@@ -582,21 +602,21 @@ const standardizeDifficulty = (input) => {
     return "Medium";
 };
 
-// 🤖 GENERATE PROBLEM API (FIXED: NO FREEZE, GLOBAL SOURCE)
-app.post('/api/generate-problem', async (req, res) => {
+// 🤖 MAIN GENERATION ENDPOINT
+// 1. ដាក់ globalGameLimiter ដើម្បីការពារ Server
+app.post('/api/generate-problem', globalGameLimiter, async (req, res) => {
     const { prompt, topic, difficulty } = req.body;
     
-    // 1. Sanitize & Map Inputs
+    // A. Sanitize Inputs
     const finalTopic = mapTopicToKey(topic); 
     const finalDifficulty = standardizeDifficulty(difficulty);
     
     SYSTEM_STATE.totalGamesGenerated++;
 
-    // 2. CHECK DB CACHE (UNLIMITED SPEED - NO RATE LIMIT)
-    // 🛠 FIX: Removed Source IP Filter. Now reads from GLOBAL pool.
+    // B. 🚀 CACHE LAYER (UNLIMITED SPEED)
+    // ព្យាយាមអានពី MongoDB មុនគេ (មិនជាប់ AI Limit ទេ)
     if (SYSTEM_STATE.mongoConnected) {
         try {
-            // Using $sample for random selection from ALL valid problems
             const cached = await MathCache.aggregate([
                 { $match: { topic: finalTopic, difficulty: finalDifficulty } }, 
                 { $sample: { size: 1 } }
@@ -605,6 +625,7 @@ app.post('/api/generate-problem', async (req, res) => {
             if (cached.length > 0) {
                 SYSTEM_STATE.cacheHits++;
                 logSystem('DB', 'Cache Hit', `${finalTopic} (${finalDifficulty})`);
+                // ✅ Return ភ្លាមៗ (Zero Latency & No AI Cost)
                 return res.json({ 
                     text: cached[0].raw_text, 
                     source: "cache",
@@ -614,14 +635,21 @@ app.post('/api/generate-problem', async (req, res) => {
         } catch (e) { logSystem('ERR', 'Cache Read Error', e.message); }
     }
 
-    // 3. AI FALLBACK (RATE LIMITED)
-    // Only if DB is empty or offline do we hit the AI Limit
+    // C. 🤖 AI FALLBACK LAYER (COST CONTROLLED)
+    // បើមកដល់ទីនេះ មានន័យថា Cache អស់ហើយ -> ត្រូវប្រើ AI
     logSystem('AI', 'Direct AI Generation', `${finalTopic} [${finalDifficulty}]`);
-    
-    // Manually check limits here if you want strict control, or rely on middleware if applied to route
-    // For now, we allow it but log it heavily.
     SYSTEM_STATE.aiCalls++;
+
+    // 🔒 អនុវត្ត AI RATE LIMIT នៅត្រង់នេះ (Conditional Check)
+    try {
+        await runMiddleware(req, res, aiLimiterQuota);
+    } catch (limitError) {
+        // បើជាប់ Limit, RateLimit middleware នឹងផ្ញើ Response ដោយស្វ័យប្រវត្តិ
+        // យើងគ្រាន់តែ return ដើម្បីបញ្ឈប់ function
+        return; 
+    }
     
+    // D. ⚙️ GEMINI GENERATION PROCESS
     try {
         const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
         const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
@@ -643,16 +671,17 @@ app.post('/api/generate-problem', async (req, res) => {
         const response = await result.response;
         const text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
         
-        // Validate before sending
+        // Validate JSON
         const parsed = JSON.parse(text);
         if(!parsed.options || parsed.options.length !== 4) throw new Error("Invalid Format");
 
+        // Save to Cache for next user
         if (SYSTEM_STATE.mongoConnected) {
             MathCache.create({
                 topic: finalTopic,
                 difficulty: finalDifficulty, 
                 raw_text: text,
-                source_ip: req.ip // Save source for logs, but we read from everyone
+                source_ip: req.ip 
             }).catch(e => logSystem('WARN', 'Cache Write Failed', e.message));
         }
 
@@ -660,7 +689,8 @@ app.post('/api/generate-problem', async (req, res) => {
 
     } catch (err) {
         logSystem('ERR', 'AI Service Error', err.message);
-        res.status(500).json({ error: "AI Service Unavailable" });
+        // បើ Error ពី AI (មិនមែន Rate Limit) ផ្ញើ 500
+        if (!res.headersSent) res.status(500).json({ error: "AI Service Unavailable" });
     }
 });
 
@@ -668,35 +698,56 @@ app.post('/api/generate-problem', async (req, res) => {
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
     const finalDiff = standardizeDifficulty(difficulty);
+    
+    // Validate Inputs
+    if (!username || !score) return res.status(400).json({ message: "Missing data" });
+
     try {
         const client = await pgPool.connect();
+        
+        // Security Check: Max Score Validation
         const maxAllowed = CONFIG.ALLOWED_SCORES[finalDiff] || 50; 
         if (score > maxAllowed) {
             client.release();
-            logSystem('SEC', 'Score Rejected', `${username}: ${score}`);
-            return res.status(403).json({ message: "Score rejected" });
+            logSystem('SEC', 'Score Rejected', `${username}: ${score} (Max: ${maxAllowed})`);
+            return res.status(403).json({ message: "Score rejected: Too high" });
         }
+
+        // Logic: Update if exists, Insert if new
         const check = await client.query('SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC', [username, finalDiff]);
+        
         if (check.rows.length > 0) {
             const finalScore = check.rows.reduce((acc, row) => acc + row.score, 0) + score;
             await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [finalScore, check.rows[0].id]);
+            // Clean up duplicates if any
             if (check.rows.length > 1) await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [check.rows.slice(1).map(r => r.id)]);
         } else {
             await client.query('INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)', [username, score, finalDiff, req.ip]);
         }
+        
         client.release();
         res.status(201).json({ success: true });
-    } catch (err) { res.status(500).json({ success: false }); }
+    } catch (err) { 
+        console.error(err);
+        res.status(500).json({ success: false }); 
+    }
 });
 
 app.get('/api/leaderboard/top', async (req, res) => {
     try {
         const client = await pgPool.connect();
-        const result = await client.query(`SELECT username, SUM(score) as score, COUNT(difficulty) as games_played FROM leaderboard GROUP BY username ORDER BY score DESC LIMIT 100`);
+        const result = await client.query(`
+            SELECT username, SUM(score) as score, COUNT(difficulty) as games_played 
+            FROM leaderboard 
+            GROUP BY username 
+            ORDER BY score DESC 
+            LIMIT 100
+        `);
         client.release();
         res.json(result.rows);
     } catch (err) { res.status(500).json([]); }
 });
+
 
 // =================================================================================================
 // SECTION 9: ADMINISTRATIVE API
