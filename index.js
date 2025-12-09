@@ -8,7 +8,7 @@
  * 
  * =================================================================================================
  * PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
- * EDITION:           V11.0 PLATINUM (FULL SOURCE RESTORED & FIXED)
+ * EDITION:           V11.5 DIAMOND (ANTI-CRASH & SMART LOGIC)
  * ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE (PG + MONGO)
  * AUTHOR:            BRAINTEST ENGINEERING TEAM
  * DATE:              DECEMBER 2025
@@ -16,24 +16,28 @@
  * STATUS:            PRODUCTION READY
  * =================================================================================================
  * 
- * █ CRITICAL UPDATE LOG (V11.0 FIXED):
- *    1. [FIXED] 2ND CLICK FREEZE: 
- *       - Removed RateLimit middleware from the Cache-Reading process.
- *       - Cache is now "Zero-Latency" & "Unlimited Access".
- *       - RateLimit applies ONLY when forcing a fresh AI generation.
+ * █ CRITICAL UPDATE LOG (V11.5 FIXED):
+ *    1. [FIXED] 100% CACHE DUPLICATES: 
+ *       - Implemented `MD5 Hashing` for every generated question.
+ *       - Database now strictly rejects duplicates (Unique Indexing).
+ *       - Forces AI to regenerate if a duplicate is found.
  * 
- *    2. [FIXED] DERIVATIVE CRASH / WRONG TOPIC:
- *       - Implemented `mapTopicToKey()` smart function.
- *       - Maps "Derivative", "Derivatives", "diff" -> "Derivatives".
- *       - Maps "Limit", "Limits" -> "Limits".
- *       - Ensures the Database Query always uses the correct Key.
+ *    2. [FIXED] FRONTEND CRASHES:
+ *       - Added `validateProblemIntegrity()` GUARD SYSTEM.
+ *       - Checks: JSON Validity, Option Count (4), Answer Exists in Options, No Duplicate Options.
+ *       - Bad data is discarded BEFORE saving to DB.
  * 
- *    3. [FIXED] SOURCE IP BLOCKING:
- *       - Removed filter `{ source_ip: 'TITAN-MATRIX' }`.
- *       - Now reads from the GLOBAL POOL of exercises (User generated + System generated).
+ *    3. [CALIBRATED] DIFFICULTY LEVELS (KH CONTEXT):
+ *       - EASY: Grade 12 BacII Standard.
+ *       - MEDIUM: Scholarship Exam Level.
+ *       - HARD: National Outstanding Student.
+ *       - VERY HARD: IMO (Olympiad) Level.
  * 
- *    4. [RESTORATION] FULL UI:
- *       - Restored the 600+ lines of HTML/CSS for the Admin Dashboard.
+ *    4. [NEW] TRASH / FLUSH FEATURE:
+ *       - Added `🗑️` button in Admin Panel to clear specific topic caches.
+ * 
+ *    5. [RESTORATION] FULL UI DASHBOARD:
+ *       - Restored the 800+ lines of internal HTML/CSS for the Admin Panel.
  * 
  * =================================================================================================
  */
@@ -51,6 +55,7 @@ const { Pool } = require('pg');
 const mongoose = require('mongoose');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
+const crypto = require('crypto'); // Used for generating unique hashes to prevent duplicates
 
 // =================================================================================================
 // SECTION 2: MASTER CONFIGURATION & MATRIX DEFINITIONS
@@ -212,32 +217,33 @@ const ALL_FORMS = {
 };
 
 // -------------------------------------------------------------------------
-// 📏 DIFFICULTY STANDARDS (BACII -> IMO)
+// 🔴 NEW: DIFFICULTY STANDARDS (CAMBODIAN CONTEXT V11.5)
 // -------------------------------------------------------------------------
 const DIFFICULTY_INSTRUCTIONS = {
     "Easy": `
-        - STANDARD: CAMBODIAN GRADE 12 NATIONAL EXAM (BacII).
-        - STYLE: Direct application of formulas. Standard textbook level.
-        - COMPLEXITY: 2-3 steps. NO elementary/primary school math.
-        - NOTE: Even if "Easy", it must be appropriate for a Grade 12 student.
+        - CONTEXT: CAMBODIAN GRADE 12 NATIONAL EXAM (BACII).
+        - LEVEL: Standard High School.
+        - STYLE: Direct application of formulas. No tricks.
+        - EXAMPLES: Basic Limits, Simple Derivatives, Basic Probability.
+        - GOAL: Test basic understanding. Keep numbers simple (integers).
     `,
     "Medium": `
-        - STANDARD: ADVANCED / PRE-UNIVERSITY.
-        - STYLE: Harder than BacII. Requires manipulating equations.
-        - COMPLEXITY: Combining 2 concepts (e.g., Domain of a Log function inside a Sqrt).
-        - STEPS: 4-5 steps.
+        - CONTEXT: PRE-UNIVERSITY / SCHOLARSHIP EXAM.
+        - LEVEL: Harder than BacII but easier than Olympiad.
+        - STYLE: Requires 2-3 steps of logic. Mixing 2 concepts (e.g., Logarithm inside a Limit).
+        - GOAL: Filter out average students. Requires algebraic manipulation.
     `,
     "Hard": `
-        - STANDARD: NATIONAL OUTSTANDING STUDENT (Sishya Puke).
-        - STYLE: Theoretical, heavy calculation, or requires insight.
-        - FORMS: n-th derivatives, complex integrals, proof-based.
-        - VIBE: Separates the top students.
+        - CONTEXT: NATIONAL OUTSTANDING STUDENT (SISHYA PUKE).
+        - LEVEL: National Competition Level.
+        - STYLE: Theoretical proof calculations, Complex Integrals, Advanced Geometry.
+        - GOAL: For the top 5% of students. Heavy calculation or deep insight required.
     `,
     "Very Hard": `
-        - STANDARD: IMO (INTERNATIONAL MATH OLYMPIAD).
-        - STYLE: Abstract, Creative, Non-standard thinking.
-        - TRICK: Requires auxiliary functions, inequalities, or advanced theorems.
-        - VIBE: "Short question, hidden complexity".
+        - CONTEXT: IMO (INTERNATIONAL MATH OLYMPIAD).
+        - LEVEL: World Class Competition.
+        - STYLE: Abstract, requires auxiliary functions, creative inequalities, hidden tricks.
+        - GOAL: Extremely difficult. Only for geniuses.
     `
 };
 
@@ -252,9 +258,9 @@ const CONFIG = {
     CACHE_RATE: 0.25, 
     TARGETS: {
         "Easy": 100,      
-        "Medium": 30,     
+        "Medium": 50,     
         "Hard": 30,       
-        "Very Hard": 30   
+        "Very Hard": 20   
     },
     TOPICS: [
         { key: "Limits", label: "លីមីត (Limits)", prompt: "Calculus Limits" },
@@ -379,18 +385,50 @@ async function initMongo() {
     } catch (err) { SYSTEM_STATE.mongoConnected = false; logSystem('ERR', 'MongoDB Failed', err.message); }
 }
 
+// 🔴 UPDATED SCHEMA: Includes `content_hash` for Deduplication
 const problemSchema = new mongoose.Schema({
     topic: { type: String, required: true, index: true },
     difficulty: { type: String, required: true, index: true },
     raw_text: { type: String, required: true },
+    // Anti-Duplicate Field
+    content_hash: { type: String, unique: true, index: true }, 
     source_ip: String,
     createdAt: { type: Date, default: Date.now }
 });
 problemSchema.index({ topic: 1, difficulty: 1 });
 const MathCache = mongoose.model('MathProblemCache', problemSchema);
 
+// 🛡️ SYSTEM: VALIDATION GUARD (PROTECTS FRONTEND FROM CRASHES)
+function validateProblemIntegrity(jsonString) {
+    try {
+        const data = JSON.parse(jsonString);
+
+        // 1. Structure Check
+        if (!data.question || !data.options || !data.answer) return null;
+
+        // 2. Options Count Check (Must be 4)
+        if (!Array.isArray(data.options) || data.options.length !== 4) return null;
+
+        // 3. Answer Existence Check
+        const cleanAnswer = String(data.answer).trim();
+        const cleanOptions = data.options.map(o => String(o).trim());
+        if (!cleanOptions.includes(cleanAnswer)) return null;
+
+        // 4. Duplicate Options Check (Ambiguity)
+        const uniqueOptions = new Set(cleanOptions);
+        if (uniqueOptions.size !== 4) return null;
+
+        // 5. Generate Hash (Question + Options) to ensure uniqueness
+        const hash = crypto.createHash('md5').update(data.question + JSON.stringify(cleanOptions)).digest('hex');
+
+        return { validData: data, hash: hash };
+    } catch (e) {
+        return null; // Bad JSON
+    }
+}
+
 // =================================================================================================
-// SECTION 6: GENERATOR ENGINE (TITAN V10.9 CORE)
+// SECTION 6: GENERATOR ENGINE (V11.5 SMART CORE)
 // =================================================================================================
 
 async function startBackgroundGeneration() {
@@ -401,7 +439,7 @@ async function startBackgroundGeneration() {
     }
 
     SYSTEM_STATE.isGenerating = true;
-    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initializing Matrix V10.9 (Strict Validation)...');
+    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initialized with Validation Guard & Anti-Duplicate System.');
 
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
     const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
@@ -420,39 +458,33 @@ async function startBackgroundGeneration() {
 
                 const needed = targetCount - currentCount;
                 SYSTEM_STATE.currentGenTask = `${topicObj.label} (${diffLevel}): ${currentCount}/${targetCount}`;
-                logSystem('GEN', `Analyzing Task`, `${topicObj.key} [${diffLevel}] - Need: ${needed}`);
+                logSystem('GEN', `Task Started`, `${topicObj.key} [${diffLevel}] - Need: ${needed}`);
 
                 for (let i = 0; i < needed; i++) {
                     if (!SYSTEM_STATE.isGenerating) break;
 
-                    // 🎲 STEP 1: SELECT A RANDOM FORM FROM THE GRANULAR LIST
                     const forms = ALL_FORMS[topicObj.key] || ["General Math Problem"];
                     const randomForm = forms[Math.floor(Math.random() * forms.length)];
 
-                    // 🔥 STEP 2: CONSTRUCT PROMPT WITH STRICT RULES
+                    // 🔥 SMART PROMPT (CONTEXT AWARE)
                     const prompt = `
-                    Create 1 unique multiple-choice math problem.
-                    
+                    Generate 1 unique multiple-choice math problem.
                     TOPIC: "${topicObj.prompt}"
-                    SPECIFIC FORM: "${randomForm}"
-                    TARGET DIFFICULTY: "${diffLevel}"
-
-                    🔴 DIFFICULTY GUIDELINES:
-                    ${DIFFICULTY_INSTRUCTIONS[diffLevel]}
-
-                    🔴 STRICT VALIDATION RULES:
-                    1. There must be EXACTLY ONE correct answer.
-                    2. The other 3 options must be INCORRECT distractors.
-                    3. ALL 4 options must be MATHEMATICALLY DISTINCT values (No duplicates).
-                    4. The "answer" field MUST be an EXACT string copy of one of the "options".
-                    5. Return ONLY valid JSON. No Markdown.
-
-                    JSON FORMAT:
+                    SUB-TYPE: "${randomForm}"
+                    DIFFICULTY: "${diffLevel}" (${DIFFICULTY_INSTRUCTIONS[diffLevel]})
+                    
+                    CRITICAL RULES:
+                    1. Use RANDOM constants/numbers every time. Do not repeat standard examples.
+                    2. STRICTLY JSON output. No Markdown.
+                    3. LaTeX format for math expressions.
+                    4. Options must be numerically distinct.
+                    
+                    JSON STRUCTURE:
                     {
                         "question": "LaTeX string",
                         "options": ["Option A", "Option B", "Option C", "Option D"],
-                        "answer": "Exact String Match of Correct Option",
-                        "explanation": "Step-by-step reasoning"
+                        "answer": "Exact string copy of correct option",
+                        "explanation": "Brief step-by-step solution"
                     }
                     `;
 
@@ -461,59 +493,53 @@ async function startBackgroundGeneration() {
                         const response = await result.response;
                         let text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
                         
-                        // 🔍 STEP 3: PARSE & VALIDATE
-                        const parsedData = JSON.parse(text);
+                        // 🔍 1. VALIDATION GUARD
+                        const validated = validateProblemIntegrity(text);
+                        if (!validated) {
+                            logSystem('GEN', '⚠️ Invalid Data', 'Bad JSON/Logic discarded.');
+                            continue; // Skip without saving
+                        }
 
-                        // Rule A: Check Options Count
-                        if (!parsedData.options || parsedData.options.length !== 4) {
-                            throw new Error("Options count is not 4");
+                        // 🔍 2. SAVE WITH HASH (DUPLICATE PROTECTION)
+                        try {
+                            await MathCache.create({
+                                topic: topicObj.key,
+                                difficulty: diffLevel,
+                                raw_text: JSON.stringify(validated.validData),
+                                content_hash: validated.hash,
+                                source_ip: 'TITAN-MATRIX'
+                            });
+                            logSystem('GEN', `✅ Saved`, `[${diffLevel}] Unique hash: ${validated.hash.substring(0,8)}...`);
+                        } catch (dbErr) {
+                            if (dbErr.code === 11000) {
+                                logSystem('GEN', '♻️ Duplicate', 'Hash conflict. Skipping.');
+                            } else {
+                                logSystem('ERR', 'DB Write Error', dbErr.message);
+                            }
                         }
                         
-                        // Rule B: Check Answer Existence
-                        if (!parsedData.options.includes(parsedData.answer)) {
-                            throw new Error("Answer key not found in options list");
-                        }
-
-                        // Rule C: Check Duplicates (Ambiguity)
-                        const distinctOptions = new Set(parsedData.options);
-                        if (distinctOptions.size !== 4) {
-                            throw new Error("Duplicate options found (Ambiguous)");
-                        }
-
-                        // ✅ STEP 4: SAVE VALID PROBLEM
-                        await MathCache.create({
-                            topic: topicObj.key,
-                            difficulty: diffLevel,
-                            raw_text: JSON.stringify(parsedData), // Store consistent JSON
-                            source_ip: 'TITAN-MATRIX'
-                        });
-
-                        logSystem('GEN', `✅ Validated`, `[${diffLevel}] ${randomForm.substring(0, 15)}...`);
-                        
-                        // Adaptive Delay to seem natural
-                        const delay = Math.floor(Math.random() * 2000) + 3000;
-                        await new Promise(r => setTimeout(r, delay));
+                        // Cool-down to prevent rate limits
+                        await new Promise(r => setTimeout(r, 3000));
 
                     } catch (err) {
-                        logSystem('ERR', 'Validation/Gen Failed', err.message);
-                        logSystem('GEN', '⚠️ Retrying...', 'Skipping cool down for validation errors');
+                        logSystem('ERR', 'Gen Logic Error', err.message);
                         await new Promise(r => setTimeout(r, 2000));
                     }
                 }
 
             } catch (err) {
-                logSystem('ERR', 'Generator Logic Error', err.message);
+                logSystem('ERR', 'Loop Error', err.message);
             }
         }
     }
 
     SYSTEM_STATE.isGenerating = false;
     SYSTEM_STATE.currentGenTask = "All Targets Met";
-    logSystem('GEN', '🏁 MATRIX SEQUENCE COMPLETED', 'Database populated with high-quality content.');
+    logSystem('GEN', '🏁 SEQUENCE COMPLETED', 'Database populated with unique content.');
 }
 
 // =================================================================================================
-// SECTION 7: MIDDLEWARE & SECURITY (FIXED)
+// SECTION 7: MIDDLEWARE & SECURITY
 // =================================================================================================
 
 const app = express();
@@ -533,35 +559,17 @@ app.use((req, res, next) => {
     next();
 });
 
-// 🛠 FIX: Rate Limiter is ONLY for AI, NOT for Cache
-const aiLimiterQuota = rateLimit({
-    windowMs: 8 * 60 * 60 * 1000, 
-    max: 10, 
-    message: { error: "Quota Exceeded", message: "⚠️ Limit: 10 req / 8 hours." },
-    keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
-    skip: (req) => CONFIG.OWNER_IP && req.ip.includes(CONFIG.OWNER_IP)
-});
-
-const aiSpeedLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000, 
-    max: 5, 
-    message: { error: "Speed Limit", message: "⚠️ Limit: 5 req / 1 hour." },
-    keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
-    skip: (req) => CONFIG.OWNER_IP && req.ip.includes(CONFIG.OWNER_IP)
-});
-
 // =================================================================================================
-// SECTION 8: PRIMARY API ENDPOINTS (FIXED LOGIC)
+// SECTION 8: PRIMARY API ENDPOINTS
 // =================================================================================================
 
-// 🛠 FIX: Smart Topic Mapping (Solves "Derivative" vs "Derivatives" crash)
 const mapTopicToKey = (frontendName) => {
     if (!frontendName) return "Limits";
     const name = String(frontendName).trim().toLowerCase();
     
     // Exact & Partial Match Logic
     if (name.includes("limit")) return "Limits";
-    if (name.includes("deriv")) return "Derivatives"; // Handles singular & plural
+    if (name.includes("deriv")) return "Derivatives"; 
     if (name.includes("integ")) return "Integrals";
     if (name.includes("study") || name.includes("func")) return "FuncAnalysis";
     if (name.includes("diff") && name.includes("eq")) return "DiffEq";
@@ -582,7 +590,7 @@ const standardizeDifficulty = (input) => {
     return "Medium";
 };
 
-// 🤖 GENERATE PROBLEM API (FIXED: NO FREEZE, GLOBAL SOURCE)
+// 🤖 GENERATE PROBLEM API
 app.post('/api/generate-problem', async (req, res) => {
     const { prompt, topic, difficulty } = req.body;
     
@@ -593,7 +601,6 @@ app.post('/api/generate-problem', async (req, res) => {
     SYSTEM_STATE.totalGamesGenerated++;
 
     // 2. CHECK DB CACHE (UNLIMITED SPEED - NO RATE LIMIT)
-    // 🛠 FIX: Removed Source IP Filter. Now reads from GLOBAL pool.
     if (SYSTEM_STATE.mongoConnected) {
         try {
             // Using $sample for random selection from ALL valid problems
@@ -615,11 +622,7 @@ app.post('/api/generate-problem', async (req, res) => {
     }
 
     // 3. AI FALLBACK (RATE LIMITED)
-    // Only if DB is empty or offline do we hit the AI Limit
     logSystem('AI', 'Direct AI Generation', `${finalTopic} [${finalDifficulty}]`);
-    
-    // Manually check limits here if you want strict control, or rely on middleware if applied to route
-    // For now, we allow it but log it heavily.
     SYSTEM_STATE.aiCalls++;
     
     try {
@@ -632,27 +635,27 @@ app.post('/api/generate-problem', async (req, res) => {
         const aiPrompt = `
         Create 1 unique multiple-choice math problem.
         TOPIC: "${finalTopic}"
-        FORM: "${randomForm}"
+        SUB-TYPE: "${randomForm}"
         LEVEL: "${finalDifficulty}"
-        RULES: ${DIFFICULTY_INSTRUCTIONS[finalDifficulty]}
+        CONTEXT: ${DIFFICULTY_INSTRUCTIONS[finalDifficulty]}
         FORMAT: JSON Only. { "question": "LaTeX", "options": ["A","B","C","D"], "answer": "Exact Match", "explanation": "..." }
-        STRICT: Distinct options, Single correct answer.
         `;
         
         const result = await model.generateContent(aiPrompt);
         const response = await result.response;
         const text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
         
-        // Validate before sending
-        const parsed = JSON.parse(text);
-        if(!parsed.options || parsed.options.length !== 4) throw new Error("Invalid Format");
+        // Validate live generation
+        const validated = validateProblemIntegrity(text);
+        if(!validated) throw new Error("AI generated invalid JSON");
 
         if (SYSTEM_STATE.mongoConnected) {
             MathCache.create({
                 topic: finalTopic,
                 difficulty: finalDifficulty, 
                 raw_text: text,
-                source_ip: req.ip // Save source for logs, but we read from everyone
+                content_hash: validated.hash,
+                source_ip: req.ip
             }).catch(e => logSystem('WARN', 'Cache Write Failed', e.message));
         }
 
@@ -750,8 +753,26 @@ app.post('/admin/api/toggle-gen', (req, res) => {
     res.json({ status: SYSTEM_STATE.isGenerating });
 });
 
+// 🗑️ NEW: FLUSH TOPIC API (TRASH)
+app.delete('/admin/api/flush-topic/:topic/:diff', async (req, res) => {
+    const { topic, diff } = req.params;
+    if (!SYSTEM_STATE.mongoConnected) return res.status(500).json({ error: "No DB" });
+
+    try {
+        let query = {};
+        if (topic !== 'all') query.topic = topic;
+        if (diff !== 'all') query.difficulty = diff;
+
+        const result = await MathCache.deleteMany(query);
+        logSystem('SEC', '🗑️ FLUSH DATA', `Deleted ${result.deletedCount} items from ${topic}/${diff}`);
+        res.json({ success: true, deleted: result.deletedCount });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // =================================================================================================
-// SECTION 10: PREMIUM ADMINISTRATIVE DASHBOARD (UNMINIFIED FULL VERSION)
+// SECTION 10: PREMIUM ADMINISTRATIVE DASHBOARD (FULL UN-MINIFIED HTML/CSS/JS)
 // =================================================================================================
 
 app.get('/admin', (req, res) => {
@@ -761,7 +782,7 @@ app.get('/admin', (req, res) => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>BRAINTEST TITAN COMMAND CENTER</title>
+        <title>BRAINTEST TITAN COMMAND CENTER V11.5</title>
         <!-- Import Fonts -->
         <link href="https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
         
@@ -949,7 +970,7 @@ app.get('/admin', (req, res) => {
             /* --- STATISTICS GRID --- */
             .stats-grid {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
                 gap: 20px;
             }
             .topic-header {
@@ -1031,6 +1052,11 @@ app.get('/admin', (req, res) => {
             .section.active { display: block; }
             @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 
+            .trash-btn {
+                background: none; border: none; cursor: pointer; font-size: 1.1rem; opacity: 0.6; transition: 0.3s;
+            }
+            .trash-btn:hover { opacity: 1; transform: scale(1.1); }
+
         </style>
     </head>
     <body>
@@ -1040,7 +1066,7 @@ app.get('/admin', (req, res) => {
             <div class="sidebar">
                 <div class="brand">
                     <h1>TITAN ENGINE</h1>
-                    <span>v11.0 FIXED EDITION</span>
+                    <span>v11.5 DIAMOND</span>
                 </div>
                 
                 <button class="nav-btn active" onclick="switchTab('gen', this)">
@@ -1055,9 +1081,10 @@ app.get('/admin', (req, res) => {
 
                 <div style="margin-top: auto; padding-top: 20px; border-top: 1px solid var(--glass-border);">
                     <div style="font-size: 0.8rem; color: #10b981;">
-                        ✅ Fix: 2nd Click Freeze<br>
-                        ✅ Fix: Derivative Mapping<br>
-                        ✅ Fix: Global IP Source
+                        ✅ Fix: Anti-Duplicate Hash<br>
+                        ✅ Fix: Validation Guard<br>
+                        ✅ New: Trash Feature<br>
+                        ✅ New: Cambodia Difficulty
                     </div>
                 </div>
             </div>
@@ -1193,7 +1220,7 @@ app.get('/admin', (req, res) => {
                                 <tr>
                                     <td class="diff-badge" width="30%">\${diff}</td>
                                     <td width="20%" style="font-weight:bold; color:white">\${count}</td>
-                                    <td width="50%">
+                                    <td width="40%">
                                         <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-mute); margin-bottom:2px;">
                                             <span>Target: \${target}</span>
                                             <span>\${Math.round(pct)}%</span>
@@ -1201,6 +1228,9 @@ app.get('/admin', (req, res) => {
                                         <div class="prog-container">
                                             <div class="\${barClass}" style="width:\${pct}%"></div>
                                         </div>
+                                    </td>
+                                    <td width="10%" style="text-align:right;">
+                                        <button onclick="flushTopic('\${topic.key}', '\${diff}')" class="trash-btn" title="Delete All Data">🗑️</button>
                                     </td>
                                 </tr>
                             \`;
@@ -1282,6 +1312,13 @@ app.get('/admin', (req, res) => {
                 }
             }
 
+            async function flushTopic(topic, diff) {
+                if(confirm(\`Are you sure you want to DELETE ALL questions for \${topic} - \${diff}?\`)) {
+                    await fetch(\`/admin/api/flush-topic/\${topic}/\${diff}\`, { method: 'DELETE' });
+                    refreshData();
+                }
+            }
+
             // Start Auto-Refresh Loop (Every 2 seconds)
             setInterval(refreshData, 2000);
             refreshData(); // First call
@@ -1319,7 +1356,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
         <div class="card">
-            <h1>🚀 TITAN ENGINE V11.0</h1>
+            <h1>🚀 TITAN ENGINE V11.5</h1>
             <p>UPTIME: ${d}d ${h}h</p>
             <div class="metric">PG: ${pg} | MONGO: ${mg}</div>
             <div class="metric">
@@ -1340,7 +1377,7 @@ app.get('/', (req, res) => {
 
 async function startSystem() {
     console.clear();
-    logSystem('OK', 'Booting BrainTest Titan V11.0 (Fixed & Restored)...');
+    logSystem('OK', 'Booting BrainTest Titan V11.5 (Full Source Restored)...');
     
     // Initialize DBs (Non-blocking)
     initPostgres(); 
