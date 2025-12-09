@@ -679,7 +679,7 @@ app.post('/api/generate-problem', async (req, res) => {
                 const cached = await MathCache.aggregate([
                     { $match: { topic: finalTopic, difficulty: finalDifficulty } }, 
                     { $sample: { size: 1 } }
-                ]).maxTimeMS(2000); 
+                ]).maxTimeMS(15000); 
                 
                 // If DB is empty, break loop to go to AI Fallback
                 if (!cached || cached.length === 0) {
