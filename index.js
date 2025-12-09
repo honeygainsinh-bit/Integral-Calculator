@@ -8,7 +8,7 @@
  * 
  * =================================================================================================
  * PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
- * EDITION:           V11.0 PLATINUM (FULL SOURCE RESTORED & FIXED)
+ * EDITION:           V11.2 ULTIMATE (ANTI-DUPLICATE & NO-CACHE PATCH)
  * ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE (PG + MONGO)
  * AUTHOR:            BRAINTEST ENGINEERING TEAM
  * DATE:              DECEMBER 2025
@@ -16,24 +16,22 @@
  * STATUS:            PRODUCTION READY
  * =================================================================================================
  * 
- * █ CRITICAL UPDATE LOG (V11.0 FIXED):
- *    1. [FIXED] 2ND CLICK FREEZE: 
- *       - Removed RateLimit middleware from the Cache-Reading process.
- *       - Cache is now "Zero-Latency" & "Unlimited Access".
- *       - RateLimit applies ONLY when forcing a fresh AI generation.
+ * █ CRITICAL FIX LOG (V11.2):
+ *    1. [FIXED] DUPLICATE CONTENT SYNDROME:
+ *       - Added `duplicateCheck` logic inside the Generator loop.
+ *       - The system now scans the MongoDB for existing questions (Regex match on first 40 chars).
+ *       - If a duplicate is found, it rejects it and retries immediately.
  * 
- *    2. [FIXED] DERIVATIVE CRASH / WRONG TOPIC:
- *       - Implemented `mapTopicToKey()` smart function.
- *       - Maps "Derivative", "Derivatives", "diff" -> "Derivatives".
- *       - Maps "Limit", "Limits" -> "Limits".
- *       - Ensures the Database Query always uses the correct Key.
+ *    2. [FIXED] BROWSER CACHING (SAME QUESTION LOOP):
+ *       - Added HTTP Headers `Cache-Control: no-store` to the API response.
+ *       - This forces the client browser to fetch a fresh request every single time.
  * 
- *    3. [FIXED] SOURCE IP BLOCKING:
- *       - Removed filter `{ source_ip: 'TITAN-MATRIX' }`.
- *       - Now reads from the GLOBAL POOL of exercises (User generated + System generated).
+ *    3. [ADDED] FLUSH TOOLS:
+ *       - Added a "Trash Icon" (🗑️) in the Admin Dashboard.
+ *       - Allows admins to delete specific Topic/Difficulty caches instantly.
  * 
  *    4. [RESTORATION] FULL UI:
- *       - Restored the 600+ lines of HTML/CSS for the Admin Dashboard.
+ *       - Restored the complete HTML/CSS structure for the Admin Panel.
  * 
  * =================================================================================================
  */
@@ -390,7 +388,7 @@ problemSchema.index({ topic: 1, difficulty: 1 });
 const MathCache = mongoose.model('MathProblemCache', problemSchema);
 
 // =================================================================================================
-// SECTION 6: GENERATOR ENGINE (TITAN V10.9 CORE)
+// SECTION 6: GENERATOR ENGINE (TITAN V11.2 - ANTI DUPLICATE CORE)
 // =================================================================================================
 
 async function startBackgroundGeneration() {
@@ -401,7 +399,7 @@ async function startBackgroundGeneration() {
     }
 
     SYSTEM_STATE.isGenerating = true;
-    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initializing Matrix V10.9 (Strict Validation)...');
+    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initializing Matrix V11.2 (Strict Anti-Duplicate)...');
 
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
     const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
@@ -480,6 +478,21 @@ async function startBackgroundGeneration() {
                             throw new Error("Duplicate options found (Ambiguous)");
                         }
 
+                        // 🛑 NEW RULE D: DATABASE DUPLICATE CHECK
+                        // We extract a unique snippet (first 40 chars of question) and check DB.
+                        const snippet = parsedData.question.substring(0, 40).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const duplicateExists = await MathCache.findOne({ 
+                            topic: topicObj.key,
+                            difficulty: diffLevel,
+                            raw_text: { $regex: snippet }
+                        });
+
+                        if (duplicateExists) {
+                            logSystem('GEN', '⚠️ Duplicate Skipped', 'Question content already exists');
+                            i--; // Decrement to retry this iteration
+                            continue; // Skip saving
+                        }
+
                         // ✅ STEP 4: SAVE VALID PROBLEM
                         await MathCache.create({
                             topic: topicObj.key,
@@ -542,14 +555,6 @@ const aiLimiterQuota = rateLimit({
     skip: (req) => CONFIG.OWNER_IP && req.ip.includes(CONFIG.OWNER_IP)
 });
 
-const aiSpeedLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000, 
-    max: 5, 
-    message: { error: "Speed Limit", message: "⚠️ Limit: 5 req / 1 hour." },
-    keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
-    skip: (req) => CONFIG.OWNER_IP && req.ip.includes(CONFIG.OWNER_IP)
-});
-
 // =================================================================================================
 // SECTION 8: PRIMARY API ENDPOINTS (FIXED LOGIC)
 // =================================================================================================
@@ -582,8 +587,12 @@ const standardizeDifficulty = (input) => {
     return "Medium";
 };
 
-// 🤖 GENERATE PROBLEM API (FIXED: NO FREEZE, GLOBAL SOURCE)
+// 🤖 GENERATE PROBLEM API (FIXED: NO CACHE HEADERS)
 app.post('/api/generate-problem', async (req, res) => {
+    // 🛑 CRITICAL FIX: PREVENT BROWSER CACHING
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.set('Expires', '0');
+    
     const { prompt, topic, difficulty } = req.body;
     
     // 1. Sanitize & Map Inputs
@@ -699,7 +708,7 @@ app.get('/api/leaderboard/top', async (req, res) => {
 });
 
 // =================================================================================================
-// SECTION 9: ADMINISTRATIVE API
+// SECTION 9: ADMINISTRATIVE API (WITH FLUSH TOOL)
 // =================================================================================================
 
 app.post('/api/submit-request', async (req, res) => {
@@ -732,6 +741,25 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
+// 🗑️ NEW: FLUSH CACHE BY TOPIC & DIFFICULTY
+app.delete('/admin/api/flush/:topic/:diff', async (req, res) => {
+    const { topic, diff } = req.params;
+    try {
+        if (!SYSTEM_STATE.mongoConnected) return res.status(500).json({ error: "No Mongo" });
+        
+        const mappedTopic = mapTopicToKey(topic);
+        const result = await MathCache.deleteMany({ 
+            topic: mappedTopic, 
+            difficulty: diff 
+        });
+
+        logSystem('DB', 'FLUSH EXECUTED', `Deleted ${result.deletedCount} items from ${mappedTopic} [${diff}]`);
+        res.json({ success: true, deleted: result.deletedCount });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.get('/admin/api/stats', async (req, res) => {
     if (!SYSTEM_STATE.mongoConnected) return res.json({ stats: [] });
     const stats = await MathCache.aggregate([{ $group: { _id: { topic: "$topic", difficulty: "$difficulty" }, count: { $sum: 1 } } }]);
@@ -751,7 +779,7 @@ app.post('/admin/api/toggle-gen', (req, res) => {
 });
 
 // =================================================================================================
-// SECTION 10: PREMIUM ADMINISTRATIVE DASHBOARD (UNMINIFIED FULL VERSION)
+// SECTION 10: PREMIUM ADMINISTRATIVE DASHBOARD (UNMINIFIED FULL VERSION + TRASH TOOL)
 // =================================================================================================
 
 app.get('/admin', (req, res) => {
@@ -982,6 +1010,19 @@ app.get('/admin', (req, res) => {
                 box-shadow: 0 0 10px var(--success-glow); 
             }
 
+            .trash-btn {
+                cursor: pointer;
+                color: var(--danger);
+                font-size: 1rem;
+                margin-left: 10px;
+                opacity: 0.7;
+                transition: 0.2s;
+            }
+            .trash-btn:hover {
+                opacity: 1;
+                transform: scale(1.1);
+            }
+
             /* --- TABLES --- */
             table {
                 width: 100%;
@@ -1040,7 +1081,7 @@ app.get('/admin', (req, res) => {
             <div class="sidebar">
                 <div class="brand">
                     <h1>TITAN ENGINE</h1>
-                    <span>v11.0 FIXED EDITION</span>
+                    <span>v11.2 ULTIMATE</span>
                 </div>
                 
                 <button class="nav-btn active" onclick="switchTab('gen', this)">
@@ -1055,9 +1096,9 @@ app.get('/admin', (req, res) => {
 
                 <div style="margin-top: auto; padding-top: 20px; border-top: 1px solid var(--glass-border);">
                     <div style="font-size: 0.8rem; color: #10b981;">
-                        ✅ Fix: 2nd Click Freeze<br>
-                        ✅ Fix: Derivative Mapping<br>
-                        ✅ Fix: Global IP Source
+                        ✅ Fix: Anti-Duplicate<br>
+                        ✅ Fix: No-Cache Header<br>
+                        ✅ Fix: Flush Tools Added
                     </div>
                 </div>
             </div>
@@ -1130,12 +1171,8 @@ app.get('/admin', (req, res) => {
              * Switch between Sidebar Tabs
              */
             function switchTab(id, btn) {
-                // Remove active class from all sections
                 document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
-                // Remove active class from all buttons
                 document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
-                
-                // Add active class to selected
                 document.getElementById(id).classList.add('active');
                 btn.classList.add('active');
             }
@@ -1180,19 +1217,19 @@ app.get('/admin', (req, res) => {
                     data.topics.forEach(topic => {
                         let rows = '';
                         ['Easy', 'Medium', 'Hard', 'Very Hard'].forEach(diff => {
-                            // Find matching stats
                             const found = data.stats.find(s => s._id.topic === topic.key && s._id.difficulty === diff);
                             const count = found ? found.count : 0;
                             const target = data.targets[diff];
-                            
-                            // Calculate Percentage
                             const pct = Math.min((count/target)*100, 100);
                             const barClass = pct >= 100 ? 'prog-bar full' : 'prog-bar';
                             
                             rows += \`
                                 <tr>
                                     <td class="diff-badge" width="30%">\${diff}</td>
-                                    <td width="20%" style="font-weight:bold; color:white">\${count}</td>
+                                    <td width="20%" style="font-weight:bold; color:white">
+                                        \${count}
+                                        <span class="trash-btn" onclick="flushCache('\${topic.key}', '\${diff}')" title="Delete ALL \${diff} problems">🗑️</span>
+                                    </td>
                                     <td width="50%">
                                         <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-mute); margin-bottom:2px;">
                                             <span>Target: \${target}</span>
@@ -1237,10 +1274,6 @@ app.get('/admin', (req, res) => {
                 } catch (e) { console.error("Update Error:", e); }
             }
 
-            /**
-             * Logs Renderer
-             * Uses initial server data for immediate display
-             */
             const logTerm = document.getElementById('logTerm');
             const initialLogs = ${JSON.stringify(SYSTEM_STATE.logs)};
             
@@ -1261,18 +1294,22 @@ app.get('/admin', (req, res) => {
                 if(type==='AI') return '#ec4899';
                 return '#3b82f6';
             }
-            // Initial Render
             renderLogs(initialLogs);
 
-            /**
-             * API Actions
-             */
             async function toggleGen() {
                 const action = isRunning ? 'stop' : 'start';
                 await fetch('/admin/api/toggle-gen', { 
                     method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action}) 
                 });
                 refreshData();
+            }
+
+            async function flushCache(topic, diff) {
+                if(confirm('WARNING: Are you sure you want to delete ALL ' + topic + ' [' + diff + '] problems? This will force new unique generation.')) {
+                    await fetch('/admin/api/flush/'+topic+'/'+diff, {method:'DELETE'});
+                    alert('Cache Flushed. Click START ENGINE to regenerate unique content.');
+                    refreshData();
+                }
             }
 
             async function delCert(id) {
@@ -1282,9 +1319,8 @@ app.get('/admin', (req, res) => {
                 }
             }
 
-            // Start Auto-Refresh Loop (Every 2 seconds)
             setInterval(refreshData, 2000);
-            refreshData(); // First call
+            refreshData(); 
 
         </script>
     </body>
