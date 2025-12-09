@@ -8,7 +8,7 @@
  * 
  * =================================================================================================
  * PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
- * EDITION:           V10.9 PLATINUM (UNMINIFIED FULL SOURCE)
+ * EDITION:           V10.9.1 PLATINUM (HOTFIX: KHMER MAPPING & ANTI-FREEZE)
  * ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE (PG + MONGO)
  * AUTHOR:            BRAINTEST ENGINEERING TEAM
  * DATE:              DECEMBER 2025
@@ -16,18 +16,12 @@
  * STATUS:            PRODUCTION READY
  * =================================================================================================
  * 
- * █ CRITICAL UPDATE LOG (V10.9):
- *    1. [RESTORATION] FULL SOURCE CODE: Expanded all HTML/CSS/JS for the Admin Panel. 
- *       Line count restored to ~1500+ for better readability and maintenance.
- *    2. [MATRIX] FULL GRANULAR FORMS: Implemented detailed sub-topic lists for ALL 10 TOPICS.
- *       (Limits, Derivatives, Integrals, DiffEq, Complex, Vectors, FuncAnalysis, Conics, Probability, Continuity)
- *    3. [LOGIC] DIFFICULTY STANDARDS (BacII -> IMO): 
- *       - Easy = BacII Standard.
- *       - Very Hard = IMO/Olympiad Standard.
- *    4. [SECURITY] STRICT ANSWER VALIDATION: 
- *       - Ensures exactly ONE correct answer.
- *       - Checks for duplicate options.
- *       - Verifies 'answer' key matches one of the 'options'.
+ * █ CRITICAL UPDATE LOG (V10.9.1):
+ *    1. [FIX] LANGUAGE MAPPING: Added full support for Khmer topic names (e.g., "ដេរីវេ" -> "Derivatives").
+ *       This fixes the issue where cached items were ignored because of name mismatch.
+ *    2. [STABILITY] ANTI-FREEZE: Added 'maxTimeMS' to MongoDB queries to prevent infinite loading.
+ *    3. [MATRIX] FULL GRANULAR FORMS: Retained detailed sub-topic lists for ALL 10 TOPICS.
+ *    4. [SECURITY] STRICT ANSWER VALIDATION: Retained strict 1-correct-answer logic.
  * 
  * =================================================================================================
  */
@@ -52,7 +46,6 @@ const rateLimit = require('express-rate-limit');
 
 // -------------------------------------------------------------------------
 // 🧬 THE GRANULAR MATRIX: DETAILED FORMS FOR EVERY TOPIC (10 TOPICS)
-// This list ensures high variety and coverage of all math sub-disciplines.
 // -------------------------------------------------------------------------
 const ALL_FORMS = {
     // --- 1. LIMITS ---
@@ -250,6 +243,7 @@ const CONFIG = {
         "Hard": 30,       
         "Very Hard": 30   
     },
+    // Used for Admin Panel & Generation Loop
     TOPICS: [
         { key: "Limits", label: "លីមីត (Limits)", prompt: "Calculus Limits" },
         { key: "Derivatives", label: "ដេរីវេ (Derivatives)", prompt: "Calculus Derivatives" },
@@ -547,15 +541,39 @@ const aiSpeedLimiter = rateLimit({
 // SECTION 8: PRIMARY API ENDPOINTS
 // =================================================================================================
 
-// Helper: Map Frontend Names to Backend Keys
+// 🛡️ HELPER: KHMER LANGUAGE MAPPING FIXED
+// This function ensures "ដេរីវេ" maps correctly to "Derivatives" in the DB
 const mapTopicToKey = (frontendName) => {
     if (!frontendName) return "Limits";
     const name = String(frontendName).trim();
+    
+    // Mapping both English and Khmer to Database Keys
     const mapping = {
-        "Limit": "Limits", "Derivative": "Derivatives", "Integral": "Integrals",
-        "Study of Functions": "FuncAnalysis", "Differential Equation": "DiffEq",
-        "Complex Number": "Complex", "Vectors in Space": "Vectors",
-        "Probability": "Probability", "Conics": "Conics", "Continuity": "Continuity"
+        // Limits
+        "Limit": "Limits", "Limits": "Limits", "លីមីត": "Limits",
+        
+        // Derivatives
+        "Derivative": "Derivatives", "Derivatives": "Derivatives", "ដេរីវេ": "Derivatives",
+        
+        // Integrals
+        "Integral": "Integrals", "Integrals": "Integrals", "អាំងតេក្រាល": "Integrals",
+        
+        // Diff Eq
+        "Differential Equation": "DiffEq", "DiffEq": "DiffEq", "សមីការឌីផេរ៉ង់ស្យែល": "DiffEq",
+        
+        // Complex
+        "Complex Number": "Complex", "Complex": "Complex", "ចំនួនកុំផ្លិច": "Complex",
+        
+        // Vectors
+        "Vectors in Space": "Vectors", "Vectors": "Vectors", "វ៉ិចទ័រ": "Vectors",
+        
+        // Func Analysis
+        "Study of Functions": "FuncAnalysis", "FuncAnalysis": "FuncAnalysis", "សិក្សាអនុគមន៍": "FuncAnalysis",
+        
+        // Others
+        "Conics": "Conics", "កោនិក": "Conics",
+        "Probability": "Probability", "ប្រូបាប": "Probability",
+        "Continuity": "Continuity", "ភាពជាប់": "Continuity"
     };
     return mapping[name] || name;
 };
@@ -568,10 +586,10 @@ const standardizeDifficulty = (input) => {
     return "Medium";
 };
 
-// 🤖 GENERATE PROBLEM API
+// 🤖 GENERATE PROBLEM API (WITH FREEZE PROTECTION)
 app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, res) => {
     const { prompt, topic, difficulty } = req.body;
-    const finalTopic = mapTopicToKey(topic); 
+    const finalTopic = mapTopicToKey(topic); // Fixes the Khmer lookup issue
     const finalDifficulty = standardizeDifficulty(difficulty);
     
     SYSTEM_STATE.totalGamesGenerated++;
@@ -593,10 +611,12 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
 
     if (useCache) {
         try {
+            // FIX: Added maxTimeMS option to prevent hanging if DB is slow
             const cached = await MathCache.aggregate([
                 { $match: { topic: finalTopic, difficulty: finalDifficulty } }, 
                 { $sample: { size: 1 } }
-            ]);
+            ]).option({ maxTimeMS: 2000 }); 
+
             if (cached.length > 0) {
                 SYSTEM_STATE.cacheHits++;
                 return res.json({ 
@@ -604,6 +624,8 @@ app.post('/api/generate-problem', aiLimiterQuota, aiSpeedLimiter, async (req, re
                     source: "cache",
                     metadata: { topic: finalTopic, difficulty: finalDifficulty }
                 });
+            } else {
+                logSystem('WARN', 'Cache Miss', `DB has count, but sample failed for ${finalTopic}`);
             }
         } catch (e) { logSystem('ERR', 'Cache Read Error', e.message); }
     }
