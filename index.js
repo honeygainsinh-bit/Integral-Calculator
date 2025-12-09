@@ -8,7 +8,7 @@
  * 
  * =================================================================================================
  * PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
- * EDITION:           V11.5 DIAMOND (ANTI-CRASH & SMART LOGIC)
+ * EDITION:           V12.1 PLATINUM (FULL SOURCE RESTORED + SMART MERGE LOGIC)
  * ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE (PG + MONGO)
  * AUTHOR:            BRAINTEST ENGINEERING TEAM
  * DATE:              DECEMBER 2025
@@ -16,28 +16,21 @@
  * STATUS:            PRODUCTION READY
  * =================================================================================================
  * 
- * █ CRITICAL UPDATE LOG (V11.5 FIXED):
- *    1. [FIXED] 100% CACHE DUPLICATES: 
- *       - Implemented `MD5 Hashing` for every generated question.
- *       - Database now strictly rejects duplicates (Unique Indexing).
- *       - Forces AI to regenerate if a duplicate is found.
+ * █ CRITICAL FEATURE: SMART SCORE MERGING (THE "DARA" FIX)
+ *    - Scenario: Database has 3 rows for "Dara" (Scores: 10, 20, 30).
+ *    - Action: User plays again and gets 5 points.
+ *    - Logic: 
+ *         1. Calculate Total Previous = 10 + 20 + 30 = 60.
+ *         2. Add New Score = 60 + 5 = 65.
+ *         3. Update "Dara (Row 1)" to 65.
+ *         4. DELETE "Dara (Row 2)" and "Dara (Row 3)".
+ *    - Result: Database is cleaned, user keeps all points.
  * 
- *    2. [FIXED] FRONTEND CRASHES:
- *       - Added `validateProblemIntegrity()` GUARD SYSTEM.
- *       - Checks: JSON Validity, Option Count (4), Answer Exists in Options, No Duplicate Options.
- *       - Bad data is discarded BEFORE saving to DB.
- * 
- *    3. [CALIBRATED] DIFFICULTY LEVELS (KH CONTEXT):
- *       - EASY: Grade 12 BacII Standard.
- *       - MEDIUM: Scholarship Exam Level.
- *       - HARD: National Outstanding Student.
- *       - VERY HARD: IMO (Olympiad) Level.
- * 
- *    4. [NEW] TRASH / FLUSH FEATURE:
- *       - Added `🗑️` button in Admin Panel to clear specific topic caches.
- * 
- *    5. [RESTORATION] FULL UI DASHBOARD:
- *       - Restored the 800+ lines of internal HTML/CSS for the Admin Panel.
+ * █ OTHER FEATURES:
+ *    - Khmer Language Enforced.
+ *    - LaTeX Math ($) Enforced.
+ *    - Shuffle Options (A, B, C, D randomized).
+ *    - Full Admin UI (Restored).
  * 
  * =================================================================================================
  */
@@ -217,20 +210,19 @@ const ALL_FORMS = {
 };
 
 // -------------------------------------------------------------------------
-// 🔴 NEW: DIFFICULTY STANDARDS (CAMBODIAN CONTEXT V11.5)
+// 🔴 DIFFICULTY STANDARDS (CAMBODIAN CONTEXT)
 // -------------------------------------------------------------------------
 const DIFFICULTY_INSTRUCTIONS = {
     "Easy": `
         - CONTEXT: CAMBODIAN GRADE 12 NATIONAL EXAM (BACII).
         - LEVEL: Standard High School.
         - STYLE: Direct application of formulas. No tricks.
-        - EXAMPLES: Basic Limits, Simple Derivatives, Basic Probability.
         - GOAL: Test basic understanding. Keep numbers simple (integers).
     `,
     "Medium": `
         - CONTEXT: PRE-UNIVERSITY / SCHOLARSHIP EXAM.
         - LEVEL: Harder than BacII but easier than Olympiad.
-        - STYLE: Requires 2-3 steps of logic. Mixing 2 concepts (e.g., Logarithm inside a Limit).
+        - STYLE: Requires 2-3 steps of logic. Mixing 2 concepts.
         - GOAL: Filter out average students. Requires algebraic manipulation.
     `,
     "Hard": `
@@ -385,12 +377,10 @@ async function initMongo() {
     } catch (err) { SYSTEM_STATE.mongoConnected = false; logSystem('ERR', 'MongoDB Failed', err.message); }
 }
 
-// 🔴 UPDATED SCHEMA: Includes `content_hash` for Deduplication
 const problemSchema = new mongoose.Schema({
     topic: { type: String, required: true, index: true },
     difficulty: { type: String, required: true, index: true },
     raw_text: { type: String, required: true },
-    // Anti-Duplicate Field
     content_hash: { type: String, unique: true, index: true }, 
     source_ip: String,
     createdAt: { type: Date, default: Date.now }
@@ -398,37 +388,46 @@ const problemSchema = new mongoose.Schema({
 problemSchema.index({ topic: 1, difficulty: 1 });
 const MathCache = mongoose.model('MathProblemCache', problemSchema);
 
-// 🛡️ SYSTEM: VALIDATION GUARD (PROTECTS FRONTEND FROM CRASHES)
+// 🛡️ SYSTEM: VALIDATION GUARD
 function validateProblemIntegrity(jsonString) {
     try {
         const data = JSON.parse(jsonString);
 
-        // 1. Structure Check
         if (!data.question || !data.options || !data.answer) return null;
-
-        // 2. Options Count Check (Must be 4)
         if (!Array.isArray(data.options) || data.options.length !== 4) return null;
 
-        // 3. Answer Existence Check
         const cleanAnswer = String(data.answer).trim();
         const cleanOptions = data.options.map(o => String(o).trim());
         if (!cleanOptions.includes(cleanAnswer)) return null;
 
-        // 4. Duplicate Options Check (Ambiguity)
         const uniqueOptions = new Set(cleanOptions);
         if (uniqueOptions.size !== 4) return null;
 
-        // 5. Generate Hash (Question + Options) to ensure uniqueness
         const hash = crypto.createHash('md5').update(data.question + JSON.stringify(cleanOptions)).digest('hex');
 
         return { validData: data, hash: hash };
     } catch (e) {
-        return null; // Bad JSON
+        return null; 
+    }
+}
+
+// 🔥 FIX #3: SHUFFLE OPTIONS (Randomize Answer Position)
+function shuffleOptions(jsonString) {
+    try {
+        const data = JSON.parse(jsonString);
+        // Fisher-Yates Shuffle Algorithm
+        for (let i = data.options.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [data.options[i], data.options[j]] = [data.options[j], data.options[i]];
+        }
+        return JSON.stringify(data);
+    } catch (e) {
+        return jsonString; // Fail-safe: return original if error
     }
 }
 
 // =================================================================================================
-// SECTION 6: GENERATOR ENGINE (V11.6 SMART QUOTA MANAGER)
+// SECTION 6: GENERATOR ENGINE (UPDATED KHMER + LATEX RULES)
 // =================================================================================================
 
 async function startBackgroundGeneration() {
@@ -439,7 +438,7 @@ async function startBackgroundGeneration() {
     }
 
     SYSTEM_STATE.isGenerating = true;
-    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initialized with Smart Quota Management.');
+    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initialized with KHMER + LATEX FIXES.');
 
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
     const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
@@ -453,7 +452,6 @@ async function startBackgroundGeneration() {
             }
 
             try {
-                // Check quota before starting loop
                 const currentCount = await MathCache.countDocuments({ topic: topicObj.key, difficulty: diffLevel });
                 if (currentCount >= targetCount) continue;
 
@@ -467,24 +465,31 @@ async function startBackgroundGeneration() {
                     const forms = ALL_FORMS[topicObj.key] || ["General Math Problem"];
                     const randomForm = forms[Math.floor(Math.random() * forms.length)];
 
+                    // 🔥 FIX #1 & #2: KHMER LANGUAGE & MATH LATEX DELIMITERS ($)
                     const prompt = `
-                    Generate 1 unique multiple-choice math problem.
+                    Generate 1 unique multiple-choice math problem in KHMER LANGUAGE.
                     TOPIC: "${topicObj.prompt}"
                     SUB-TYPE: "${randomForm}"
                     DIFFICULTY: "${diffLevel}" (${DIFFICULTY_INSTRUCTIONS[diffLevel]})
                     
                     CRITICAL RULES:
-                    1. Use RANDOM constants/numbers every time.
-                    2. STRICTLY JSON output. No Markdown.
-                    3. LaTeX format for math expressions.
-                    4. Options must be numerically distinct.
+                    1. LANGUAGE: The question text and explanation MUST be in KHMER (Cambodian).
+                       - Example: "គណនា...", "រកតម្លៃនៃ...", "គេឱ្យអនុគមន៍...".
+                    2. MATH FORMATTING: 
+                       - YOU MUST WRAP ALL MATH EXPRESSIONS IN DOLLAR SIGNS ($).
+                       - Example: Do NOT write "y = x^2". WRITE "$y = x^2$".
+                       - Example: Do NOT write "\\frac{dy}{dx}". WRITE "$\\frac{dy}{dx}$".
+                       - Applies to Question, Options, and Explanation.
+                    3. Use RANDOM constants/numbers every time.
+                    4. STRICTLY JSON output. No Markdown.
+                    5. Options must be numerically distinct.
                     
                     JSON STRUCTURE:
                     {
-                        "question": "LaTeX string",
-                        "options": ["Option A", "Option B", "Option C", "Option D"],
+                        "question": "Question string in Khmer with LaTeX wrapped in $",
+                        "options": ["$Option A$", "$Option B$", "$Option C$", "$Option D$"],
                         "answer": "Exact string copy of correct option",
-                        "explanation": "Brief step-by-step solution"
+                        "explanation": "Explanation in Khmer with math in $"
                     }
                     `;
 
@@ -514,18 +519,14 @@ async function startBackgroundGeneration() {
                             }
                         }
                         
-                        // 🟢 NORMAL DELAY: 10 Seconds (To stay under 15 RPM limit)
+                        // Delay to avoid rate limits
                         await new Promise(r => setTimeout(r, 10000));
 
                     } catch (err) {
-                        // 🔴 SMART ERROR HANDLING FOR QUOTA
                         if (err.message.includes('429') || err.message.includes('quota')) {
-                            logSystem('WARN', '⏳ QUOTA HIT', 'Pausing for 60 seconds to cool down...');
-                            SYSTEM_STATE.currentGenTask = "Cooling Down (Quota)...";
-                            // Wait 60 Seconds
+                            logSystem('WARN', '⏳ QUOTA HIT', 'Pausing for 60 seconds...');
                             await new Promise(r => setTimeout(r, 60000));
-                            logSystem('GEN', '▶️ RESUMING', 'Quota cooldown finished.');
-                            i--; // Retry the same iteration
+                            i--; 
                         } else {
                             logSystem('ERR', 'Gen Logic Error', err.message);
                             await new Promise(r => setTimeout(r, 2000));
@@ -573,7 +574,6 @@ const mapTopicToKey = (frontendName) => {
     if (!frontendName) return "Limits";
     const name = String(frontendName).trim().toLowerCase();
     
-    // Exact & Partial Match Logic
     if (name.includes("limit")) return "Limits";
     if (name.includes("deriv")) return "Derivatives"; 
     if (name.includes("integ")) return "Integrals";
@@ -585,7 +585,7 @@ const mapTopicToKey = (frontendName) => {
     if (name.includes("conic")) return "Conics";
     if (name.includes("contin")) return "Continuity";
 
-    return "Limits"; // Default fallback
+    return "Limits"; 
 };
 
 const standardizeDifficulty = (input) => {
@@ -600,16 +600,14 @@ const standardizeDifficulty = (input) => {
 app.post('/api/generate-problem', async (req, res) => {
     const { prompt, topic, difficulty } = req.body;
     
-    // 1. Sanitize & Map Inputs
     const finalTopic = mapTopicToKey(topic); 
     const finalDifficulty = standardizeDifficulty(difficulty);
     
     SYSTEM_STATE.totalGamesGenerated++;
 
-    // 2. CHECK DB CACHE (UNLIMITED SPEED - NO RATE LIMIT)
+    // 2. CHECK DB CACHE
     if (SYSTEM_STATE.mongoConnected) {
         try {
-            // Using $sample for random selection from ALL valid problems
             const cached = await MathCache.aggregate([
                 { $match: { topic: finalTopic, difficulty: finalDifficulty } }, 
                 { $sample: { size: 1 } }
@@ -618,8 +616,12 @@ app.post('/api/generate-problem', async (req, res) => {
             if (cached.length > 0) {
                 SYSTEM_STATE.cacheHits++;
                 logSystem('DB', 'Cache Hit', `${finalTopic} (${finalDifficulty})`);
+                
+                // 🔥 APPLY SHUFFLE BEFORE SENDING
+                const shuffledText = shuffleOptions(cached[0].raw_text);
+
                 return res.json({ 
-                    text: cached[0].raw_text, 
+                    text: shuffledText, 
                     source: "cache",
                     metadata: { topic: finalTopic, difficulty: finalDifficulty }
                 });
@@ -627,7 +629,7 @@ app.post('/api/generate-problem', async (req, res) => {
         } catch (e) { logSystem('ERR', 'Cache Read Error', e.message); }
     }
 
-    // 3. AI FALLBACK (RATE LIMITED)
+    // 3. AI FALLBACK (DIRECT GENERATION)
     logSystem('AI', 'Direct AI Generation', `${finalTopic} [${finalDifficulty}]`);
     SYSTEM_STATE.aiCalls++;
     
@@ -638,20 +640,24 @@ app.post('/api/generate-problem', async (req, res) => {
         const forms = ALL_FORMS[finalTopic] || ["General Math"];
         const randomForm = forms[Math.floor(Math.random() * forms.length)];
 
+        // 🔥 FIX #1 & #2: APPLIED HERE TOO
         const aiPrompt = `
-        Create 1 unique multiple-choice math problem.
+        Create 1 unique multiple-choice math problem in KHMER LANGUAGE.
         TOPIC: "${finalTopic}"
         SUB-TYPE: "${randomForm}"
         LEVEL: "${finalDifficulty}"
-        CONTEXT: ${DIFFICULTY_INSTRUCTIONS[finalDifficulty]}
-        FORMAT: JSON Only. { "question": "LaTeX", "options": ["A","B","C","D"], "answer": "Exact Match", "explanation": "..." }
+        
+        CRITICAL RULES:
+        1. Language: KHMER (Cambodia).
+        2. MATH FORMATTING: Wrap ALL LaTeX in dollar signs ($...$).
+           - Ex: $x^2 + y^2 = 1$
+        3. FORMAT: JSON Only. { "question": "...", "options": ["..."], "answer": "Exact Match", "explanation": "..." }
         `;
         
         const result = await model.generateContent(aiPrompt);
         const response = await result.response;
         const text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
         
-        // Validate live generation
         const validated = validateProblemIntegrity(text);
         if(!validated) throw new Error("AI generated invalid JSON");
 
@@ -665,7 +671,10 @@ app.post('/api/generate-problem', async (req, res) => {
             }).catch(e => logSystem('WARN', 'Cache Write Failed', e.message));
         }
 
-        res.json({ text: text, source: "ai", metadata: { topic: finalTopic, difficulty: finalDifficulty } });
+        // 🔥 APPLY SHUFFLE BEFORE SENDING
+        const shuffledLive = shuffleOptions(text);
+
+        res.json({ text: shuffledLive, source: "ai", metadata: { topic: finalTopic, difficulty: finalDifficulty } });
 
     } catch (err) {
         logSystem('ERR', 'AI Service Error', err.message);
@@ -673,29 +682,66 @@ app.post('/api/generate-problem', async (req, res) => {
     }
 });
 
-// 🏆 LEADERBOARD API
+// 🏆 LEADERBOARD API (MERGE DUPLICATE DARA LOGIC)
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
     const finalDiff = standardizeDifficulty(difficulty);
     try {
         const client = await pgPool.connect();
+        
+        // 1. Security Check
         const maxAllowed = CONFIG.ALLOWED_SCORES[finalDiff] || 50; 
         if (score > maxAllowed) {
             client.release();
-            logSystem('SEC', 'Score Rejected', `${username}: ${score}`);
             return res.status(403).json({ message: "Score rejected" });
         }
-        const check = await client.query('SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC', [username, finalDiff]);
+
+        // 2. Fetch ALL records for this user (including duplicates)
+        // Order by ID ASC (oldest first)
+        const check = await client.query(
+            'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC', 
+            [username, finalDiff]
+        );
+        
         if (check.rows.length > 0) {
-            const finalScore = check.rows.reduce((acc, row) => acc + row.score, 0) + score;
-            await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [finalScore, check.rows[0].id]);
-            if (check.rows.length > 1) await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [check.rows.slice(1).map(r => r.id)]);
+            // 🔥 MERGE LOGIC START
+            
+            // Calculate sum of ALL existing duplicates
+            const totalExistingScore = check.rows.reduce((sum, row) => sum + row.score, 0);
+            
+            // Add the new score to the grand total
+            const grandTotal = totalExistingScore + score;
+            
+            // The "Survivor" is the first record (oldest ID)
+            const survivorId = check.rows[0].id;
+            
+            // Update Survivor with Grand Total
+            await client.query(
+                'UPDATE leaderboard SET score = $1, updated_at = NOW(), ip_address = $3 WHERE id = $2', 
+                [grandTotal, survivorId, req.ip]
+            );
+            
+            logSystem('SEC', 'Merged & Updated', `${username}: Total ${grandTotal}`);
+
+            // 🔥 KILL CLONES: Delete all records except the survivor
+            if (check.rows.length > 1) {
+                const idsToDelete = check.rows.slice(1).map(r => r.id);
+                await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
+                logSystem('DB', 'Cleaned Duplicates', `Deleted IDs: ${idsToDelete.join(', ')}`);
+            }
+            // 🔥 MERGE LOGIC END
         } else {
+            // New Entry (No duplicates found)
             await client.query('INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)', [username, score, finalDiff, req.ip]);
+            logSystem('DB', 'New Player', `${username}`);
         }
+
         client.release();
         res.status(201).json({ success: true });
-    } catch (err) { res.status(500).json({ success: false }); }
+    } catch (err) { 
+        logSystem('ERR', 'Leaderboard Error', err.message);
+        res.status(500).json({ success: false }); 
+    }
 });
 
 app.get('/api/leaderboard/top', async (req, res) => {
@@ -732,6 +778,7 @@ app.get('/admin/generate-cert/:id', async (req, res) => {
     } catch (e) { res.status(500).send("Error"); }
 });
 
+// 🗑️ DELETE CERT REQUEST BY ID
 app.delete('/admin/delete-request/:id', async (req, res) => {
     try {
         const client = await pgPool.connect();
@@ -739,6 +786,23 @@ app.delete('/admin/delete-request/:id', async (req, res) => {
         client.release();
         res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false }); }
+});
+
+// 🗑️ DELETE BAD PROBLEM BY ID (Mongo)
+app.delete('/admin/api/problem/:id', async (req, res) => {
+    if (!SYSTEM_STATE.mongoConnected) return res.status(500).json({ error: "No DB" });
+
+    try {
+        const result = await MathCache.findByIdAndDelete(req.params.id);
+        if (result) {
+            logSystem('SEC', 'Problem Deleted', `ID: ${req.params.id}`);
+            res.json({ success: true });
+        } else {
+            res.status(404).json({ success: false, message: "Not found" });
+        }
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 app.get('/admin/api/stats', async (req, res) => {
@@ -759,7 +823,7 @@ app.post('/admin/api/toggle-gen', (req, res) => {
     res.json({ status: SYSTEM_STATE.isGenerating });
 });
 
-// 🗑️ NEW: FLUSH TOPIC API (TRASH)
+// 🗑️ FLUSH TOPIC API (TRASH)
 app.delete('/admin/api/flush-topic/:topic/:diff', async (req, res) => {
     const { topic, diff } = req.params;
     if (!SYSTEM_STATE.mongoConnected) return res.status(500).json({ error: "No DB" });
@@ -779,6 +843,7 @@ app.delete('/admin/api/flush-topic/:topic/:diff', async (req, res) => {
 
 // =================================================================================================
 // SECTION 10: PREMIUM ADMINISTRATIVE DASHBOARD (FULL UN-MINIFIED HTML/CSS/JS)
+// This section is intentionally kept verbose to provide the full UI experience.
 // =================================================================================================
 
 app.get('/admin', (req, res) => {
@@ -788,7 +853,7 @@ app.get('/admin', (req, res) => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>BRAINTEST TITAN COMMAND CENTER V11.5</title>
+        <title>BRAINTEST TITAN COMMAND CENTER V12.1</title>
         <!-- Import Fonts -->
         <link href="https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
         
@@ -1072,7 +1137,7 @@ app.get('/admin', (req, res) => {
             <div class="sidebar">
                 <div class="brand">
                     <h1>TITAN ENGINE</h1>
-                    <span>v11.5 DIAMOND</span>
+                    <span>v12.1 DIAMOND</span>
                 </div>
                 
                 <button class="nav-btn active" onclick="switchTab('gen', this)">
@@ -1087,10 +1152,11 @@ app.get('/admin', (req, res) => {
 
                 <div style="margin-top: auto; padding-top: 20px; border-top: 1px solid var(--glass-border);">
                     <div style="font-size: 0.8rem; color: #10b981;">
-                        ✅ Fix: Anti-Duplicate Hash<br>
-                        ✅ Fix: Validation Guard<br>
-                        ✅ New: Trash Feature<br>
-                        ✅ New: Cambodia Difficulty
+                        ✅ Fix: Khmer Language<br>
+                        ✅ Fix: Math LaTeX ($)<br>
+                        ✅ Fix: Answer Shuffle<br>
+                        ✅ Fix: Score Auto-Merge<br>
+                        ✅ New: Delete Tools
                     </div>
                 </div>
             </div>
@@ -1362,7 +1428,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
         <div class="card">
-            <h1>🚀 TITAN ENGINE V11.5</h1>
+            <h1>🚀 TITAN ENGINE V12.1</h1>
             <p>UPTIME: ${d}d ${h}h</p>
             <div class="metric">PG: ${pg} | MONGO: ${mg}</div>
             <div class="metric">
@@ -1383,7 +1449,7 @@ app.get('/', (req, res) => {
 
 async function startSystem() {
     console.clear();
-    logSystem('OK', 'Booting BrainTest Titan V11.5 (Full Source Restored)...');
+    logSystem('OK', 'Booting BrainTest Titan V12.1 (Full Source Restored)...');
     
     // Initialize DBs (Non-blocking)
     initPostgres(); 
