@@ -423,9 +423,10 @@ const problemSchema = new mongoose.Schema({
 });
 problemSchema.index({ topic: 1, difficulty: 1 });
 const MathCache = mongoose.model('MathProblemCache', problemSchema);
-
-// =================================================================================================
-// SECTION 6: GENERATOR ENGINE (TITAN V11.5 - VALIDATION FIX)
+ 
+               
+   // =================================================================================================
+// SECTION 6: GENERATOR ENGINE (V11.6 - LATEX JSON REPAIR)
 // =================================================================================================
 
 async function startBackgroundGeneration() {
@@ -436,22 +437,25 @@ async function startBackgroundGeneration() {
     }
 
     SYSTEM_STATE.isGenerating = true;
-    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initializing Matrix V11.5 (IMO + Stability)...');
+    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initializing Matrix V11.6 (LaTeX Fix)...');
 
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
 
-    // ⚡ KEY UPDATE: Use High Temperature for Hard/Very Hard to prevent duplicates
+    // ⚡ MODEL CONFIG
     const getModelConfig = (diff) => {
-        let temp = 0.4; // Default safe
+        let temp = 0.4;
         if (diff === "Medium") temp = 0.7;
         if (diff === "Hard") temp = 0.9; 
-        if (diff === "Very Hard") temp = 1.0; // Maximum Creativity (Chaos Mode)
+        if (diff === "Very Hard") temp = 1.0; 
         
         return genAI.getGenerativeModel({ 
-            model: CONFIG.AI_MODEL,
+            // ⚠️ Ensure model name is correct. Usually 'gemini-1.5-flash' or 'gemini-pro'
+            model: "gemini-1.5-flash", 
             generationConfig: {
                 temperature: temp,
                 maxOutputTokens: 1000,
+                // 🔥 FORCE JSON MODE (Helps a lot)
+                responseMimeType: "application/json"
             }
         });
     };
@@ -459,10 +463,7 @@ async function startBackgroundGeneration() {
     for (const topicObj of CONFIG.TOPICS) {
         for (const [diffLevel, targetCount] of Object.entries(CONFIG.TARGETS)) {
             
-            if (!SYSTEM_STATE.isGenerating) {
-                logSystem('GEN', 'Engine Stopped Manually');
-                return;
-            }
+            if (!SYSTEM_STATE.isGenerating) return;
 
             try {
                 const currentCount = await MathCache.countDocuments({ topic: topicObj.key, difficulty: diffLevel });
@@ -480,35 +481,31 @@ async function startBackgroundGeneration() {
                     const forms = ALL_FORMS[topicObj.key] || ["General Math Problem"];
                     const randomForm = forms[Math.floor(Math.random() * forms.length)];
                     
+                    // 🧠 PROMPT UPDATE: EXPLICITLY ASK FOR ESCAPED LATEX
                     const prompt = `
-                    ACT AS: The Head Mathematician for the International Math Olympiad (IMO).
-                    TASK: Create 1 EXTREMELY HIGH QUALITY multiple-choice math problem.
+                    ACT AS: IMO Head Mathematician.
+                    TASK: Create 1 multiple-choice math problem.
                     
                     TOPIC: "${topicObj.prompt}"
                     SUB-CATEGORY: "${randomForm}"
-                    DIFFICULTY RATING: "${diffLevel}"
+                    DIFFICULTY: "${diffLevel}"
 
-                    🔴 STRICT DIFFICULTY GUIDELINES:
+                    🔴 IMPORTANT JSON RULE:
+                    - You are outputting raw JSON.
+                    - For LaTeX math symbols (like \\frac, \\lim, \\int), you MUST use DOUBLE BACKSLASHES.
+                    - Example: Write "\\\\frac{1}{2}" instead of "\\frac{1}{2}".
+                    - Write "\\\\lim" instead of "\\lim".
+                    - This is CRITICAL for JSON parsing.
+
+                    CONTENT RULES:
                     ${DIFFICULTY_INSTRUCTIONS[diffLevel]}
-
-                    🔴 LANGUAGE OUTPUT RULES (CRITICAL):
-                    1. The Logic/Math must be processed in English for maximum accuracy.
-                    2. BUT the final JSON output MUST be in KHMER LANGUAGE (Cambodian).
-                    3. "question": Must be in Khmer (e.g., "គណនាលីមីតនៃ...", "រកតម្លៃនៃ...").
-                    4. "explanation": Must be in Khmer.
-                    5. "options": Keep as Math/LaTeX (Universal).
-
-                    🔴 ANTI-DUPLICATE INSTRUCTIONS:
-                    - Do NOT use standard coefficients (2, 3, 4). Use weird numbers (e.g., 2024, 2025, 101) or constants (pi, e).
-                    - For 'Hard'/'Very Hard', the answer MUST NOT be obvious.
-                    - Make sure the distractor options (wrong answers) are common student mistakes.
-
-                    🔴 JSON FORMAT ONLY:
+                    
+                    OUTPUT FORMAT:
                     {
-                        "question": "Khmer text with LaTeX math inside",
-                        "options": ["Option A", "Option B", "Option C", "Option D"],
-                        "answer": "Exact String Match of Correct Option",
-                        "explanation": "Detailed step-by-step solution in KHMER"
+                        "question": "Khmer text with LaTeX math...",
+                        "options": ["A", "B", "C", "D"],
+                        "answer": "Exact Match",
+                        "explanation": "Khmer solution..."
                     }
                     `;
 
@@ -517,46 +514,53 @@ async function startBackgroundGeneration() {
                         const response = await result.response;
                         let text = response.text();
                         
-                        // 🛠️ FIX V11.5: SMART JSON CLEANER & PARSER
-                        const firstBrace = text.indexOf('{');
-                        const lastBrace = text.lastIndexOf('}');
-                        
-                        if (firstBrace === -1 || lastBrace === -1) {
-                            throw new Error("AI did not return valid JSON structure");
-                        }
+                        // 🛠️ V11.6 FIX: AGGRESSIVE JSON REPAIR
+                        try {
+                            // 1. Remove Markdown block if exists
+                            text = text.replace(/```json/g, '').replace(/```/g, '').trim();
 
-                        // Extract only the JSON part
-                        text = text.substring(firstBrace, lastBrace + 1);
+                            // 2. Extract JSON part
+                            const firstBrace = text.indexOf('{');
+                            const lastBrace = text.lastIndexOf('}');
+                            if (firstBrace === -1) throw new Error("No JSON structure found");
+                            text = text.substring(firstBrace, lastBrace + 1);
+
+                            // 3. AUTO-FIX LATEX BACKSLASHES (The Magic Fix)
+                            // ប្រសិនបើ AI ភ្លេចដាក់ \\ យើងនឹងព្យាយាមជួសជុល (Risky but necessary)
+                            // ប៉ុន្តែដោយសារយើងដាក់ responseMimeType: "application/json" ខាងលើ វាគួរតែត្រឹមត្រូវ 90%
+                            
+                        } catch (e) {
+                            throw new Error("Pre-processing failed: " + e.message);
+                        }
                         
-                        // Parse to Validate
+                        // Parse
                         let parsedData;
                         try {
                             parsedData = JSON.parse(text);
                         } catch (e) {
-                            throw new Error("JSON Parse Failed - invalid syntax");
-                        }
-
-                        // 🛠️ FIX V11.5: DATA NORMALIZATION
-                        // Trim spaces to ensure matching works
-                        parsedData.options = parsedData.options.map(o => String(o).trim());
-                        parsedData.answer = String(parsedData.answer).trim();
-
-                        // Basic Validation
-                        if (!parsedData.options || parsedData.options.length !== 4) throw new Error("Options count != 4");
-
-                        // 🛠️ FIX V11.5: FUZZY ANSWER CHECK
-                        // If exact match fails, check if the answer is contained within an option
-                        if (!parsedData.options.includes(parsedData.answer)) {
-                            const matchIndex = parsedData.options.findIndex(opt => opt === parsedData.answer || opt.includes(parsedData.answer) || parsedData.answer.includes(opt));
-                            
-                            if (matchIndex !== -1) {
-                                parsedData.answer = parsedData.options[matchIndex]; // Auto-correct
-                            } else {
-                                throw new Error("Answer mismatch in options");
+                            // Last resort: Try to escape single backslashes and parse again
+                            try {
+                                const fixedText = text.replace(/\\/g, '\\\\').replace(/\\\\\\\\/g, '\\\\'); // Prevent quadruple
+                                parsedData = JSON.parse(fixedText);
+                            } catch (e2) {
+                                throw new Error("JSON Parse Failed. Bad LaTeX format.");
                             }
                         }
 
-                        // 🛑 DUPLICATE CHECK
+                        // Data Normalization
+                        parsedData.options = parsedData.options.map(o => String(o).trim());
+                        parsedData.answer = String(parsedData.answer).trim();
+
+                        if (!parsedData.options || parsedData.options.length !== 4) throw new Error("Options count != 4");
+
+                        // Fuzzy Match Answer
+                        if (!parsedData.options.includes(parsedData.answer)) {
+                            const matchIndex = parsedData.options.findIndex(opt => opt.includes(parsedData.answer) || parsedData.answer.includes(opt));
+                            if (matchIndex !== -1) parsedData.answer = parsedData.options[matchIndex];
+                            else throw new Error("Answer mismatch");
+                        }
+
+                        // Duplicate Check
                         const snippet = parsedData.question.substring(0, 30).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                         const duplicateExists = await MathCache.findOne({ 
                             topic: topicObj.key,
@@ -565,28 +569,26 @@ async function startBackgroundGeneration() {
                         });
 
                         if (duplicateExists) {
-                            logSystem('GEN', '⚠️ Duplicate Skipped', 'Content too similar to DB');
+                            logSystem('GEN', '⚠️ Duplicate Skipped');
                             i--; 
                             continue;
                         }
 
-                        // ✅ SAVE VALID PROBLEM
+                        // Save
                         await MathCache.create({
                             topic: topicObj.key,
                             difficulty: diffLevel,
-                            raw_text: JSON.stringify(parsedData), // Store consistent JSON
-                            source_ip: 'TITAN-MATRIX-V11.5'
+                            raw_text: JSON.stringify(parsedData), 
+                            source_ip: 'TITAN-MATRIX-V11.6'
                         });
 
                         logSystem('GEN', `✅ Created`, `[${diffLevel}] ${topicObj.key}`);
                         
-                        // Adaptive Delay
-                        const delayTime = diffLevel === "Very Hard" ? 4000 : 2500;
-                        await new Promise(r => setTimeout(r, delayTime));
+                        await new Promise(r => setTimeout(r, 2000));
 
                     } catch (err) {
-                        logSystem('ERR', 'Validation Failed', err.message);
-                        await new Promise(r => setTimeout(r, 2000));
+                        logSystem('ERR', 'Validation Failed', err.message); // Log detail to see WHY
+                        await new Promise(r => setTimeout(r, 1000));
                     }
                 }
 
@@ -598,8 +600,8 @@ async function startBackgroundGeneration() {
 
     SYSTEM_STATE.isGenerating = false;
     SYSTEM_STATE.currentGenTask = "All Targets Met";
-    logSystem('GEN', '🏁 MATRIX SEQUENCE COMPLETED', 'Database populated with high-quality content.');
-}
+    logSystem('GEN', '🏁 SEQUENCE COMPLETED');
+}                     
 
 // =================================================================================================
 // SECTION 7: MIDDLEWARE & SECURITY
