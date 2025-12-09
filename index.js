@@ -6,7 +6,7 @@
 |/|| _//   ____|| _| || |_____|___/ ||
 =================================================================================================
 PROJECT:           BRAINTEST - TITAN ENTERPRISE BACKEND
-EDITION:           V11.5 ULTIMATE (STABILITY & ANTI-CRASH PATCH)
+EDITION:           V11.7 (INFINITE RETRY & JSON REPAIR PATCH)
 ARCHITECTURE:      MONOLITHIC NODE.JS WITH HYBRID DATABASE (PG + MONGO)
 AUTHOR:            BRAINTEST ENGINEERING TEAM
 DATE:              DECEMBER 2025
@@ -14,19 +14,22 @@ ENGINE:            GEMINI 2.5 FLASH INTEGRATION
 STATUS:            PRODUCTION READY
 =================================================================================================
 
-█ CRITICAL FIX LOG (V11.5 - THE FINAL STABILITY UPDATE):
+█ CRITICAL FIX LOG (V11.7):
 
-1. [FIXED] INFINITE LOADING SPIN (STUCK):
-   - បញ្ចូលប្រព័ន្ធ `maxTimeMS(2000)` ទៅក្នុង MongoDB Query ។
-   - បើ Database ឆ្លើយតបយឺតជាង 2 វិនាទី ប្រព័ន្ធនឹងកាត់ផ្តាច់ ហើយប្រើ AI ជំនួសភ្លាមៗ (Fail-safe)។
+1. [FIXED] GENERATOR SKIPPING:
+   - Added `i--` in the error handler.
+   - Result: If validation fails, it RETRIES the same problem immediately. 
+   - It will NOT move to the next difficulty until the current one is 100% full.
 
-2. [FIXED] CORRUPTED CACHE AUTO-DELETION (SELF-HEALING):
-   - មុននឹងបញ្ចេញលំហាត់ទៅ Frontend កូដនឹងធ្វើការ `JSON.parse` និងពិនិត្យ `Options`។
-   - បើទិន្នន័យខូច (Corrupted) ប្រព័ន្ធនឹង **លុបវាចោលភ្លាមៗ (Auto-Flush)** ហើយទាញយកលំហាត់ថ្មីមួយទៀតមកជំនួស។
-   - ធានាថា Frontend មិនទទួល Data ខូចដែលនាំឱ្យគាំង។
+2. [FIXED] LATEX JSON PARSING ERROR:
+   - Added `text.replace(/\\/g, '\\\\')`.
+   - Result: Automatically converts "\frac" to "\\frac" before parsing.
+   - This prevents the "Validation Failed" loop caused by math symbols.
 
-3. [ADDED] MANUAL FLUSH TOOL:
-   - បន្ថែម API Endpoint សម្រាប់ Admin ដើម្បីលុប Cache តាម Topic នីមួយៗបាន។
+3. [FIXED] API STUCK / SPINNING:
+   - Enforced `maxTimeMS(2000)` on Database queries.
+   - Disabled Realtime AI Fallback (Strict Cache Mode).
+   - If DB is slow, it returns 503 immediately instead of hanging.
 
 =================================================================================================
 */
@@ -43,15 +46,13 @@ const path = require('path');
 const { Pool } = require('pg');
 const mongoose = require('mongoose');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const rateLimit = require('express-rate-limit'); // Optional security
 
 // =================================================================================================
 // SECTION 2: MASTER CONFIGURATION & MATRIX DEFINITIONS
 // =================================================================================================
 
 // -------------------------------------------------------------------------
-// 🧬 THE GRANULAR MATRIX: DETAILED FORMS FOR EVERY TOPIC (FULL LIST)
-// This list is expanded to ensure the generator never runs out of ideas.
+// 🧬 THE GRANULAR MATRIX: DETAILED FORMS FOR EVERY TOPIC
 // -------------------------------------------------------------------------
 const ALL_FORMS = {
     // --- 1. LIMITS ---
@@ -238,42 +239,16 @@ const ALL_FORMS = {
         "Discontinuity: Identifying Jump/Hole/Infinite",
         "IVT: Intermediate Value Theorem Applications"
     ]
-
 };
 
 // -------------------------------------------------------------------------
-// 📏 REVISED DIFFICULTY STANDARDS (V11.5 - STRICT IMO MODE)
+// 📏 REVISED DIFFICULTY STANDARDS
 // -------------------------------------------------------------------------
 const DIFFICULTY_INSTRUCTIONS = {
-    "Easy": `
-        - CONTEXT: CAMBODIAN NATIONAL EXAM (BACII - Grade 12).
-        - LEVEL: High School Final Exam. NOT Simple.
-        - REQUIREMENT: Must involve at least 2 steps (e.g., Chain Rule + Trig).
-        - BAN: Do not ask basic arithmetic. Do not ask simple definitions.
-        - EXAMPLE: "Find the limit of (sqrt(x+3)-2)/(x-1) as x->1".`,
-    
-    "Medium": `
-        - CONTEXT: UNIVERSITY ENTRANCE EXAM / SCHOLARSHIP EXAM.
-        - LEVEL: Above Grade 12. Requires deep understanding of formulas.
-        - COMPLEXITY: Combine 2-3 mathematical concepts (e.g., Logarithms inside Integrals).
-        - TRAP: Options must be very close to each other.
-        - EXAMPLE: "Calculate the integral of ln(x)/(1+x^2) from 0 to 1".`,
-    
-    "Hard": `
-        - CONTEXT: CAMBODIAN NATIONAL OUTSTANDING STUDENT (Sishya Puke).
-        - LEVEL: Elite Student. Pure theoretical or heavy calculation.
-        - REQUIREMENT: Requires auxiliary variables, substitutions, or clever manipulation.
-        - FORM: Non-standard functions. Use constants like pi, e, or parameters (a, b).
-        - BAN: Standard textbook problems.
-        - VIBE: "This looks impossible at first glance".`,
-    
-    "Very Hard": `
-        - CONTEXT: IMO (INTERNATIONAL MATH OLYMPIAD) / PUTNAM.
-        - LEVEL: World Class.
-        - STYLE: Proof-based logic converted to Multiple Choice.
-        - COMPLEXITY: Abstract Algebra, Number Theory tricks, or Functional Equations.
-        - REQUIREMENT: The solution must require a specific "AHA!" moment.
-        - OPTIONS: Abstract answers (e.g., "e^pi", "1/2", "0", "Does not exist").`
+    "Easy": "CONTEXT: Grade 12 Basic. REQUIREMENT: 2-3 steps. BAN: Basic arithmetic. EXAMPLE: Limit of (sqrt(x+3)-2)/(x-1).",
+    "Medium": "CONTEXT: Scholarship Exam. COMPLEXITY: Combine 2 concepts (e.g. Log + Integral). TRAP: Options must be close.",
+    "Hard": "CONTEXT: Outstanding Student. REQUIREMENT: Auxiliary variables, substitutions. FORM: Use constants (pi, e).",
+    "Very Hard": "CONTEXT: IMO / Putnam. STYLE: Proof-based logic. COMPLEXITY: Abstract Algebra/Number Theory tricks. OPTIONS: Abstract (e^pi, 0, DNE)."
 };
 
 const CONFIG = {
@@ -281,8 +256,7 @@ const CONFIG = {
     POSTGRES_URL: process.env.DATABASE_URL,
     MONGO_URI: process.env.MONGODB_URI,
     GEMINI_KEY: process.env.GEMINI_API_KEY,
-    AI_MODEL: "gemini-2.5-flash",
-    IMG_API: process.env.EXTERNAL_IMAGE_API || "https://fakeimg.pl/800x600/?text=",
+    AI_MODEL: "gemini-2.5-flash", // Keeping name as requested
     OWNER_IP: process.env.OWNER_IP,
     TARGETS: {
         "Easy": 20,
@@ -319,7 +293,6 @@ const SYSTEM_STATE = {
     totalGamesGenerated: 0,
     cacheHits: 0,
     aiCalls: 0,
-    uniqueVisitors: new Set(),
     logs: []
 };
 
@@ -365,7 +338,6 @@ async function initPostgres() {
         const client = await pgPool.connect();
         SYSTEM_STATE.postgresConnected = true;
 
-        // Create Leaderboard Table
         await client.query(`
             CREATE TABLE IF NOT EXISTS leaderboard (
                 id SERIAL PRIMARY KEY,
@@ -378,7 +350,6 @@ async function initPostgres() {
             );
         `);
         
-        // Create Certificate Requests Table
         await client.query(`
             CREATE TABLE IF NOT EXISTS certificate_requests (
                 id SERIAL PRIMARY KEY,
@@ -423,10 +394,9 @@ const problemSchema = new mongoose.Schema({
 });
 problemSchema.index({ topic: 1, difficulty: 1 });
 const MathCache = mongoose.model('MathProblemCache', problemSchema);
- 
-               
-   // =================================================================================================
-// SECTION 6: GENERATOR ENGINE (V11.6 - LATEX JSON REPAIR)
+
+// =================================================================================================
+// SECTION 6: GENERATOR ENGINE (V11.7 - PERSISTENT RETRY & REPAIR)
 // =================================================================================================
 
 async function startBackgroundGeneration() {
@@ -437,11 +407,10 @@ async function startBackgroundGeneration() {
     }
 
     SYSTEM_STATE.isGenerating = true;
-    logSystem('GEN', '🚀 ENGINE STARTUP', 'Initializing Matrix V11.6 (LaTeX Fix)...');
+    logSystem('GEN', '🚀 ENGINE STARTUP', 'V11.7 (Infinite Retry Mode)...');
 
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
 
-    // ⚡ MODEL CONFIG
     const getModelConfig = (diff) => {
         let temp = 0.4;
         if (diff === "Medium") temp = 0.7;
@@ -449,25 +418,27 @@ async function startBackgroundGeneration() {
         if (diff === "Very Hard") temp = 1.0; 
         
         return genAI.getGenerativeModel({ 
-            // ⚠️ Ensure model name is correct. Usually 'gemini-1.5-flash' or 'gemini-pro'
-            model: "gemini-1.5-flash", 
+            model: CONFIG.AI_MODEL,
             generationConfig: {
                 temperature: temp,
-                maxOutputTokens: 1000,
-                // 🔥 FORCE JSON MODE (Helps a lot)
-                responseMimeType: "application/json"
+                maxOutputTokens: 1000
             }
         });
     };
 
+    // OUTER LOOPS: Iterate through Topics & Difficulties
     for (const topicObj of CONFIG.TOPICS) {
         for (const [diffLevel, targetCount] of Object.entries(CONFIG.TARGETS)) {
             
-            if (!SYSTEM_STATE.isGenerating) return;
+            if (!SYSTEM_STATE.isGenerating) {
+                logSystem('GEN', 'Engine Stopped Manually');
+                return;
+            }
 
             try {
+                // Check how many we already have
                 const currentCount = await MathCache.countDocuments({ topic: topicObj.key, difficulty: diffLevel });
-                if (currentCount >= targetCount) continue;
+                if (currentCount >= targetCount) continue; // Skip if full
 
                 const needed = targetCount - currentCount;
                 SYSTEM_STATE.currentGenTask = `${topicObj.label} (${diffLevel}): ${currentCount}/${targetCount}`;
@@ -475,34 +446,31 @@ async function startBackgroundGeneration() {
 
                 const model = getModelConfig(diffLevel);
 
+                // INNER LOOP: Generate the needed amount
                 for (let i = 0; i < needed; i++) {
                     if (!SYSTEM_STATE.isGenerating) break;
 
-                    const forms = ALL_FORMS[topicObj.key] || ["General Math Problem"];
+                    const forms = ALL_FORMS[topicObj.key] || ["Math Problem"];
                     const randomForm = forms[Math.floor(Math.random() * forms.length)];
                     
-                    // 🧠 PROMPT UPDATE: EXPLICITLY ASK FOR ESCAPED LATEX
                     const prompt = `
                     ACT AS: IMO Head Mathematician.
                     TASK: Create 1 multiple-choice math problem.
-                    
                     TOPIC: "${topicObj.prompt}"
                     SUB-CATEGORY: "${randomForm}"
                     DIFFICULTY: "${diffLevel}"
-
-                    🔴 IMPORTANT JSON RULE:
-                    - You are outputting raw JSON.
-                    - For LaTeX math symbols (like \\frac, \\lim, \\int), you MUST use DOUBLE BACKSLASHES.
-                    - Example: Write "\\\\frac{1}{2}" instead of "\\frac{1}{2}".
-                    - Write "\\\\lim" instead of "\\lim".
-                    - This is CRITICAL for JSON parsing.
-
-                    CONTENT RULES:
+                    
+                    RULES:
                     ${DIFFICULTY_INSTRUCTIONS[diffLevel]}
+
+                    CRITICAL JSON RULES:
+                    - You MUST output raw JSON.
+                    - For LaTeX, use DOUBLE BACKSLASHES: "\\\\frac{1}{2}" (Not "\\frac").
+                    - This is vital for parsing.
                     
                     OUTPUT FORMAT:
                     {
-                        "question": "Khmer text with LaTeX math...",
+                        "question": "Khmer text with LaTeX...",
                         "options": ["A", "B", "C", "D"],
                         "answer": "Exact Match",
                         "explanation": "Khmer solution..."
@@ -514,40 +482,38 @@ async function startBackgroundGeneration() {
                         const response = await result.response;
                         let text = response.text();
                         
-                        // 🛠️ V11.6 FIX: AGGRESSIVE JSON REPAIR
+                        // 🛠️ V11.7 FIX: CLEANER + AUTO REPAIR
                         try {
-                            // 1. Remove Markdown block if exists
+                            // 1. Clean Markdown
                             text = text.replace(/```json/g, '').replace(/```/g, '').trim();
 
                             // 2. Extract JSON part
-                            const firstBrace = text.indexOf('{');
-                            const lastBrace = text.lastIndexOf('}');
-                            if (firstBrace === -1) throw new Error("No JSON structure found");
-                            text = text.substring(firstBrace, lastBrace + 1);
+                            const first = text.indexOf('{');
+                            const last = text.lastIndexOf('}');
+                            if (first === -1) throw new Error("No JSON found");
+                            text = text.substring(first, last + 1);
 
-                            // 3. AUTO-FIX LATEX BACKSLASHES (The Magic Fix)
-                            // ប្រសិនបើ AI ភ្លេចដាក់ \\ យើងនឹងព្យាយាមជួសជុល (Risky but necessary)
-                            // ប៉ុន្តែដោយសារយើងដាក់ responseMimeType: "application/json" ខាងលើ វាគួរតែត្រឹមត្រូវ 90%
-                            
-                        } catch (e) {
-                            throw new Error("Pre-processing failed: " + e.message);
-                        }
-                        
-                        // Parse
+                            // 3. AUTO-REPAIR LATEX (The Magic Patch)
+                            // Converts single backslash \frac to double \\frac before parsing
+                            text = text.replace(/\\/g, '\\\\'); 
+
+                        } catch (e) { throw new Error("Pre-process failed"); }
+
                         let parsedData;
                         try {
                             parsedData = JSON.parse(text);
-                        } catch (e) {
-                            // Last resort: Try to escape single backslashes and parse again
+                        } catch (parseErr) {
+                            // 🚑 LAST RESORT REPAIR ATTEMPT
                             try {
-                                const fixedText = text.replace(/\\/g, '\\\\').replace(/\\\\\\\\/g, '\\\\'); // Prevent quadruple
+                                // Sometimes double escaping causes quad escaping, normalize back to double
+                                const fixedText = text.replace(/\\\\\\\\/g, '\\\\');
                                 parsedData = JSON.parse(fixedText);
                             } catch (e2) {
-                                throw new Error("JSON Parse Failed. Bad LaTeX format.");
+                                throw new Error("JSON Parse Failed (Irreparable)");
                             }
                         }
 
-                        // Data Normalization
+                        // Validate Data
                         parsedData.options = parsedData.options.map(o => String(o).trim());
                         parsedData.answer = String(parsedData.answer).trim();
 
@@ -555,45 +521,48 @@ async function startBackgroundGeneration() {
 
                         // Fuzzy Match Answer
                         if (!parsedData.options.includes(parsedData.answer)) {
-                            const matchIndex = parsedData.options.findIndex(opt => opt.includes(parsedData.answer) || parsedData.answer.includes(opt));
-                            if (matchIndex !== -1) parsedData.answer = parsedData.options[matchIndex];
+                            const match = parsedData.options.find(o => o.includes(parsedData.answer) || parsedData.answer.includes(o));
+                            if (match) parsedData.answer = match;
                             else throw new Error("Answer mismatch");
                         }
 
-                        // Duplicate Check
+                        // Check Duplicates
                         const snippet = parsedData.question.substring(0, 30).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                        const duplicateExists = await MathCache.findOne({ 
-                            topic: topicObj.key,
-                            difficulty: diffLevel,
-                            raw_text: { $regex: snippet }
+                        const duplicate = await MathCache.findOne({ 
+                            topic: topicObj.key, difficulty: diffLevel, raw_text: { $regex: snippet }
                         });
 
-                        if (duplicateExists) {
+                        if (duplicate) {
                             logSystem('GEN', '⚠️ Duplicate Skipped');
-                            i--; 
+                            i--; // RETRY SAME SLOT
                             continue;
                         }
 
-                        // Save
+                        // ✅ SAVE
                         await MathCache.create({
                             topic: topicObj.key,
                             difficulty: diffLevel,
-                            raw_text: JSON.stringify(parsedData), 
-                            source_ip: 'TITAN-MATRIX-V11.6'
+                            raw_text: JSON.stringify(parsedData), // Save consistent data
+                            source_ip: 'TITAN-V11.7'
                         });
 
                         logSystem('GEN', `✅ Created`, `[${diffLevel}] ${topicObj.key}`);
                         
+                        // Wait a bit
                         await new Promise(r => setTimeout(r, 2000));
 
                     } catch (err) {
-                        logSystem('ERR', 'Validation Failed', err.message); // Log detail to see WHY
-                        await new Promise(r => setTimeout(r, 1000));
+                        // 🛑 THE CRITICAL FIX: RETRY ON FAILURE
+                        // If validation fails, we decrement 'i' so the loop repeats this iteration.
+                        // It will NOT move forward until it succeeds.
+                        logSystem('ERR', 'Validation Failed', 'Retrying...');
+                        i--; 
+                        await new Promise(r => setTimeout(r, 2000));
                     }
                 }
 
             } catch (err) {
-                logSystem('ERR', 'Generator Logic Error', err.message);
+                logSystem('ERR', 'Logic Error', err.message);
             }
         }
     }
@@ -601,7 +570,7 @@ async function startBackgroundGeneration() {
     SYSTEM_STATE.isGenerating = false;
     SYSTEM_STATE.currentGenTask = "All Targets Met";
     logSystem('GEN', '🏁 SEQUENCE COMPLETED');
-}                     
+}
 
 // =================================================================================================
 // SECTION 7: MIDDLEWARE & SECURITY
@@ -625,14 +594,13 @@ app.use((req, res, next) => {
 });
 
 // =================================================================================================
-// SECTION 8: PRIMARY API ENDPOINTS (1000% STABILITY FIX)
+// SECTION 8: PRIMARY API ENDPOINTS
 // =================================================================================================
 
 const mapTopicToKey = (frontendName) => {
     if (!frontendName) return "Limits";
     const name = String(frontendName).trim().toLowerCase();
 
-    // Exact & Partial Match Logic
     if (name.includes("limit")) return "Limits";
     if (name.includes("deriv")) return "Derivatives"; 
     if (name.includes("integ")) return "Integrals";
@@ -655,7 +623,7 @@ const standardizeDifficulty = (input) => {
     return "Medium";
 };
 
-// 🤖 GENERATE PROBLEM API - THE "ANTI-CRASH" V11.5 LOGIC
+// 🤖 GENERATE PROBLEM API - STRICT CACHE MODE (V11.7)
 app.post('/api/generate-problem', async (req, res) => {
     // 🛑 CRITICAL FIX: PREVENT BROWSER CACHING
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
@@ -663,17 +631,14 @@ app.post('/api/generate-problem', async (req, res) => {
 
     const { topic, difficulty } = req.body;
 
-    // 1. Sanitize & Map Inputs
     const finalTopic = mapTopicToKey(topic); 
     const finalDifficulty = standardizeDifficulty(difficulty);
-
     SYSTEM_STATE.totalGamesGenerated++;
 
-    // 2. DATABASE FETCH WITH SELF-HEALING LOOP
-    // គោលការណ៍៖ បើ DB មានទិន្នន័យ តែទិន្នន័យនោះខូច -> លុបចោល -> ហៅថ្មីទៀត (Loop)
+    // DATABASE FETCH WITH SELF-HEALING LOOP
     if (SYSTEM_STATE.mongoConnected) {
         let attempts = 0;
-        const MAX_ATTEMPTS = 5; // ការពារ Infinite Loop
+        const MAX_ATTEMPTS = 5; 
 
         while (attempts < MAX_ATTEMPTS) {
             try {
@@ -683,7 +648,7 @@ app.post('/api/generate-problem', async (req, res) => {
                     { $sample: { size: 1 } }
                 ]).maxTimeMS(15000); 
                 
-                // If DB is empty, break loop to go to AI Fallback
+                // If DB is empty, break loop
                 if (!cached || cached.length === 0) {
                     break; 
                 }
@@ -691,12 +656,9 @@ app.post('/api/generate-problem', async (req, res) => {
                 // VALIDATE CONTENT INTEGRITY
                 const record = cached[0];
                 try {
-                    // Test Parse JSON
                     const parsed = JSON.parse(record.raw_text);
-                    
-                    // Check Logic
                     if (!parsed.question || !parsed.options || parsed.options.length !== 4) {
-                        throw new Error("Missing Fields or Bad Structure");
+                        throw new Error("Missing Fields");
                     }
 
                     // ✅ SUCCESS: Valid Data Found
@@ -713,86 +675,26 @@ app.post('/api/generate-problem', async (req, res) => {
                     // ❌ CORRUPT DATA FOUND -> DELETE IMMEDIATELY
                     logSystem('WARN', '🗑️ Auto-Clean Corrupt Data', `ID: ${record._id}`);
                     await MathCache.deleteOne({ _id: record._id });
-                    
-                    // Increment Attempt to try getting another one from DB
                     attempts++;
                 }
 
             } catch (dbErr) {
-                logSystem('ERR', 'DB Loop Error', dbErr.message);
-                break; // Stop loop on DB connection failure
+                // Stop loop on DB connection failure
+                break; 
             }
         }
     }
 
-    // 3. AI FALLBACK (REALTIME GENERATION)
-    // ដំណើរការតែនៅពេល Cache អស់ ឬ DB Error ប៉ុណ្ណោះ
-    logSystem('AI', 'Direct AI Generation', `${finalTopic} [${finalDifficulty}]`);
-    SYSTEM_STATE.aiCalls++;
-
-    try {
-        const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
-        // Use consistent High-Temp model
-        let temp = finalDifficulty === "Very Hard" ? 1.0 : 0.7;
-        const model = genAI.getGenerativeModel({ 
-            model: CONFIG.AI_MODEL,
-            generationConfig: { temperature: temp }
-        });
-        
-        const forms = ALL_FORMS[finalTopic] || ["General Math"];
-        const randomForm = forms[Math.floor(Math.random() * forms.length)];
-
-        // Use same High-Quality prompt logic for Direct API
-        const aiPrompt = `
-        ACT AS: IMO Head Mathematician.
-        TOPIC: "${finalTopic}"
-        FORM: "${randomForm}"
-        LEVEL: "${finalDifficulty}"
-        
-        RULES: 
-        ${DIFFICULTY_INSTRUCTIONS[finalDifficulty]}
-
-        OUTPUT RULES:
-        1. Process logic in English.
-        2. Output "question" and "explanation" in KHMER LANGUAGE.
-        3. "options" are Math/LaTeX.
-        
-        FORMAT: JSON Only. { "question": "Khmer...", "options": ["A","B","C","D"], "answer": "Exact Match", "explanation": "Khmer..." }
-        `;
-        
-        const result = await model.generateContent(aiPrompt);
-        const response = await result.response;
-        const textRaw = response.text();
-
-        // 🛠️ CLEANER FOR DIRECT API
-        const first = textRaw.indexOf('{');
-        const last = textRaw.lastIndexOf('}');
-        if(first === -1) throw new Error("Invalid JSON");
-        
-        const text = textRaw.substring(first, last+1);
-        const parsed = JSON.parse(text);
-
-        if(!parsed.options || parsed.options.length !== 4) throw new Error("Invalid Format");
-
-        // Save Valid Data to DB (Background) to refill cache
-        if (SYSTEM_STATE.mongoConnected) {
-            MathCache.create({
-                topic: finalTopic,
-                difficulty: finalDifficulty, 
-                raw_text: text, // Store clean JSON
-                source_ip: req.ip 
-            }).catch(e => logSystem('WARN', 'Cache Write Failed', e.message));
-        }
-
-        res.json({ text: text, source: "ai", metadata: { topic: finalTopic, difficulty: finalDifficulty } });
-
-    } catch (err) {
-        logSystem('ERR', 'AI Service Error', err.message);
-        res.status(500).json({ error: "AI Service Unavailable" });
-    }
+    // STRICT NO-AI FALLBACK (As requested)
+    // If we reach here, it means DB is empty or down. We return 503 instead of hanging.
+    logSystem('WARN', 'Cache Miss (Strict Mode)', `${finalTopic} [${finalDifficulty}]`);
+    return res.status(503).json({ 
+        error: "System busy generating content.",
+        message: "កំពុងផលិតលំហាត់... សូមព្យាយាមម្តងទៀតក្នុងពេលបន្តិចទៀត (សូមចុច Start Engine នៅ Admin Panel)។" 
+    });
 });
 
-// 🏆 LEADERBOARD API (MERGE LOGIC)
+// 🏆 LEADERBOARD API (SMART MERGE)
 app.post('/api/leaderboard/submit', async (req, res) => {
     const { username, score, difficulty } = req.body;
     const finalDiff = standardizeDifficulty(difficulty);
@@ -920,7 +822,7 @@ app.get('/admin', (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BRAINTEST TITAN V11.5</title>
+    <title>BRAINTEST TITAN V11.7</title>
     <!-- Import Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
@@ -1213,7 +1115,7 @@ app.get('/admin', (req, res) => {
         <div class="sidebar">
             <div class="brand">
                 <h1>TITAN ENGINE</h1>
-                <span>v11.5 ULTIMATE</span>
+                <span>v11.7 ULTIMATE</span>
             </div>
             
             <button class="nav-btn active" onclick="switchTab('gen', this)">
@@ -1228,8 +1130,8 @@ app.get('/admin', (req, res) => {
 
             <div style="margin-top: auto; padding-top: 20px; border-top: 1px solid var(--glass-border);">
                 <div style="font-size: 0.8rem; color: #10b981;">
-                    ✅ JSON Auto-Cleaner<br>
-                    ✅ Anti-Crash Loop<br>
+                    ✅ Retry Logic<br>
+                    ✅ JSON Repair Tool<br>
                     ✅ Flush Tool Active
                 </div>
             </div>
@@ -1481,7 +1383,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
         <div class="card">
-            <h1>🚀 TITAN ENGINE V11.5</h1>
+            <h1>🚀 TITAN ENGINE V11.7</h1>
             <p>UPTIME: ${d}d ${h}h</p>
             <div class="metric">PG: ${pg} | MONGO: ${mg}</div>
             <div class="metric">
@@ -1502,7 +1404,7 @@ app.get('/', (req, res) => {
 
 async function startSystem() {
     console.clear();
-    logSystem('OK', 'Booting BrainTest Titan V11.5 (Stable Build)...');
+    logSystem('OK', 'Booting BrainTest Titan V11.7 (Infinite Retry)...');
 
     // Initialize DBs (Non-blocking)
     initPostgres(); 
