@@ -1240,6 +1240,7 @@ const d = Math.floor(uptime / 86400);
 const h = Math.floor((uptime % 86400) / 3600);
 const pg = SYSTEM_STATE.postgresConnected ? '<span style="color:#10b981">● ONLINE</span>' : '<span style="color:#ef4444">● OFFLINE</span>';
 const mg = SYSTEM_STATE.mongoConnected ? '<span style="color:#10b981">● ONLINE</span>' : '<span style="color:#ef4444">● OFFLINE</span>';
+const uniqueCount = SYSTEM_STATE.uniqueVisitors.size;    
 
 res.send(`
 <!DOCTYPE html>
