@@ -1266,6 +1266,11 @@ res.send(`
             HITS: ${SYSTEM_STATE.cacheHits} | 
             AI: ${SYSTEM_STATE.aiCalls}
         </div>
+
+        <div class="metric" style="background:rgba(59, 130, 246, 0.2); color:#93c5fd; border: 1px solid rgba(59, 130, 246, 0.5);">
+        UNIQUE VISITORS: ${uniqueCount}
+    </div>
+        
         <a href="/admin" class="btn">🔐 ENTER ADMIN PANEL</a>
     </div>
 </body>
