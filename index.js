@@ -211,9 +211,9 @@ OWNER_IP: process.env.OWNER_IP,
 CACHE_RATE: 0.25,
 TARGETS: {
 "Easy": 20,
-"Medium": 20,
-"Hard": 20,
-"Very Hard": 20,
+"Medium": 10,
+"Hard": 10,
+"Very Hard": 10,
 },
 TOPICS: [
 { key: "Limits", label: "លីមីត (Limits)", prompt: "Calculus Limits" },
@@ -483,27 +483,16 @@ for (const topicObj of CONFIG.TOPICS) {
                     // Delay to avoid rate limits
                     await new Promise(r => setTimeout(r, 10000));
 
-                                } catch (err) {
-                    // 🔥 UPDATED: ចាប់យកកំហុស 429 (QUOTA), 503 (SERVICE UNAVAILABLE) ឬ Overloaded
-                    if (
-                        err.message.includes('429') || 
-                        err.message.includes('quota') ||
-                        err.message.includes('503') ||
-                        err.message.includes('overloaded')
-                    ) {
-                        logSystem('WARN', '⏳ API PAUSE (Quota/Overload)', 'Pausing for 60 seconds...');
-                        // រង់ចាំ 60 វិនាទី
+                } catch (err) {
+                    if (err.message.includes('429') || err.message.includes('quota')) {
+                        logSystem('WARN', '⏳ QUOTA HIT', 'Pausing for 60 seconds...');
                         await new Promise(r => setTimeout(r, 60000));
-                        // ព្យាយាមធ្វើវិញនូវតំណាក់កាលបច្ចុប្បន្ន
                         i--; 
                     } else {
-                        // កំហុសផ្សេងៗទៀត (JSON មិនត្រឹមត្រូវ/Network ខ្លី)
-                        logSystem('ERR', 'Gen Logic Error (Unknown)', err.message);
-                        // រង់ចាំខ្លី
-                        await new Promise(r => setTimeout(r, 10000));
+                        logSystem('ERR', 'Gen Logic Error', err.message);
+                        await new Promise(r => setTimeout(r, 2000));
                     }
                 }
-
             }
 
         } catch (err) {
@@ -742,7 +731,7 @@ const client = await pgPool.connect();
 app.get('/api/leaderboard/top', async (req, res) => {
 try {
 const client = await pgPool.connect();
-const result = await client.query(`SELECT username, SUM(score) as score, COUNT(difficulty) as games_played FROM leaderboard GROUP BY username ORDER BY score DESC LIMIT 1000`);
+const result = await client.query(`SELECT username, SUM(score) as score, COUNT(difficulty) as games_played FROM leaderboard GROUP BY username ORDER BY score DESC LIMIT 100`);
 client.release();
 res.json(result.rows);
 } catch (err) { res.status(500).json([]); }
