@@ -483,16 +483,27 @@ for (const topicObj of CONFIG.TOPICS) {
                     // Delay to avoid rate limits
                     await new Promise(r => setTimeout(r, 10000));
 
-                } catch (err) {
-                    if (err.message.includes('429') || err.message.includes('quota')) {
-                        logSystem('WARN', '⏳ QUOTA HIT', 'Pausing for 60 seconds...');
+                                } catch (err) {
+                    // 🔥 UPDATED: ចាប់យកកំហុស 429 (QUOTA), 503 (SERVICE UNAVAILABLE) ឬ Overloaded
+                    if (
+                        err.message.includes('429') || 
+                        err.message.includes('quota') ||
+                        err.message.includes('503') ||
+                        err.message.includes('overloaded')
+                    ) {
+                        logSystem('WARN', '⏳ API PAUSE (Quota/Overload)', 'Pausing for 60 seconds...');
+                        // រង់ចាំ 60 វិនាទី
                         await new Promise(r => setTimeout(r, 60000));
+                        // ព្យាយាមធ្វើវិញនូវតំណាក់កាលបច្ចុប្បន្ន
                         i--; 
                     } else {
-                        logSystem('ERR', 'Gen Logic Error', err.message);
+                        // កំហុសផ្សេងៗទៀត (JSON មិនត្រឹមត្រូវ/Network ខ្លី)
+                        logSystem('ERR', 'Gen Logic Error (Unknown)', err.message);
+                        // រង់ចាំខ្លី
                         await new Promise(r => setTimeout(r, 2000));
                     }
                 }
+
             }
 
         } catch (err) {
