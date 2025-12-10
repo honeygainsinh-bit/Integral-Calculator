@@ -211,9 +211,9 @@ OWNER_IP: process.env.OWNER_IP,
 CACHE_RATE: 0.25,
 TARGETS: {
 "Easy": 20,
-"Medium": 15,
-"Hard": 15,
-"Very Hard": 15,
+"Medium": 20,
+"Hard": 20,
+"Very Hard": 20,
 },
 TOPICS: [
 { key: "Limits", label: "លីមីត (Limits)", prompt: "Calculus Limits" },
@@ -500,7 +500,7 @@ for (const topicObj of CONFIG.TOPICS) {
                         // កំហុសផ្សេងៗទៀត (JSON មិនត្រឹមត្រូវ/Network ខ្លី)
                         logSystem('ERR', 'Gen Logic Error (Unknown)', err.message);
                         // រង់ចាំខ្លី
-                        await new Promise(r => setTimeout(r, 2000));
+                        await new Promise(r => setTimeout(r, 10000));
                     }
                 }
 
