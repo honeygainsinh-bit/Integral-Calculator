@@ -611,10 +611,6 @@ if (SYSTEM_STATE.mongoConnected) {
     } catch (e) { logSystem('ERR', 'Cache Read Error', e.message); }
 }
 
-// 3. AI FALLBACK (DIRECT GENERATION)
-logSystem('AI', 'Direct AI Generation', `${finalTopic} [${finalDifficulty}]`);
-SYSTEM_STATE.aiCalls++;
-
 try {
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
     const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
