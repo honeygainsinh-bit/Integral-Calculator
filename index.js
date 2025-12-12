@@ -210,7 +210,7 @@ IMG_API: process.env.EXTERNAL_IMAGE_API || "https://fakeimg.pl/800x600/?text=",
 OWNER_IP: process.env.OWNER_IP,
 CACHE_RATE: 0.25,
 TARGETS: {
-"Easy": 50,
+"Easy": 100,
 "Medium": 20,
 "Hard": 20,
 "Very Hard": 20,
