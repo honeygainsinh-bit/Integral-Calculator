@@ -662,90 +662,90 @@ try {
 
 });
 
- * 🏆 SUBMIT SCORE API (PUBLIC/GUEST)
- * Handles score submission using client-supplied username.
- */
+// 🏆 LEADERBOARD SUBMIT API (SMART MERGE & ANTI-CHEAT)
+// =========================================================================
 app.post('/api/leaderboard/submit', async (req, res) => {
-    // 🔥 NO TOKEN REQUIRED - PUBLIC MODE
     const { username, score, difficulty } = req.body;
 
+    // 0. standardizeDifficulty: ធានាថាឈ្មោះកម្រិតត្រូវនឹង CONFIG (Easy, Medium...)
+    const finalDiff = standardizeDifficulty(difficulty);
+
+    // ពិនិត្យមើលថាតើទិន្នន័យមកគ្រប់ឬអត់
     if (!username || typeof score !== 'number' || !difficulty) {
-        return res.status(400).json({ success: false, message: "Missing username, score, or difficulty" });
+        return res.status(400).json({ success: false, message: "Missing Data" });
     }
 
     try {
         const client = await pgPool.connect();
 
-        // 1. ANTI-CHEAT: SCORE LIMIT CHECK
-        const maxAllowed = CONFIG.ALLOWED_SCORES[difficulty] || 100;
+        // -----------------------------------------------------------------
+        // 🛡️ 1. ANTI-CHEAT: ពិនិត្យដែនកំណត់ពិន្ទុ (SCORE LIMIT CHECK)
+        // -----------------------------------------------------------------
+        // ទាញយកពិន្ទុអតិបរមាដែលអនុញ្ញាតពី CONFIG (ឧ. Easy=5, Hard=15)
+        const maxAllowed = CONFIG.ALLOWED_SCORES[finalDiff] || 50; 
+        
         if (score > maxAllowed) {
-            logSystem('SEC', `Score Rejected (Anti-Cheat)`, `User: ${username}, Score: ${score}`);
             client.release();
-            return res.status(403).json({ success: false, message: "Score exceeds difficulty limit." });
+            // កត់ត្រាទុកថាមានគេបន្លំ
+            logSystem('SEC', '⚠️ CHEAT DETECTED', `User: ${username} tried submitting ${score} (Max: ${maxAllowed})`);
+            return res.status(403).json({ success: false, message: "Score rejected: Exceeds limit per game." });
         }
 
-        // 2. SMART MERGE LOGIC
+        // -----------------------------------------------------------------
+        // 🧠 2. SMART MERGE LOGIC (យន្តការបូកបញ្ចូលនិងលុបស្ទួន)
+        // -----------------------------------------------------------------
+        
+        // [A] ស្វែងរកគ្រប់ ID ទាំងអស់របស់ user នេះក្នុងកម្រិតនេះ (Older ID first)
         const check = await client.query(
-            'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC',
-            [username, difficulty]
+            'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC', 
+            [username, finalDiff]
         );
-
+        
         if (check.rows.length > 0) {
-            // MERGE
+            // --- ករណីមានកំណត់ត្រាចាស់ (Old Records Found) ---
+            
             const rows = check.rows;
-            const targetId = rows[0].id; 
-            const currentTotal = rows.reduce((acc, row) => acc + row.score, 0);
-            const finalScore = currentTotal + score;
+            const survivorId = rows[0].id; // ទុក ID ចាស់ជាងគេមួយ (Survivor)
 
-            await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [finalScore, targetId]);
-            logSystem('DB', `Merged Score`, `User: ${username}, Total: ${finalScore}`);
+            // [B] បូកពិន្ទុចាស់ៗទាំងអស់ដែលមានក្នុង DB (Consolidate Duplicates)
+            // ឧទាហរណ៍: បើមាន ID1(5) និង ID2(10) => totalExisting = 15
+            const totalExistingScore = rows.reduce((sum, row) => sum + row.score, 0);
+            
+            // [C] បូកពិន្ទុថ្មីចូលទៅក្នុងផលបូកចាស់
+            const grandTotal = totalExistingScore + score;
+            
+            // [D] Update Survivor ជាមួយនឹងពិន្ទុសរុបថ្មី
+            await client.query(
+                'UPDATE leaderboard SET score = $1, updated_at = NOW(), ip_address = $3 WHERE id = $2', 
+                [grandTotal, survivorId, req.ip]
+            );
+            
+            logSystem('DB', 'Merged Score', `${username}: Old(${totalExistingScore}) + New(${score}) = ${grandTotal}`);
 
-            // DEDUPLICATE
+            // [E] KILL CLONES: លុប ID ស្ទួនផ្សេងៗទៀតចោលទាំងអស់ (ទុកតែ Survivor)
             if (rows.length > 1) {
                 const idsToDelete = rows.slice(1).map(r => r.id);
                 await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
+                logSystem('DB', 'Cleanup Duplicates', `Deleted IDs: ${idsToDelete.join(', ')}`);
             }
+
         } else {
-            // INSERT
-            const userIP = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+            // --- ករណីជាអ្នកលេងថ្មី (New Player) ---
             await client.query(
-                'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
-                [username, score, difficulty, userIP]
+                'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)', 
+                [username, score, finalDiff, req.ip]
             );
-            logSystem('DB', `New Leaderboard Row`, `User: ${username}`);
+            logSystem('DB', 'New Entry', `${username} started with ${score}`);
         }
 
         client.release();
         res.status(201).json({ success: true });
 
-    } catch (err) {
-        logSystem('ERR', 'Submit Failed', err.message);
-        res.status(500).json({ success: false });
+    } catch (err) { 
+        logSystem('ERR', 'Submit Error', err.message);
+        res.status(500).json({ success: false }); 
     }
-});
-
-/**
- * 📊 GET TOP SCORES API
- * Returns aggregated scores for the global leaderboard.
- */
-app.get('/api/leaderboard/top', async (req, res) => {
-    try {
-        const client = await pgPool.connect();
-        // SQL Aggregation: Sum scores across all difficulties per user
-        const result = await client.query(`
-            SELECT username, SUM(score) as score, COUNT(difficulty) as games_played 
-            FROM leaderboard 
-            GROUP BY username 
-            ORDER BY score DESC 
-            LIMIT 1000
-        `);
-        client.release();
-        res.json(result.rows);
-    } catch (err) {
-        logSystem('ERR', 'Leaderboard Fetch Failed', err.message);
-        res.status(500).json([]);
-    }
-});
+}); 
 
 // =================================================================================================
 // SECTION 9: ADMINISTRATIVE API & AUTH ROUTES (🔥 UPDATED)
