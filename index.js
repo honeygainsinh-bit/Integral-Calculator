@@ -863,6 +863,50 @@ res.json({ status: SYSTEM_STATE.isGenerating });
 });
 
 app.delete('/admin/api/flush-topic/:topic/:diff', requireAuth, async (req, res) => {
+    // ==========================================================
+// ➕ NEW: LEADERBOARD MANAGEMENT APIS (បន្ថែមថ្មី)
+// ==========================================================
+
+// 1. យកទិន្នន័យ Leaderboard ទាំងអស់សម្រាប់ Admin
+app.get('/admin/api/leaderboard', requireAuth, async (req, res) => {
+    try {
+        const client = await pgPool.connect();
+        // យក 100 នាក់ចុងក្រោយ (ឬតាមលំដាប់ពិន្ទុ)
+        const result = await client.query('SELECT * FROM leaderboard ORDER BY score DESC, created_at DESC LIMIT 100');
+        client.release();
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 2. កែប្រែពិន្ទុ (Edit Score)
+app.put('/admin/api/leaderboard/:id', requireAuth, async (req, res) => {
+    const { newScore } = req.body;
+    try {
+        const client = await pgPool.connect();
+        await client.query('UPDATE leaderboard SET score = $1 WHERE id = $2', [newScore, req.params.id]);
+        client.release();
+        logSystem('SEC', 'Score Updated', `ID: ${req.params.id} -> ${newScore}`);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 3. លុបឈ្មោះចោល (Delete User)
+app.delete('/admin/api/leaderboard/:id', requireAuth, async (req, res) => {
+    try {
+        const client = await pgPool.connect();
+        await client.query('DELETE FROM leaderboard WHERE id = $1', [req.params.id]);
+        client.release();
+        logSystem('SEC', 'User Deleted', `ID: ${req.params.id}`);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 const { topic, diff } = req.params;
 if (!SYSTEM_STATE.mongoConnected) return res.status(500).json({ error: "No DB" });
 try {
@@ -881,7 +925,8 @@ try {
 // SECTION 10: PREMIUM ADMINISTRATIVE DASHBOARD (FULL HTML/CSS/JS)
 // =================================================================================================
 
-app.get('/admin', requireAuth, (req, res) => {
+
+     app.get('/admin', requireAuth, (req, res) => {
 res.send(`
 <!DOCTYPE html>
 <html lang="km">
@@ -891,118 +936,63 @@ res.send(`
 <title>BRAINTEST TITAN COMMAND CENTER V12.1</title>
 <link href="https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
-    /* --- CSS VARIABLES & THEME --- */
-    :root {
-        --bg-dark: #050b14;
-        --glass-bg: rgba(30, 41, 59, 0.6);
-        --glass-border: rgba(255, 255, 255, 0.1);
-        --primary: #3b82f6;
-        --primary-glow: rgba(59, 130, 246, 0.5);
-        --success: #10b981;
-        --success-glow: rgba(16, 185, 129, 0.5);
-        --danger: #ef4444;
-        --text-main: #f8fafc;
-        --text-mute: #94a3b8;
-    }
-
+    /* រក្សាទុក CSS ដដែល គ្រាន់តែបន្ថែម Style សម្រាប់តារាង */
+    :root { --bg-dark: #050b14; --glass-bg: rgba(30, 41, 59, 0.6); --glass-border: rgba(255, 255, 255, 0.1); --primary: #3b82f6; --primary-glow: rgba(59, 130, 246, 0.5); --success: #10b981; --success-glow: rgba(16, 185, 129, 0.5); --danger: #ef4444; --text-main: #f8fafc; --text-mute: #94a3b8; }
     * { box-sizing: border-box; }
-
-    body {
-        margin: 0; padding: 0;
-        background-color: var(--bg-dark);
-        background-image: radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.1) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.1) 0px, transparent 50%);
-        color: var(--text-main);
-        font-family: 'Kantumruy Pro', sans-serif;
-        min-height: 100vh;
-    }
-
-    .layout {
-        max-width: 1400px; margin: 0 auto; padding: 30px;
-        display: grid; grid-template-columns: 280px 1fr; gap: 30px;
-    }
-
-    .sidebar {
-        position: sticky; top: 30px; height: calc(100vh - 60px);
-        background: var(--glass-bg); backdrop-filter: blur(12px);
-        border: 1px solid var(--glass-border); border-radius: 20px;
-        padding: 30px; display: flex; flex-direction: column;
-    }
-
+    body { margin: 0; padding: 0; background-color: var(--bg-dark); background-image: radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.1) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.1) 0px, transparent 50%); color: var(--text-main); font-family: 'Kantumruy Pro', sans-serif; min-height: 100vh; }
+    .layout { max-width: 1400px; margin: 0 auto; padding: 30px; display: grid; grid-template-columns: 280px 1fr; gap: 30px; }
+    .sidebar { position: sticky; top: 30px; height: calc(100vh - 60px); background: var(--glass-bg); backdrop-filter: blur(12px); border: 1px solid var(--glass-border); border-radius: 20px; padding: 30px; display: flex; flex-direction: column; }
     .brand { margin-bottom: 40px; padding-bottom: 20px; border-bottom: 1px solid var(--glass-border); }
     .brand h1 { margin: 0; font-size: 1.4rem; letter-spacing: 1px; color: var(--primary); text-shadow: 0 0 10px var(--primary-glow); }
     .brand span { font-size: 0.75rem; color: var(--text-mute); font-family: 'JetBrains Mono'; }
-
-    .nav-btn {
-        background: transparent; border: none; color: var(--text-mute);
-        padding: 15px; text-align: left; font-family: 'Kantumruy Pro';
-        font-size: 1rem; cursor: pointer; border-radius: 12px;
-        transition: all 0.3s; margin-bottom: 10px; display: flex; align-items: center; gap: 12px;
-    }
+    .nav-btn { background: transparent; border: none; color: var(--text-mute); padding: 15px; text-align: left; font-family: 'Kantumruy Pro'; font-size: 1rem; cursor: pointer; border-radius: 12px; transition: all 0.3s; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; }
     .nav-btn:hover { background: rgba(255,255,255,0.05); color: white; }
     .nav-btn.active { background: rgba(59, 130, 246, 0.15); color: var(--primary); border: 1px solid rgba(59, 130, 246, 0.3); box-shadow: 0 0 15px rgba(59, 130, 246, 0.1); }
-
     .main-content { display: flex; flex-direction: column; gap: 25px; }
     .glass-card { background: var(--glass-bg); backdrop-filter: blur(12px); border: 1px solid var(--glass-border); border-radius: 20px; padding: 25px; box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5); }
-
     .status-header { display: flex; justify-content: space-between; align-items: center; }
     .status-badge { padding: 8px 16px; border-radius: 50px; font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 8px; }
     .status-badge.idle { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
     .status-badge.running { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
-    
     .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1.5s infinite; }
     @keyframes pulse { 0% { opacity: 1; box-shadow: 0 0 0 0px currentColor; } 100% { opacity: 0; box-shadow: 0 0 0 10px transparent; } }
-
     .ctrl-btn { width: 100%; padding: 20px; border: none; border-radius: 16px; font-family: 'Kantumruy Pro'; font-size: 1.2rem; font-weight: 700; cursor: pointer; transition: all 0.3s; text-transform: uppercase; letter-spacing: 1px; }
     .btn-start { background: linear-gradient(135deg, #059669, #10b981); color: white; box-shadow: 0 4px 20px var(--success-glow); }
-    .btn-start:hover { transform: translateY(-2px); box-shadow: 0 8px 25px var(--success-glow); }
     .btn-stop { background: linear-gradient(135deg, #991b1b, #ef4444); color: white; box-shadow: 0 4px 20px rgba(239, 68, 68, 0.5); }
-
     .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
     .topic-header { font-size: 1.1rem; color: var(--primary); border-bottom: 1px solid var(--glass-border); padding-bottom: 10px; margin-bottom: 15px; margin-top: 0; }
-
     .prog-container { width: 100%; background: rgba(0,0,0,0.3); height: 8px; border-radius: 4px; overflow: hidden; margin-top: 5px; }
     .prog-bar { height: 100%; background: var(--primary); border-radius: 4px; transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 0 10px var(--primary-glow); }
     .prog-bar.full { background: var(--success); box-shadow: 0 0 10px var(--success-glow); }
-
     table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    td { padding: 12px 5px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    td, th { padding: 12px 5px; border-bottom: 1px solid rgba(255,255,255,0.05); text-align: left; }
     tr:last-child td { border-bottom: none; }
     .diff-badge { font-family: 'JetBrains Mono'; font-size: 0.75rem; color: var(--text-mute); }
-
     .terminal { background: #09090b; border: 1px solid #27272a; border-radius: 12px; height: 400px; overflow-y: auto; padding: 15px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; box-shadow: inset 0 0 20px rgba(0,0,0,0.5); }
     .log-row { margin-bottom: 5px; display: flex; gap: 10px; }
     .log-time { color: #52525b; } .log-type { font-weight: bold; }
-
     ::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-track { background: var(--bg-dark); } ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
-
     .section { display: none; animation: slideUp 0.4s ease-out; } .section.active { display: block; }
     @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-
     .trash-btn { background: none; border: none; cursor: pointer; font-size: 1.1rem; opacity: 0.6; transition: 0.3s; }
-    .trash-btn:hover { opacity: 1; transform: scale(1.1); }
+    .trash-btn:hover { opacity: 1; transform: scale(1.1); color: var(--danger); }
+    .edit-btn { background: none; border: none; cursor: pointer; font-size: 1.1rem; opacity: 0.6; transition: 0.3s; margin-right: 10px; }
+    .edit-btn:hover { opacity: 1; transform: scale(1.1); color: var(--primary); }
 </style>
 </head>
 <body>
     <div class="layout">
         
-        <!-- LEFT SIDEBAR -->
         <div class="sidebar">
             <div class="brand">
                 <h1>TITAN ENGINE</h1>
                 <span>v12.1 DIAMOND</span>
             </div>
             
-            <button class="nav-btn active" onclick="switchTab('gen', this)">
-                ⚙️ ម៉ាស៊ីនផលិត (Generator)
-            </button>
-            <button class="nav-btn" onclick="switchTab('cert', this)">
-                🎓 វិញ្ញាបនបត្រ (Certs)
-            </button>
-            <button class="nav-btn" onclick="switchTab('logs', this)">
-                📡 ប្រព័ន្ធតាមដាន (Logs)
-            </button>
+            <button class="nav-btn active" onclick="switchTab('gen', this)">⚙️ ម៉ាស៊ីនផលិត (Generator)</button>
+            <button class="nav-btn" onclick="switchTab('leaderboard', this)">🏆 តារាងពិន្ទុ (Scores)</button> <button class="nav-btn" onclick="switchTab('cert', this)">🎓 វិញ្ញាបនបត្រ (Certs)</button>
+            <button class="nav-btn" onclick="switchTab('logs', this)">📡 ប្រព័ន្ធតាមដាន (Logs)</button>
 
-            <!-- 🔥 LOGOUT BUTTON ADDED HERE -->
             <a href="/admin/logout" class="nav-btn" style="margin-top: auto; text-decoration: none; border: 1px solid rgba(239, 68, 68, 0.4); color: #ef4444; justify-content: center;">
                 🚪 ចាកចេញ (Logout)
             </a>
@@ -1012,41 +1002,48 @@ res.send(`
             </div>
         </div>
 
-        <!-- RIGHT CONTENT -->
         <div class="main-content">
             
-            <!-- GENERATOR SECTION -->
             <div id="gen" class="section active">
                 <div class="glass-card status-header">
-                    <div>
-                        <h2 style="margin:0">Control Center</h2>
-                        <small style="color: var(--text-mute)" id="taskDisplay">System Idle</small>
-                    </div>
-                    <div id="statusBadge" class="status-badge idle">
-                        <div class="pulse-dot"></div> <span id="statusText">STANDBY</span>
-                    </div>
+                    <div><h2 style="margin:0">Control Center</h2><small style="color: var(--text-mute)" id="taskDisplay">System Idle</small></div>
+                    <div id="statusBadge" class="status-badge idle"><div class="pulse-dot"></div> <span id="statusText">STANDBY</span></div>
                 </div>
-
                 <div style="margin-top: 20px;">
-                    <button id="mainBtn" class="ctrl-btn btn-start" onclick="toggleGen()">
-                        ⚡ ចាប់ផ្តើមដំណើរការ (START ENGINE)
-                    </button>
+                    <button id="mainBtn" class="ctrl-btn btn-start" onclick="toggleGen()">⚡ ចាប់ផ្តើមដំណើរការ (START ENGINE)</button>
                 </div>
-
                 <div class="stats-grid" id="statsGrid" style="margin-top: 30px;">
-                    <div class="glass-card" style="text-align:center; color: var(--text-mute)">
-                        Connecting to Secure Core...
-                    </div>
+                    <div class="glass-card" style="text-align:center; color: var(--text-mute)">Connecting...</div>
                 </div>
             </div>
 
-            <!-- CERTIFICATES SECTION -->
+            <div id="leaderboard" class="section">
+                <div class="glass-card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid var(--glass-border); padding-bottom: 10px; margin-bottom: 15px;">
+                        <h3 style="margin:0; color:var(--primary)">តារាងពិន្ទុសិស្ស (Leaderboard Management)</h3>
+                        <button onclick="loadLeaderboard()" style="background:#334155; color:white; border:none; padding:5px 10px; border-radius:5px; cursor:pointer;">🔄 Refresh</button>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr style="color:var(--text-mute);">
+                                <th>ID</th>
+                                <th>ឈ្មោះ (Username)</th>
+                                <th>កម្រិត (Difficulty)</th>
+                                <th>ពិន្ទុ (Score)</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leaderboardBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
             <div id="cert" class="section">
                 <div class="glass-card">
                     <h3 class="topic-header">បញ្ជីសំណើរសុំវិញ្ញាបនបត្រ (Certificate Requests)</h3>
                     <table>
                         <thead>
-                            <tr style="color:var(--text-mute); text-align:left;">
+                            <tr style="color:var(--text-mute);">
                                 <th>ID</th>
                                 <th>ឈ្មោះសិស្ស</th>
                                 <th>ពិន្ទុ</th>
@@ -1059,7 +1056,6 @@ res.send(`
                 </div>
             </div>
 
-            <!-- LOGS SECTION -->
             <div id="logs" class="section">
                 <div class="glass-card">
                     <h3 class="topic-header">Live Server Terminal</h3>
@@ -1071,20 +1067,25 @@ res.send(`
     </div>
 
     <script>
+        // --- UI SWITCHING ---
         function switchTab(id, btn) {
             document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
             document.getElementById(id).classList.add('active');
             if(btn) btn.classList.add('active');
+            
+            // Auto load leaderboard if tab is selected
+            if(id === 'leaderboard') loadLeaderboard();
         }
 
+        // --- CORE DATA REFRESH ---
         let isRunning = false;
         async function refreshData() {
             try {
                 const res = await fetch('/admin/api/stats');
                 const data = await res.json();
 
-                // 1. UPDATE GENERATOR STATUS UI
+                // Gen Status
                 isRunning = data.isGenerating;
                 const btn = document.getElementById('mainBtn');
                 const badge = document.getElementById('statusBadge');
@@ -1092,25 +1093,18 @@ res.send(`
                 const taskDisplay = document.getElementById('taskDisplay');
 
                 if (isRunning) {
-                    btn.innerHTML = "🛑 បញ្ឈប់ដំណើរការ (EMERGENCY STOP)";
-                    btn.className = "ctrl-btn btn-stop";
-                    badge.className = "status-badge running";
-                    statusText.innerText = "RUNNING";
-                    taskDisplay.innerText = "Current Task: " + data.currentTask;
-                    taskDisplay.style.color = "var(--success)";
+                    btn.innerHTML = "🛑 បញ្ឈប់ដំណើរការ (EMERGENCY STOP)"; btn.className = "ctrl-btn btn-stop";
+                    badge.className = "status-badge running"; statusText.innerText = "RUNNING";
+                    taskDisplay.innerText = "Current Task: " + data.currentTask; taskDisplay.style.color = "var(--success)";
                 } else {
-                    btn.innerHTML = "⚡ ចាប់ផ្តើមដំណើរការ (START ENGINE)";
-                    btn.className = "ctrl-btn btn-start";
-                    badge.className = "status-badge idle";
-                    statusText.innerText = "STANDBY";
-                    taskDisplay.innerText = "System Idle - Ready to Deploy";
-                    taskDisplay.style.color = "var(--text-mute)";
+                    btn.innerHTML = "⚡ ចាប់ផ្តើមដំណើរការ (START ENGINE)"; btn.className = "ctrl-btn btn-start";
+                    badge.className = "status-badge idle"; statusText.innerText = "STANDBY";
+                    taskDisplay.innerText = "System Idle - Ready to Deploy"; taskDisplay.style.color = "var(--text-mute)";
                 }
 
-                // 2. RENDER TOPIC STATISTICS CARDS
+                // Stats Grid
                 const grid = document.getElementById('statsGrid');
                 let htmlBuffer = '';
-                
                 data.topics.forEach(topic => {
                     let rows = '';
                     ['Easy', 'Medium', 'Hard', 'Very Hard'].forEach(diff => {
@@ -1119,112 +1113,93 @@ res.send(`
                         const target = data.targets[diff];
                         const pct = Math.min((count/target)*100, 100);
                         const barClass = pct >= 100 ? 'prog-bar full' : 'prog-bar';
-                        
-                        rows += \`
-                            <tr>
-                                <td class="diff-badge" width="30%">\${diff}</td>
-                                <td width="20%" style="font-weight:bold; color:white">\${count}</td>
-                                <td width="40%">
-                                    <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-mute); margin-bottom:2px;">
-                                        <span>Target: \${target}</span>
-                                        <span>\${Math.round(pct)}%</span>
-                                    </div>
-                                    <div class="prog-container">
-                                        <div class="\${barClass}" style="width:\${pct}%"></div>
-                                    </div>
-                                </td>
-                                <td width="10%" style="text-align:right;">
-                                    <button onclick="flushTopic('\${topic.key}', '\${diff}')" class="trash-btn" title="Delete All Data">🗑️</button>
-                                </td>
-                            </tr>
-                        \`;
+                        rows += \`<tr><td class="diff-badge" width="30%">\${diff}</td><td width="20%" style="font-weight:bold; color:white">\${count}</td><td width="40%"><div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-mute); margin-bottom:2px;"><span>T: \${target}</span><span>\${Math.round(pct)}%</span></div><div class="prog-container"><div class="\${barClass}" style="width:\${pct}%"></div></div></td><td width="10%" style="text-align:right;"><button onclick="flushTopic('\${topic.key}', '\${diff}')" class="trash-btn" title="Delete All">🗑️</button></td></tr>\`;
                     });
-                    
-                    htmlBuffer += \`
-                        <div class="glass-card">
-                            <h3 class="topic-header">\${topic.label}</h3>
-                            <table>\${rows}</table>
-                        </div>
-                    \`;
+                    htmlBuffer += \`<div class="glass-card"><h3 class="topic-header">\${topic.label}</h3><table>\${rows}</table></div>\`;
                 });
                 grid.innerHTML = htmlBuffer;
 
-                // 3. RENDER CERTIFICATE TABLE
+                // Cert Requests
                 const tbody = document.getElementById('certBody');
-                if(data.certRequests.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-mute)">No pending requests</td></tr>';
-                } else {
-                    tbody.innerHTML = data.certRequests.map(r => \`
-                        <tr>
-                            <td style="font-family:'JetBrains Mono'; color:var(--primary)">#\${r.id}</td>
-                            <td style="font-weight:600">\${r.username}</td>
-                            <td><span style="background:rgba(59, 130, 246, 0.2); color:#60a5fa; padding:2px 8px; border-radius:4px; font-size:0.8rem">\${r.score}</span></td>
-                            <td style="color:var(--text-mute)">\${new Date(r.request_date).toLocaleDateString()}</td>
-                            <td>
-                                <a href="/admin/generate-cert/\${r.id}" target="_blank" style="text-decoration:none; margin-right:10px;" title="Print">🖨️</a>
-                                <span onclick="delCert(\${r.id})" style="cursor:pointer; color:var(--danger);" title="Delete">🗑️</span>
-                            </td>
-                        </tr>
-                    \`).join('');
-                }
+                if(data.certRequests.length === 0) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-mute)">No pending requests</td></tr>';
+                else tbody.innerHTML = data.certRequests.map(r => \`<tr><td style="font-family:'JetBrains Mono'; color:var(--primary)">#\${r.id}</td><td style="font-weight:600">\${r.username}</td><td><span style="background:rgba(59, 130, 246, 0.2); color:#60a5fa; padding:2px 8px; border-radius:4px; font-size:0.8rem">\${r.score}</span></td><td style="color:var(--text-mute)">\${new Date(r.request_date).toLocaleDateString()}</td><td><a href="/admin/generate-cert/\${r.id}" target="_blank" style="text-decoration:none; margin-right:10px;">🖨️</a><span onclick="delCert(\${r.id})" style="cursor:pointer; color:var(--danger);">🗑️</span></td></tr>\`).join('');
 
             } catch (e) { console.error("Update Error:", e); }
         }
 
+        // --- 🔥 NEW LEADERBOARD LOGIC ---
+        async function loadLeaderboard() {
+            try {
+                const res = await fetch('/admin/api/leaderboard');
+                const users = await res.json();
+                const tbody = document.getElementById('leaderboardBody');
+                
+                if(users.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px;">No Data</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = users.map(u => \`
+                    <tr>
+                        <td style="font-family:'JetBrains Mono'; color:var(--text-mute)">#\${u.id}</td>
+                        <td style="font-weight:bold; color:#f8fafc">\${u.username}</td>
+                        <td><span style="background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px; font-size:0.8rem">\${u.difficulty}</span></td>
+                        <td style="color:#fbbf24; font-weight:bold">\${u.score}</td>
+                        <td>
+                            <button class="edit-btn" onclick="editScore(\${u.id}, '\${u.username}', \${u.score})" title="Edit Score">✏️</button>
+                            <button class="trash-btn" onclick="deleteUser(\${u.id}, '\${u.username}')" title="Delete User">🗑️</button>
+                        </td>
+                    </tr>
+                \`).join('');
+            } catch (e) { console.error("Leaderboard Error", e); }
+        }
+
+        async function editScore(id, name, oldScore) {
+            const newScore = prompt(\`កែពិន្ទុសម្រាប់ \${name}:\`, oldScore);
+            if(newScore !== null && !isNaN(newScore)) {
+                await fetch('/admin/api/leaderboard/'+id, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ newScore: parseInt(newScore) })
+                });
+                loadLeaderboard();
+            }
+        }
+
+        async function deleteUser(id, name) {
+            if(confirm(\`តើអ្នកចង់លុបឈ្មោះ "\${name}" ចេញពីតារាងពិន្ទុមែនទេ?\`)) {
+                await fetch('/admin/api/leaderboard/'+id, { method: 'DELETE' });
+                loadLeaderboard();
+            }
+        }
+
+        // --- EXISTING FUNCTIONS ---
         const logTerm = document.getElementById('logTerm');
         const initialLogs = ${JSON.stringify(SYSTEM_STATE.logs)};
-        
         function renderLogs(logs) {
-            logTerm.innerHTML = logs.map(l => \`
-                <div class="log-row">
-                    <span class="log-time">[\${l.time}]</span>
-                    <span class="log-type" style="color: \${getColor(l.type)}">\${l.type}</span>
-                    <span style="color: #e4e4e7">\${l.msg}</span>
-                </div>
-            \`).join('');
+            logTerm.innerHTML = logs.map(l => \`<div class="log-row"><span class="log-time">[\${l.time}]</span><span class="log-type" style="color: \${getColor(l.type)}">\${l.type}</span><span style="color: #e4e4e7">\${l.msg}</span></div>\`).join('');
         }
-        
-        function getColor(type) {
-            if(type==='ERR') return '#ef4444';
-            if(type==='GEN') return '#a855f7'; 
-            if(type==='DB') return '#f59e0b';
-            if(type==='AI') return '#ec4899';
-            if(type==='SEC') return '#10b981';
-            return '#3b82f6';
-        }
+        function getColor(type) { if(type==='ERR') return '#ef4444'; if(type==='GEN') return '#a855f7'; if(type==='DB') return '#f59e0b'; if(type==='AI') return '#ec4899'; if(type==='SEC') return '#10b981'; return '#3b82f6'; }
         renderLogs(initialLogs);
 
         async function toggleGen() {
             const action = isRunning ? 'stop' : 'start';
-            await fetch('/admin/api/toggle-gen', { 
-                method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action}) 
-            });
+            await fetch('/admin/api/toggle-gen', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action}) });
             refreshData();
         }
-
-        async function delCert(id) {
-            if(confirm('Are you sure you want to delete this request?')) {
-                await fetch('/admin/delete-request/'+id, {method:'DELETE'});
-                refreshData();
-            }
-        }
-
-        async function flushTopic(topic, diff) {
-            if(confirm(\`Are you sure you want to DELETE ALL questions for \${topic} - \${diff}?\`)) {
-                await fetch(\`/admin/api/flush-topic/\${topic}/\${diff}\`, { method: 'DELETE' });
-                refreshData();
-            }
-        }
+        async function delCert(id) { if(confirm('Delete request?')) { await fetch('/admin/delete-request/'+id, {method:'DELETE'}); refreshData(); }}
+        async function flushTopic(topic, diff) { if(confirm(\`DELETE ALL \${topic} - \${diff}?\`)) { await fetch(\`/admin/api/flush-topic/\${topic}/\${diff}\`, { method: 'DELETE' }); refreshData(); }}
 
         setInterval(refreshData, 2000);
         refreshData(); 
-
     </script>
 </body>
 </html>
 `);
-
 });
+
+ 
+            
 
 // =================================================================================================
 // SECTION 11: PUBLIC DASHBOARD (SIMPLE STATUS PAGE)
