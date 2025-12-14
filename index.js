@@ -547,136 +547,24 @@ logSystem('NET', `${req.method} ${req.path}`, `IP: ${ip}`);
 next();
 });
 
+       
 // =================================================================================================
-// SECTION 8: PRIMARY API ENDPOINTS (PUBLIC)
+// SECTION 8: PRIMARY API ENDPOINTS (PUBLIC) - [UPDATED V12.2]
 // =================================================================================================
 
-const mapTopicToKey = (frontendName) => {
-if (!frontendName) return "Limits";
-const name = String(frontendName).trim().toLowerCase();
-
-if (name.includes("limit")) return "Limits";
-if (name.includes("deriv")) return "Derivatives"; 
-if (name.includes("integ")) return "Integrals";
-if (name.includes("study") || name.includes("func")) return "FuncAnalysis";
-if (name.includes("diff") && name.includes("eq")) return "DiffEq";
-if (name.includes("complex")) return "Complex";
-if (name.includes("vector")) return "Vectors";
-if (name.includes("prob")) return "Probability";
-if (name.includes("conic")) return "Conics";
-if (name.includes("contin")) return "Continuity";
-
-return "Limits";
-
-};
-
-const standardizeDifficulty = (input) => {
-if (!input) return "Medium";
-const s = String(input).toLowerCase().trim();
-if (s === 'easy' || s === 'ez') return "Easy";
-if (s.includes('very') || s.includes('hard')) return s.includes('very') ? "Very Hard" : "Hard";
-return "Medium";
-};
-
-// 🤖 GENERATE PROBLEM API
-app.post('/api/generate-problem', async (req, res) => {
-const { prompt, topic, difficulty } = req.body;
-
-const finalTopic = mapTopicToKey(topic); 
-const finalDifficulty = standardizeDifficulty(difficulty);
-
-SYSTEM_STATE.totalGamesGenerated++;
-
-// 2. CHECK DB CACHE
-if (SYSTEM_STATE.mongoConnected) {
-    try {
-        const cached = await MathCache.aggregate([
-            { $match: { topic: finalTopic, difficulty: finalDifficulty } }, 
-            { $sample: { size: 1 } }
-        ]);
-        
-        if (cached.length > 0) {
-            SYSTEM_STATE.cacheHits++;
-            logSystem('DB', 'Cache Hit', `${finalTopic} (${finalDifficulty})`);
-            
-            // 🔥 APPLY SHUFFLE BEFORE SENDING
-            const shuffledText = shuffleOptions(cached[0].raw_text);
-
-            return res.json({ 
-                text: shuffledText, 
-                source: "cache",
-                metadata: { topic: finalTopic, difficulty: finalDifficulty }
-            });
-        }
-    } catch (e) { logSystem('ERR', 'Cache Read Error', e.message); }
-}
-
-try {
-    const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
-    const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
-    
-    const forms = ALL_FORMS[finalTopic] || ["General Math"];
-    const randomForm = forms[Math.floor(Math.random() * forms.length)];
-
-    // 🔥 FIX #1 & #2: APPLIED HERE TOO
-    const aiPrompt = `
-    Create 1 unique multiple-choice math problem in KHMER LANGUAGE.
-    TOPIC: "${finalTopic}"
-    SUB-TYPE: "${randomForm}"
-    LEVEL: "${finalDifficulty}"
-    
-    CRITICAL RULES:
-    1. Language: KHMER (Cambodia).
-    2. MATH FORMATTING: Wrap ALL LaTeX in dollar signs ($...$).
-       - Ex: $x^2 + y^2 = 1$
-    3. FORMAT: JSON Only. { "question": "...", "options": ["..."], "answer": "Exact Match", "explanation": "..." }
-    `;
-    
-    const result = await model.generateContent(aiPrompt);
-    const response = await result.response;
-    const text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
-    
-    const validated = validateProblemIntegrity(text);
-    if(!validated) throw new Error("AI generated invalid JSON");
-
-    if (SYSTEM_STATE.mongoConnected) {
-        MathCache.create({
-            topic: finalTopic,
-            difficulty: finalDifficulty, 
-            raw_text: text,
-            content_hash: validated.hash,
-            source_ip: req.ip
-        }).catch(e => logSystem('WARN', 'Cache Write Failed', e.message));
-    }
-
-    // 🔥 APPLY SHUFFLE BEFORE SENDING
-    const shuffledLive = shuffleOptions(text);
-
-    res.json({ text: shuffledLive, source: "ai", metadata: { topic: finalTopic, difficulty: finalDifficulty } });
-
-} catch (err) {
-    logSystem('ERR', 'AI Service Error', err.message);
-    res.status(500).json({ error: "AI Service Unavailable" });
-}
-
-});
-
-// =================================================================================================
-// 🛡️ ANTI-CHEAT CONFIGURATION & TOKEN MANAGER (ដាក់នៅផ្នែកខាងលើ)
-// =================================================================================================
+// -------------------------------------------------------------------------
+// 🛡️ ANTI-CHEAT & HELPER CONFIGURATION (បញ្ចូលនៅទីនេះដើម្បីកុំអោយ Error)
+// -------------------------------------------------------------------------
 
 // 1. កំណត់ពិន្ទុអតិបរមាដែលអាចទទួលក្នុង ១ ហ្គេម
 const SCORE_RULES = {
-    "Easy": 5,
-    "Medium": 10,
-    "Hard": 15,
-    "Very Hard": 20
+    "Easy": 5, "Medium": 10, "Hard": 15, "Very Hard": 20
 };
 
-// 2. ឃ្លាំងផ្ទុក Token អ្នកកំពុងលេង
+// 2. ឃ្លាំងផ្ទុក Token និង Game Sessions
 const GAME_SESSIONS = new Map();
 
-// "អ្នកអនាម័យ": លុប Token ចាស់ៗចោលរៀងរាល់ ១០ នាទីម្តង
+// "អ្នកអនាម័យ": លុប Token ចាស់ៗចោលរៀងរាល់ ១០ នាទី
 setInterval(() => {
     const now = Date.now();
     for (const [token, data] of GAME_SESSIONS.entries()) {
@@ -684,21 +572,21 @@ setInterval(() => {
     }
 }, 600000);
 
-// Function បង្កើត Token (ហៅប្រើនៅ API Generate)
+// Function បង្កើត Token
 function generateGameToken(ip) {
     const token = crypto.randomBytes(16).toString('hex');
     GAME_SESSIONS.set(token, { ip: ip, startTime: Date.now(), used: false });
     return token;
 }
 
-// Function ត្រួតពិនិត្យ Token (ប្រើក្នុង API Submit)
+// Function ត្រួតពិនិត្យ Token
 function verifyGameToken(token, ip) {
-    if (!token) return { valid: false, reason: "No Token Found" };
+    if (!token) return { valid: false, reason: "No Token Provided" };
     const session = GAME_SESSIONS.get(token);
     
     if (!session) return { valid: false, reason: "Invalid/Expired Token" };
     if (session.used) return { valid: false, reason: "Token Already Used (Replay Attack)" };
-    if (session.ip !== ip) return { valid: false, reason: "IP Address Mismatch" };
+    if (session.ip !== ip) return { valid: false, reason: "IP Mismatch" };
 
     // ⚡ Speed Trap: បើឆ្លើយលឿនជាង 2 វិនាទី = BOT
     const playTime = Date.now() - session.startTime;
@@ -709,54 +597,153 @@ function verifyGameToken(token, ip) {
     return { valid: true };
 }
 
+// Helper: Map Topic Name
+const mapTopicToKey = (frontendName) => {
+    if (!frontendName) return "Limits";
+    const name = String(frontendName).trim().toLowerCase();
+    if (name.includes("limit")) return "Limits";
+    if (name.includes("deriv")) return "Derivatives"; 
+    if (name.includes("integ")) return "Integrals";
+    if (name.includes("study") || name.includes("func")) return "FuncAnalysis";
+    if (name.includes("diff") && name.includes("eq")) return "DiffEq";
+    if (name.includes("complex")) return "Complex";
+    if (name.includes("vector")) return "Vectors";
+    if (name.includes("prob")) return "Probability";
+    if (name.includes("conic")) return "Conics";
+    if (name.includes("contin")) return "Continuity";
+    return "Limits";
+};
 
-// 🏆 LEADERBOARD SUBMIT API (FIXED SERVER ERROR + SMART MERGE + ANTI-CHEAT)
+// Helper: Standardize Difficulty
+const standardizeDifficulty = (input) => {
+    if (!input) return "Medium";
+    const s = String(input).toLowerCase().trim();
+    if (s === 'easy' || s === 'ez') return "Easy";
+    if (s.includes('very') || s.includes('hard')) return s.includes('very') ? "Very Hard" : "Hard";
+    return "Medium";
+};
+
+// -------------------------------------------------------------------------
+// 🚀 API ROUTE DEFINITIONS
+// -------------------------------------------------------------------------
+
+// 🤖 1. GENERATE PROBLEM API (WITH TOKEN GENERATION)
+app.post('/api/generate-problem', async (req, res) => {
+    const { topic, difficulty } = req.body;
+    const finalTopic = mapTopicToKey(topic); 
+    const finalDifficulty = standardizeDifficulty(difficulty);
+    SYSTEM_STATE.totalGamesGenerated++;
+
+    // 🛡️ 1. បង្កើត Game Token សម្រាប់ Session នេះ
+    const gameToken = generateGameToken(req.ip);
+
+    // 🛡️ 2. CHECK CACHE FIRST
+    if (SYSTEM_STATE.mongoConnected) {
+        try {
+            const cached = await MathCache.aggregate([
+                { $match: { topic: finalTopic, difficulty: finalDifficulty } }, 
+                { $sample: { size: 1 } }
+            ]);
+            
+            if (cached.length > 0) {
+                SYSTEM_STATE.cacheHits++;
+                logSystem('DB', 'Cache Hit', `${finalTopic} (${finalDifficulty})`);
+                
+                const shuffledText = shuffleOptions(cached[0].raw_text);
+                return res.json({ 
+                    text: shuffledText, 
+                    source: "cache",
+                    gameToken: gameToken, // <--- ផ្ញើ Token ទៅ Frontend
+                    metadata: { topic: finalTopic, difficulty: finalDifficulty }
+                });
+            }
+        } catch (e) { logSystem('ERR', 'Cache Read Error', e.message); }
+    }
+
+    // 🛡️ 3. LIVE AI GENERATION (Fallback)
+    try {
+        const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
+        const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
+        
+        const forms = ALL_FORMS[finalTopic] || ["General Math"];
+        const randomForm = forms[Math.floor(Math.random() * forms.length)];
+
+        const aiPrompt = `
+        Create 1 unique multiple-choice math problem in KHMER LANGUAGE.
+        TOPIC: "${finalTopic}"
+        SUB-TYPE: "${randomForm}"
+        LEVEL: "${finalDifficulty}"
+        CRITICAL RULES:
+        1. Language: KHMER. 
+        2. Format: JSON Only. { "question": "...", "options": ["..."], "answer": "...", "explanation": "..." }
+        3. Math: Wrap in $.
+        `;
+        
+        const result = await model.generateContent(aiPrompt);
+        const text = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+        const validated = validateProblemIntegrity(text);
+        if(!validated) throw new Error("AI generated invalid JSON");
+
+        if (SYSTEM_STATE.mongoConnected) {
+            MathCache.create({
+                topic: finalTopic, difficulty: finalDifficulty, 
+                raw_text: text, content_hash: validated.hash, source_ip: req.ip
+            }).catch(e => {});
+        }
+
+        const shuffledLive = shuffleOptions(text);
+        res.json({ 
+            text: shuffledLive, 
+            source: "ai", 
+            gameToken: gameToken, // <--- ផ្ញើ Token ទៅ Frontend
+            metadata: { topic: finalTopic, difficulty: finalDifficulty } 
+        });
+
+    } catch (err) {
+        logSystem('ERR', 'AI Service Error', err.message);
+        res.status(500).json({ error: "AI Service Unavailable" });
+    }
+});
+
+
+// 🏆 2. LEADERBOARD SUBMIT API (SMART MERGE + ANTI-CHEAT + FIX SERVER ERROR)
 app.post('/api/leaderboard/submit', async (req, res) => {
-    // ⚠️ Frontend ត្រូវតែផ្ញើ gameToken មកជាមួយ
+    // ⚠️ Frontend ត្រូវតែផ្ញើ: username, score, difficulty, gameToken
     const { username, score, difficulty, gameToken } = req.body;
-    
     const finalDiff = standardizeDifficulty(difficulty);
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-    // =========================================================
-    // 🛑 ZONE 1: SECURITY CHECKS (ANTI-CHEAT)
-    // =========================================================
-
-    // 1. ពិនិត្យ Token (Session Validation)
+    // 🛑 A. SECURITY CHECK
     const security = verifyGameToken(gameToken, ip);
     if (!security.valid) {
         logSystem('SEC', '⚠️ CHEAT BLOCKED', `${username} - ${security.reason}`);
         return res.status(403).json({ success: false, message: security.reason });
     }
 
-    // 2. ពិនិត្យពិន្ទុ (Max Score Validation)
+    // 🛑 B. SCORE CHECK
     const maxAllowed = SCORE_RULES[finalDiff] || 50; 
     if (score > maxAllowed) {
-        logSystem('SEC', '⚠️ SCORE HACK', `${username} sent ${score} for ${finalDiff} (Max: ${maxAllowed})`);
-        return res.status(400).json({ success: false, message: "Score exceeds limit." });
+        return res.status(400).json({ success: false, message: "Invalid Score" });
     }
     if (score < 0) return res.status(400).json({ success: false });
 
-    // =========================================================
-    // 🔄 ZONE 2: SMART MERGE (DATABASE TRANSACTION)
-    // =========================================================
     let client;
     try {
         client = await pgPool.connect(); // បើក Connection
-        await client.query('BEGIN');     // ចាប់ផ្តើម Transaction (Locking)
+        await client.query('BEGIN');     // ចាប់ផ្តើម Transaction
 
-        // ស្វែងរកទិន្នន័យចាស់ (Lock ទុកកុំអោយគេកែ)
+        // 🔒 Lock Rows (ការពារការជាន់គ្នា)
         const check = await client.query(
             'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC FOR UPDATE',
             [username, finalDiff]
         );
 
         if (check.rows.length > 0) {
-            // === បើធ្លាប់លេង (Old Player) ===
+            // 🔄 SMART MERGE: បូកពិន្ទុចាស់ៗទាំងអស់ចូលគ្នា
             const totalPrevious = check.rows.reduce((sum, row) => sum + row.score, 0);
             const grandTotal = totalPrevious + score;
 
-            // Update ទៅលើ ID ចាស់ជាងគេ
+            // Update ID ទីមួយ
             await client.query(
                 'UPDATE leaderboard SET score = $1, updated_at = NOW(), ip_address = $3 WHERE id = $2',
                 [grandTotal, check.rows[0].id, ip]
@@ -767,31 +754,67 @@ app.post('/api/leaderboard/submit', async (req, res) => {
                 const idsToDelete = check.rows.slice(1).map(r => r.id);
                 await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
             }
-            
             logSystem('DB', 'Smart Merge', `${username}: Total ${grandTotal}`);
-
         } else {
-            // === បើលេងលើកដំបូង (New Player) ===
+            // ➕ NEW ENTRY
             await client.query(
                 'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
                 [username, score, finalDiff, ip]
             );
-            logSystem('DB', 'New Entry', `${username} [+${score}]`);
+            logSystem('DB', 'New Player', `${username} [+${score}]`);
         }
 
-        await client.query('COMMIT'); // រក្សាទុកទិន្នន័យ
+        await client.query('COMMIT'); // Save
         res.status(201).json({ success: true, verifiedScore: score });
 
     } catch (err) {
-        if (client) await client.query('ROLLBACK'); // លុបចោលវិញ បើមាន Error
-        logSystem('ERR', 'DB Transaction Failed', err.message);
-        res.status(500).json({ success: false, message: "Server Error" });
+        if (client) await client.query('ROLLBACK'); // Rollback
+        logSystem('ERR', 'Leaderboard Logic Error', err.message);
+        res.status(500).json({ success: false });
     } finally {
-        // ✅ ចំណុចសំខាន់បំផុត: បិទ Connection ជានិច្ច ដើម្បីកុំអោយ Server Error
-        if (client) client.release();
+        if (client) client.release(); // ✅ SAFE RELEASE: ដាច់ខាតត្រូវតែមាន
     }
 });
 
+
+// 📊 3. LEADERBOARD TOP API (LIMIT 100 + FIX SERVER ERROR)
+app.get('/api/leaderboard/top', async (req, res) => {
+    let client;
+    try {
+        client = await pgPool.connect();
+        
+        // នេះជាកន្លែងកំណត់ LIMIT 100
+        const result = await client.query(`
+            SELECT username, SUM(score) as score, COUNT(difficulty) as games_played 
+            FROM leaderboard 
+            GROUP BY username 
+            ORDER BY score DESC 
+            LIMIT 100
+        `);
+        
+        res.json(result.rows);
+    } catch (err) { 
+        logSystem('ERR', 'Fetch Error', err.message);
+        res.status(500).json([]); 
+    } finally {
+        if (client) client.release(); // ✅ SAFE RELEASE
+    }
+});
+
+
+// 📜 4. CERTIFICATE REQUEST API
+app.post('/api/submit-request', async (req, res) => {
+    let client;
+    try {
+        client = await pgPool.connect();
+        await client.query('INSERT INTO certificate_requests (username, score) VALUES ($1, $2)', [req.body.username, req.body.score]);
+        res.json({ success: true });
+    } catch (e) { 
+        res.status(500).json({ success: false }); 
+    } finally {
+        if (client) client.release(); // ✅ SAFE RELEASE
+    }
+});
 
 
 
