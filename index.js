@@ -673,7 +673,7 @@ app.post('/api/generate-problem', async (req, res) => {
 
 
 // 🏆 2. LEADERBOARD SUBMIT API (SMART MERGE + SCORE CHECK ONLY)
-app.post('/api/leaderboard/submit', async (req, res) => {
+app.post('/api/leaderboard/save', async (req, res) => {
     // ⚠️ No gameToken required anymore
     const { username, score, difficulty } = req.body;
     const finalDiff = standardizeDifficulty(difficulty);
