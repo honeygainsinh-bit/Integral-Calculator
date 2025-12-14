@@ -211,9 +211,9 @@ OWNER_IP: process.env.OWNER_IP,
 CACHE_RATE: 0.25,
 TARGETS: {
 "Easy": 100,
-"Medium": 100,
-"Hard": 100,
-"Very Hard": 100,
+"Medium": 20,
+"Hard": 20,
+"Very Hard": 20,
 },
 TOPICS: [
 { key: "Limits", label: "លីមីត (Limits)", prompt: "Calculus Limits" },
@@ -611,7 +611,6 @@ if (SYSTEM_STATE.mongoConnected) {
     } catch (e) { logSystem('ERR', 'Cache Read Error', e.message); }
 }
 
-
 try {
     const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
     const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
@@ -662,90 +661,86 @@ try {
 
 });
 
-// 🏆 LEADERBOARD SUBMIT API (SMART MERGE & ANTI-CHEAT)
-// =========================================================================
+// 🏆 LEADERBOARD API (MERGE DUPLICATE DARA LOGIC)
 app.post('/api/leaderboard/submit', async (req, res) => {
-    const { username, score, difficulty } = req.body;
+const { username, score, difficulty } = req.body;
+const finalDiff = standardizeDifficulty(difficulty);
+try {
+const client = await pgPool.connect();
 
-    // 0. standardizeDifficulty: ធានាថាឈ្មោះកម្រិតត្រូវនឹង CONFIG (Easy, Medium...)
-    const finalDiff = standardizeDifficulty(difficulty);
-
-    // ពិនិត្យមើលថាតើទិន្នន័យមកគ្រប់ឬអត់
-    if (!username || typeof score !== 'number' || !difficulty) {
-        return res.status(400).json({ success: false, message: "Missing Data" });
+    // 1. Security Check
+    const maxAllowed = CONFIG.ALLOWED_SCORES[finalDiff] || 50; 
+    if (score > maxAllowed) {
+        client.release();
+        return res.status(403).json({ message: "Score rejected" });
     }
 
-    try {
-        const client = await pgPool.connect();
-
-        // -----------------------------------------------------------------
-        // 🛡️ 1. ANTI-CHEAT: ពិនិត្យដែនកំណត់ពិន្ទុ (SCORE LIMIT CHECK)
-        // -----------------------------------------------------------------
-        // ទាញយកពិន្ទុអតិបរមាដែលអនុញ្ញាតពី CONFIG (ឧ. Easy=5, Hard=15)
-        const maxAllowed = CONFIG.ALLOWED_SCORES[finalDiff] || 50; 
+    // 2. Fetch ALL records for this user (including duplicates)
+    // Order by ID ASC (oldest first)
+    const check = await client.query(
+        'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC', 
+        [username, finalDiff]
+    );
+    
+    if (check.rows.length > 0) {
+        // 🔥 MERGE LOGIC START
         
-        if (score > maxAllowed) {
-            client.release();
-            // កត់ត្រាទុកថាមានគេបន្លំ
-            logSystem('SEC', '⚠️ CHEAT DETECTED', `User: ${username} tried submitting ${score} (Max: ${maxAllowed})`);
-            return res.status(403).json({ success: false, message: "Score rejected: Exceeds limit per game." });
-        }
-
-        // -----------------------------------------------------------------
-        // 🧠 2. SMART MERGE LOGIC (យន្តការបូកបញ្ចូលនិងលុបស្ទួន)
-        // -----------------------------------------------------------------
+        // Calculate sum of ALL existing duplicates
+        const totalExistingScore = check.rows.reduce((sum, row) => sum + row.score, 0);
         
-        // [A] ស្វែងរកគ្រប់ ID ទាំងអស់របស់ user នេះក្នុងកម្រិតនេះ (Older ID first)
-        const check = await client.query(
-            'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC', 
-            [username, finalDiff]
+        // Add the new score to the grand total
+        const grandTotal = totalExistingScore + score;
+        
+        // The "Survivor" is the first record (oldest ID)
+        const survivorId = check.rows[0].id;
+        
+        // Update Survivor with Grand Total
+        await client.query(
+            'UPDATE leaderboard SET score = $1, updated_at = NOW(), ip_address = $3 WHERE id = $2', 
+            [grandTotal, survivorId, req.ip]
         );
         
-        if (check.rows.length > 0) {
-            // --- ករណីមានកំណត់ត្រាចាស់ (Old Records Found) ---
-            
-            const rows = check.rows;
-            const survivorId = rows[0].id; // ទុក ID ចាស់ជាងគេមួយ (Survivor)
+        logSystem('SEC', 'Merged & Updated', `${username}: Total ${grandTotal}`);
 
-            // [B] បូកពិន្ទុចាស់ៗទាំងអស់ដែលមានក្នុង DB (Consolidate Duplicates)
-            // ឧទាហរណ៍: បើមាន ID1(5) និង ID2(10) => totalExisting = 15
-            const totalExistingScore = rows.reduce((sum, row) => sum + row.score, 0);
-            
-            // [C] បូកពិន្ទុថ្មីចូលទៅក្នុងផលបូកចាស់
-            const grandTotal = totalExistingScore + score;
-            
-            // [D] Update Survivor ជាមួយនឹងពិន្ទុសរុបថ្មី
-            await client.query(
-                'UPDATE leaderboard SET score = $1, updated_at = NOW(), ip_address = $3 WHERE id = $2', 
-                [grandTotal, survivorId, req.ip]
-            );
-            
-            logSystem('DB', 'Merged Score', `${username}: Old(${totalExistingScore}) + New(${score}) = ${grandTotal}`);
-
-            // [E] KILL CLONES: លុប ID ស្ទួនផ្សេងៗទៀតចោលទាំងអស់ (ទុកតែ Survivor)
-            if (rows.length > 1) {
-                const idsToDelete = rows.slice(1).map(r => r.id);
-                await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
-                logSystem('DB', 'Cleanup Duplicates', `Deleted IDs: ${idsToDelete.join(', ')}`);
-            }
-
-        } else {
-            // --- ករណីជាអ្នកលេងថ្មី (New Player) ---
-            await client.query(
-                'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)', 
-                [username, score, finalDiff, req.ip]
-            );
-            logSystem('DB', 'New Entry', `${username} started with ${score}`);
+        // 🔥 KILL CLONES: Delete all records except the survivor
+        if (check.rows.length > 1) {
+            const idsToDelete = check.rows.slice(1).map(r => r.id);
+            await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
+            logSystem('DB', 'Cleaned Duplicates', `Deleted IDs: ${idsToDelete.join(', ')}`);
         }
-
-        client.release();
-        res.status(201).json({ success: true });
-
-    } catch (err) { 
-        logSystem('ERR', 'Submit Error', err.message);
-        res.status(500).json({ success: false }); 
+        // 🔥 MERGE LOGIC END
+    } else {
+        // New Entry (No duplicates found)
+        await client.query('INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)', [username, score, finalDiff, req.ip]);
+        logSystem('DB', 'New Player', `${username}`);
     }
-}); 
+
+    client.release();
+    res.status(201).json({ success: true });
+} catch (err) { 
+    logSystem('ERR', 'Leaderboard Error', err.message);
+    res.status(500).json({ success: false }); 
+}
+
+});
+
+app.get('/api/leaderboard/top', async (req, res) => {
+try {
+const client = await pgPool.connect();
+const result = await client.query(`SELECT username, SUM(score) as score, COUNT(difficulty) as games_played FROM leaderboard GROUP BY username ORDER BY score DESC LIMIT 100`);
+client.release();
+res.json(result.rows);
+} catch (err) { res.status(500).json([]); }
+});
+
+app.post('/api/submit-request', async (req, res) => {
+try {
+const client = await pgPool.connect();
+await client.query('INSERT INTO certificate_requests (username, score) VALUES ($1, $2)', [req.body.username, req.body.score]);
+client.release();
+res.json({ success: true });
+} catch (e) { res.status(500).json({ success: false }); }
+});
 
 // =================================================================================================
 // SECTION 9: ADMINISTRATIVE API & AUTH ROUTES (🔥 UPDATED)
@@ -1241,6 +1236,7 @@ const d = Math.floor(uptime / 86400);
 const h = Math.floor((uptime % 86400) / 3600);
 const pg = SYSTEM_STATE.postgresConnected ? '<span style="color:#10b981">● ONLINE</span>' : '<span style="color:#ef4444">● OFFLINE</span>';
 const mg = SYSTEM_STATE.mongoConnected ? '<span style="color:#10b981">● ONLINE</span>' : '<span style="color:#ef4444">● OFFLINE</span>';
+const uniqueCount = SYSTEM_STATE.uniqueVisitors.size;    
 
 res.send(`
 <!DOCTYPE html>
@@ -1266,6 +1262,11 @@ res.send(`
             HITS: ${SYSTEM_STATE.cacheHits} | 
             AI: ${SYSTEM_STATE.aiCalls}
         </div>
+
+        <div class="metric" style="background:rgba(59, 130, 246, 0.2); color:#93c5fd; border: 1px solid rgba(59, 130, 246, 0.5);">
+        UNIQUE VISITORS: ${uniqueCount}
+    </div>
+        
         <a href="/admin" class="btn">🔐 ENTER ADMIN PANEL</a>
     </div>
 </body>
