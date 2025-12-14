@@ -662,85 +662,89 @@ try {
 
 });
 
-// 🏆 LEADERBOARD API (MERGE DUPLICATE DARA LOGIC)
+ * 🏆 SUBMIT SCORE API (PUBLIC/GUEST)
+ * Handles score submission using client-supplied username.
+ */
 app.post('/api/leaderboard/submit', async (req, res) => {
-const { username, score, difficulty } = req.body;
-const finalDiff = standardizeDifficulty(difficulty);
-try {
-const client = await pgPool.connect();
+    // 🔥 NO TOKEN REQUIRED - PUBLIC MODE
+    const { username, score, difficulty } = req.body;
 
-    // 1. Security Check
-    const maxAllowed = CONFIG.ALLOWED_SCORES[finalDiff] || 50; 
-    if (score > maxAllowed) {
-        client.release();
-        return res.status(403).json({ message: "Score rejected" });
+    if (!username || typeof score !== 'number' || !difficulty) {
+        return res.status(400).json({ success: false, message: "Missing username, score, or difficulty" });
     }
 
-    // 2. Fetch ALL records for this user (including duplicates)
-    // Order by ID ASC (oldest first)
-    const check = await client.query(
-        'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC', 
-        [username, finalDiff]
-    );
-    
-    if (check.rows.length > 0) {
-        // 🔥 MERGE LOGIC START
-        
-        // Calculate sum of ALL existing duplicates
-        const totalExistingScore = check.rows.reduce((sum, row) => sum + row.score, 0);
-        
-        // Add the new score to the grand total
-        const grandTotal = totalExistingScore + score;
-        
-        // The "Survivor" is the first record (oldest ID)
-        const survivorId = check.rows[0].id;
-        
-        // Update Survivor with Grand Total
-        await client.query(
-            'UPDATE leaderboard SET score = $1, updated_at = NOW(), ip_address = $3 WHERE id = $2', 
-            [grandTotal, survivorId, req.ip]
-        );
-        
-        logSystem('SEC', 'Merged & Updated', `${username}: Total ${grandTotal}`);
+    try {
+        const client = await pgPool.connect();
 
-        // 🔥 KILL CLONES: Delete all records except the survivor
-        if (check.rows.length > 1) {
-            const idsToDelete = check.rows.slice(1).map(r => r.id);
-            await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
-            logSystem('DB', 'Cleaned Duplicates', `Deleted IDs: ${idsToDelete.join(', ')}`);
+        // 1. ANTI-CHEAT: SCORE LIMIT CHECK
+        const maxAllowed = CONFIG.ALLOWED_SCORES[difficulty] || 100;
+        if (score > maxAllowed) {
+            logSystem('SEC', `Score Rejected (Anti-Cheat)`, `User: ${username}, Score: ${score}`);
+            client.release();
+            return res.status(403).json({ success: false, message: "Score exceeds difficulty limit." });
         }
-        // 🔥 MERGE LOGIC END
-    } else {
-        // New Entry (No duplicates found)
-        await client.query('INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)', [username, score, finalDiff, req.ip]);
-        logSystem('DB', 'New Player', `${username}`);
+
+        // 2. SMART MERGE LOGIC
+        const check = await client.query(
+            'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC',
+            [username, difficulty]
+        );
+
+        if (check.rows.length > 0) {
+            // MERGE
+            const rows = check.rows;
+            const targetId = rows[0].id; 
+            const currentTotal = rows.reduce((acc, row) => acc + row.score, 0);
+            const finalScore = currentTotal + score;
+
+            await client.query('UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2', [finalScore, targetId]);
+            logSystem('DB', `Merged Score`, `User: ${username}, Total: ${finalScore}`);
+
+            // DEDUPLICATE
+            if (rows.length > 1) {
+                const idsToDelete = rows.slice(1).map(r => r.id);
+                await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
+            }
+        } else {
+            // INSERT
+            const userIP = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+            await client.query(
+                'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
+                [username, score, difficulty, userIP]
+            );
+            logSystem('DB', `New Leaderboard Row`, `User: ${username}`);
+        }
+
+        client.release();
+        res.status(201).json({ success: true });
+
+    } catch (err) {
+        logSystem('ERR', 'Submit Failed', err.message);
+        res.status(500).json({ success: false });
     }
-
-    client.release();
-    res.status(201).json({ success: true });
-} catch (err) { 
-    logSystem('ERR', 'Leaderboard Error', err.message);
-    res.status(500).json({ success: false }); 
-}
-
 });
 
+/**
+ * 📊 GET TOP SCORES API
+ * Returns aggregated scores for the global leaderboard.
+ */
 app.get('/api/leaderboard/top', async (req, res) => {
-try {
-const client = await pgPool.connect();
-const result = await client.query(`SELECT username, SUM(score) as score, COUNT(difficulty) as games_played FROM leaderboard GROUP BY username ORDER BY score DESC LIMIT 1000`);
-client.release();
-res.json(result.rows);
-} catch (err) { res.status(500).json([]); }
-});
-
-app.post('/api/submit-request', async (req, res) => {
-try {
-const client = await pgPool.connect();
-await client.query('INSERT INTO certificate_requests (username, score) VALUES ($1, $2)', [req.body.username, req.body.score]);
-client.release();
-res.json({ success: true });
-} catch (e) { res.status(500).json({ success: false }); }
+    try {
+        const client = await pgPool.connect();
+        // SQL Aggregation: Sum scores across all difficulties per user
+        const result = await client.query(`
+            SELECT username, SUM(score) as score, COUNT(difficulty) as games_played 
+            FROM leaderboard 
+            GROUP BY username 
+            ORDER BY score DESC 
+            LIMIT 1000
+        `);
+        client.release();
+        res.json(result.rows);
+    } catch (err) {
+        logSystem('ERR', 'Leaderboard Fetch Failed', err.message);
+        res.status(500).json([]);
+    }
 });
 
 // =================================================================================================
