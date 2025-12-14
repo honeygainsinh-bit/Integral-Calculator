@@ -548,54 +548,20 @@ next();
 });
 
        
+
+
 // =================================================================================================
-// SECTION 8: PRIMARY API ENDPOINTS (PUBLIC) - [UPDATED V12.2]
+// SECTION 8: PRIMARY API ENDPOINTS (PUBLIC) - [SIMPLIFIED V12.3: NO TOKEN]
 // =================================================================================================
 
 // -------------------------------------------------------------------------
-// 🛡️ ANTI-CHEAT & HELPER CONFIGURATION (បញ្ចូលនៅទីនេះដើម្បីកុំអោយ Error)
+// HELPER CONFIGURATIONS
 // -------------------------------------------------------------------------
 
-// 1. កំណត់ពិន្ទុអតិបរមាដែលអាចទទួលក្នុង ១ ហ្គេម
+// 1. កំណត់ពិន្ទុអតិបរមាដែលអាចទទួលក្នុង ១ ហ្គេម (នៅរក្សាទុកដើម្បីការពារការ Hack ពិន្ទុលើស)
 const SCORE_RULES = {
     "Easy": 5, "Medium": 10, "Hard": 15, "Very Hard": 20
 };
-
-// 2. ឃ្លាំងផ្ទុក Token និង Game Sessions
-const GAME_SESSIONS = new Map();
-
-// "អ្នកអនាម័យ": លុប Token ចាស់ៗចោលរៀងរាល់ ១០ នាទី
-setInterval(() => {
-    const now = Date.now();
-    for (const [token, data] of GAME_SESSIONS.entries()) {
-        if (now - data.startTime > 600000) GAME_SESSIONS.delete(token);
-    }
-}, 600000);
-
-// Function បង្កើត Token
-function generateGameToken(ip) {
-    const token = crypto.randomBytes(16).toString('hex');
-    GAME_SESSIONS.set(token, { ip: ip, startTime: Date.now(), used: false });
-    return token;
-}
-
-// Function ត្រួតពិនិត្យ Token
-function verifyGameToken(token, ip) {
-    if (!token) return { valid: false, reason: "No Token Provided" };
-    const session = GAME_SESSIONS.get(token);
-    
-    if (!session) return { valid: false, reason: "Invalid/Expired Token" };
-    if (session.used) return { valid: false, reason: "Token Already Used (Replay Attack)" };
-    if (session.ip !== ip) return { valid: false, reason: "IP Mismatch" };
-
-    // ⚡ Speed Trap: បើឆ្លើយលឿនជាង 2 វិនាទី = BOT
-    const playTime = Date.now() - session.startTime;
-    if (playTime < 2000) return { valid: false, reason: "Impossible Speed (Bot Detected)" };
-
-    session.used = true;
-    GAME_SESSIONS.delete(token); 
-    return { valid: true };
-}
 
 // Helper: Map Topic Name
 const mapTopicToKey = (frontendName) => {
@@ -627,17 +593,16 @@ const standardizeDifficulty = (input) => {
 // 🚀 API ROUTE DEFINITIONS
 // -------------------------------------------------------------------------
 
-// 🤖 1. GENERATE PROBLEM API (WITH TOKEN GENERATION)
+// 🤖 1. GENERATE PROBLEM API (SIMPLE MODE)
 app.post('/api/generate-problem', async (req, res) => {
     const { topic, difficulty } = req.body;
     const finalTopic = mapTopicToKey(topic); 
     const finalDifficulty = standardizeDifficulty(difficulty);
     SYSTEM_STATE.totalGamesGenerated++;
 
-    // 🛡️ 1. បង្កើត Game Token សម្រាប់ Session នេះ
-    const gameToken = generateGameToken(req.ip);
+    // 🛡️ NO TOKEN GENERATION HERE ANYMORE
 
-    // 🛡️ 2. CHECK CACHE FIRST
+    // A. CHECK CACHE FIRST
     if (SYSTEM_STATE.mongoConnected) {
         try {
             const cached = await MathCache.aggregate([
@@ -653,14 +618,14 @@ app.post('/api/generate-problem', async (req, res) => {
                 return res.json({ 
                     text: shuffledText, 
                     source: "cache",
-                    gameToken: gameToken, // <--- ផ្ញើ Token ទៅ Frontend
+                    // gameToken removed
                     metadata: { topic: finalTopic, difficulty: finalDifficulty }
                 });
             }
         } catch (e) { logSystem('ERR', 'Cache Read Error', e.message); }
     }
 
-    // 🛡️ 3. LIVE AI GENERATION (Fallback)
+    // B. LIVE AI GENERATION (Fallback)
     try {
         const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
         const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
@@ -681,6 +646,7 @@ app.post('/api/generate-problem', async (req, res) => {
         
         const result = await model.generateContent(aiPrompt);
         const text = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+        
         const validated = validateProblemIntegrity(text);
         if(!validated) throw new Error("AI generated invalid JSON");
 
@@ -695,7 +661,7 @@ app.post('/api/generate-problem', async (req, res) => {
         res.json({ 
             text: shuffledLive, 
             source: "ai", 
-            gameToken: gameToken, // <--- ផ្ញើ Token ទៅ Frontend
+            // gameToken removed
             metadata: { topic: finalTopic, difficulty: finalDifficulty } 
         });
 
@@ -706,31 +672,25 @@ app.post('/api/generate-problem', async (req, res) => {
 });
 
 
-// 🏆 2. LEADERBOARD SUBMIT API (SMART MERGE + ANTI-CHEAT + FIX SERVER ERROR)
+// 🏆 2. LEADERBOARD SUBMIT API (SMART MERGE + SCORE CHECK ONLY)
 app.post('/api/leaderboard/submit', async (req, res) => {
-    // ⚠️ Frontend ត្រូវតែផ្ញើ: username, score, difficulty, gameToken
-    const { username, score, difficulty, gameToken } = req.body;
+    // ⚠️ No gameToken required anymore
+    const { username, score, difficulty } = req.body;
     const finalDiff = standardizeDifficulty(difficulty);
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-    // 🛑 A. SECURITY CHECK
-    const security = verifyGameToken(gameToken, ip);
-    if (!security.valid) {
-        logSystem('SEC', '⚠️ CHEAT BLOCKED', `${username} - ${security.reason}`);
-        return res.status(403).json({ success: false, message: security.reason });
-    }
-
-    // 🛑 B. SCORE CHECK
+    // 🛑 SCORE CHECK ONLY (ការពារកុំអោយដាក់ពិន្ទុលើស)
     const maxAllowed = SCORE_RULES[finalDiff] || 50; 
     if (score > maxAllowed) {
-        return res.status(400).json({ success: false, message: "Invalid Score" });
+        logSystem('SEC', '⚠️ SCORE REJECTED', `${username} sent ${score} (Max: ${maxAllowed})`);
+        return res.status(400).json({ success: false, message: "Invalid Score: Too High" });
     }
     if (score < 0) return res.status(400).json({ success: false });
 
     let client;
     try {
-        client = await pgPool.connect(); // បើក Connection
-        await client.query('BEGIN');     // ចាប់ផ្តើម Transaction
+        client = await pgPool.connect(); 
+        await client.query('BEGIN');     // Transaction Start
 
         // 🔒 Lock Rows (ការពារការជាន់គ្នា)
         const check = await client.query(
@@ -739,7 +699,7 @@ app.post('/api/leaderboard/submit', async (req, res) => {
         );
 
         if (check.rows.length > 0) {
-            // 🔄 SMART MERGE: បូកពិន្ទុចាស់ៗទាំងអស់ចូលគ្នា
+            // 🔄 SMART MERGE logic
             const totalPrevious = check.rows.reduce((sum, row) => sum + row.score, 0);
             const grandTotal = totalPrevious + score;
 
@@ -764,26 +724,25 @@ app.post('/api/leaderboard/submit', async (req, res) => {
             logSystem('DB', 'New Player', `${username} [+${score}]`);
         }
 
-        await client.query('COMMIT'); // Save
+        await client.query('COMMIT'); 
         res.status(201).json({ success: true, verifiedScore: score });
 
     } catch (err) {
-        if (client) await client.query('ROLLBACK'); // Rollback
-        logSystem('ERR', 'Leaderboard Logic Error', err.message);
+        if (client) await client.query('ROLLBACK'); 
+        logSystem('ERR', 'Leaderboard Error', err.message);
         res.status(500).json({ success: false });
     } finally {
-        if (client) client.release(); // ✅ SAFE RELEASE: ដាច់ខាតត្រូវតែមាន
+        if (client) client.release(); // ✅ SAFE RELEASE
     }
 });
 
 
-// 📊 3. LEADERBOARD TOP API (LIMIT 100 + FIX SERVER ERROR)
+// 📊 3. LEADERBOARD TOP API (LIMIT 100)
 app.get('/api/leaderboard/top', async (req, res) => {
     let client;
     try {
         client = await pgPool.connect();
         
-        // នេះជាកន្លែងកំណត់ LIMIT 100
         const result = await client.query(`
             SELECT username, SUM(score) as score, COUNT(difficulty) as games_played 
             FROM leaderboard 
@@ -797,7 +756,7 @@ app.get('/api/leaderboard/top', async (req, res) => {
         logSystem('ERR', 'Fetch Error', err.message);
         res.status(500).json([]); 
     } finally {
-        if (client) client.release(); // ✅ SAFE RELEASE
+        if (client) client.release(); 
     }
 });
 
@@ -812,11 +771,13 @@ app.post('/api/submit-request', async (req, res) => {
     } catch (e) { 
         res.status(500).json({ success: false }); 
     } finally {
-        if (client) client.release(); // ✅ SAFE RELEASE
+        if (client) client.release(); 
     }
 });
 
+    
 
+        
 
 // =================================================================================================
 // SECTION 9: ADMINISTRATIVE API & AUTH ROUTES (🔥 UPDATED)
