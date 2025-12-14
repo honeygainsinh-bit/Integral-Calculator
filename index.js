@@ -737,7 +737,7 @@ app.post('/api/leaderboard/save', async (req, res) => {
 });
 
 
-// 📊 3. LEADERBOARD TOP API (LIMIT 100)
+// 📊 3. LEADERBOARD TOP API (LIMIT 500)
 app.get('/api/leaderboard/top', async (req, res) => {
     let client;
     try {
@@ -748,7 +748,7 @@ app.get('/api/leaderboard/top', async (req, res) => {
             FROM leaderboard 
             GROUP BY username 
             ORDER BY score DESC 
-            LIMIT 100
+            LIMIT 500
         `);
         
         res.json(result.rows);
