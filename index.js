@@ -662,18 +662,18 @@ try {
 });
 
 // =================================================================================================
-// 🛡️ PART 1: GLOBAL CONFIGURATION (ដាក់ផ្នែកនេះនៅក្រៅ Route/API)
+// 🛡️ ANTI-CHEAT CONFIGURATION & TOKEN MANAGER (ដាក់នៅផ្នែកខាងលើ)
 // =================================================================================================
 
-// 1. កំណត់ច្បាប់ពិន្ទុ (SCORE RULES)
+// 1. កំណត់ពិន្ទុអតិបរមាដែលអាចទទួលក្នុង ១ ហ្គេម
 const SCORE_RULES = {
-    "Easy": 5,      // Easy ហាមលើស 5
-    "Medium": 10,   // Medium ហាមលើស 10
-    "Hard": 15,     // Hard ហាមលើស 15
-    "Very Hard": 20 // Very Hard ហាមលើស 20
+    "Easy": 5,
+    "Medium": 10,
+    "Hard": 15,
+    "Very Hard": 20
 };
 
-// 2. ប្រព័ន្ធគ្រប់គ្រង TOKEN (SESSION MANAGER)
+// 2. ឃ្លាំងផ្ទុក Token អ្នកកំពុងលេង
 const GAME_SESSIONS = new Map();
 
 // "អ្នកអនាម័យ": លុប Token ចាស់ៗចោលរៀងរាល់ ១០ នាទីម្តង
@@ -684,75 +684,68 @@ setInterval(() => {
     }
 }, 600000);
 
-// Function បង្កើត Token (ហៅប្រើពេលបង្កើតសំណួរ)
+// Function បង្កើត Token (ហៅប្រើនៅ API Generate)
 function generateGameToken(ip) {
     const token = crypto.randomBytes(16).toString('hex');
     GAME_SESSIONS.set(token, { ip: ip, startTime: Date.now(), used: false });
     return token;
 }
 
-// Function ត្រួតពិនិត្យ Token (ហៅប្រើពេលដាក់ពិន្ទុ)
+// Function ត្រួតពិនិត្យ Token (ប្រើក្នុង API Submit)
 function verifyGameToken(token, ip) {
     if (!token) return { valid: false, reason: "No Token Found" };
-    
     const session = GAME_SESSIONS.get(token);
-    if (!session) return { valid: false, reason: "Invalid or Expired Token" };
+    
+    if (!session) return { valid: false, reason: "Invalid/Expired Token" };
     if (session.used) return { valid: false, reason: "Token Already Used (Replay Attack)" };
     if (session.ip !== ip) return { valid: false, reason: "IP Address Mismatch" };
 
     // ⚡ Speed Trap: បើឆ្លើយលឿនជាង 2 វិនាទី = BOT
-    if (Date.now() - session.startTime < 2000) {
-        return { valid: false, reason: "Impossible Speed (Bot Detected)" };
-    }
+    const playTime = Date.now() - session.startTime;
+    if (playTime < 2000) return { valid: false, reason: "Impossible Speed (Bot Detected)" };
 
-    session.used = true; // សម្គាល់ថាប្រើហើយ
-    GAME_SESSIONS.delete(token); // លុបចោលភ្លាមៗ
+    session.used = true;
+    GAME_SESSIONS.delete(token); 
     return { valid: true };
 }
 
-// =================================================================================================
-// 🏆 PART 2: THE UNIFIED LEADERBOARD API (ដាក់ចូលក្នុង Express App របស់អ្នក)
-// =================================================================================================
 
+// 🏆 LEADERBOARD SUBMIT API (FIXED SERVER ERROR + SMART MERGE + ANTI-CHEAT)
 app.post('/api/leaderboard/submit', async (req, res) => {
-    // ⚠️ Frontend ត្រូវតែផ្ញើ: { username, score, difficulty, gameToken }
+    // ⚠️ Frontend ត្រូវតែផ្ញើ gameToken មកជាមួយ
     const { username, score, difficulty, gameToken } = req.body;
+    
     const finalDiff = standardizeDifficulty(difficulty);
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-    // -----------------------------------------------------------
-    // 🛑 ជំហានទី ១: ANTI-CHEAT CHECK (ត្រួតពិនិត្យសុវត្ថិភាព)
-    // -----------------------------------------------------------
-    
-    // A. ពិនិត្យ Token
+    // =========================================================
+    // 🛑 ZONE 1: SECURITY CHECKS (ANTI-CHEAT)
+    // =========================================================
+
+    // 1. ពិនិត្យ Token (Session Validation)
     const security = verifyGameToken(gameToken, ip);
     if (!security.valid) {
         logSystem('SEC', '⚠️ CHEAT BLOCKED', `${username} - ${security.reason}`);
         return res.status(403).json({ success: false, message: security.reason });
     }
 
-    // B. ពិនិត្យពិន្ទុ (Score Limit Check)
-    const maxAllowed = SCORE_RULES[finalDiff] || 50; // ទាញយកច្បាប់ពិន្ទុខាងលើ
-    
+    // 2. ពិនិត្យពិន្ទុ (Max Score Validation)
+    const maxAllowed = SCORE_RULES[finalDiff] || 50; 
     if (score > maxAllowed) {
-        logSystem('SEC', '⚠️ SCORE HACK', `${username} sent ${score} for ${finalDiff} (Limit: ${maxAllowed})`);
-        return res.status(400).json({ 
-            success: false, 
-            message: `Cheat Detected: Max score for ${finalDiff} is ${maxAllowed}.` 
-        });
+        logSystem('SEC', '⚠️ SCORE HACK', `${username} sent ${score} for ${finalDiff} (Max: ${maxAllowed})`);
+        return res.status(400).json({ success: false, message: "Score exceeds limit." });
     }
+    if (score < 0) return res.status(400).json({ success: false });
 
-    if (score < 0) return res.status(400).json({ success: false, message: "Negative Score" });
-
-    // -----------------------------------------------------------
-    // 🔄 ជំហានទី ២: SMART MERGE (បញ្ចូលពិន្ទុក្នុង Database)
-    // -----------------------------------------------------------
+    // =========================================================
+    // 🔄 ZONE 2: SMART MERGE (DATABASE TRANSACTION)
+    // =========================================================
     let client;
     try {
-        client = await pgPool.connect();
-        await client.query('BEGIN'); // 1. ចាប់ផ្តើម Transaction
+        client = await pgPool.connect(); // បើក Connection
+        await client.query('BEGIN');     // ចាប់ផ្តើម Transaction (Locking)
 
-        // 2. ស្វែងរកទិន្នន័យចាស់ (Lock ទុកកុំអោយគេកែ)
+        // ស្វែងរកទិន្នន័យចាស់ (Lock ទុកកុំអោយគេកែ)
         const check = await client.query(
             'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC FOR UPDATE',
             [username, finalDiff]
@@ -760,24 +753,23 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 
         if (check.rows.length > 0) {
             // === បើធ្លាប់លេង (Old Player) ===
-            
-            // បូកពិន្ទុចាស់ៗទាំងអស់ចូលគ្នា (ករណីមានស្ទួន)
             const totalPrevious = check.rows.reduce((sum, row) => sum + row.score, 0);
-            const grandTotal = totalPrevious + score; // បូកពិន្ទុថ្មីចូល
+            const grandTotal = totalPrevious + score;
 
-            // Update ដាក់ចូល ID ទីមួយ
+            // Update ទៅលើ ID ចាស់ជាងគេ
             await client.query(
                 'UPDATE leaderboard SET score = $1, updated_at = NOW(), ip_address = $3 WHERE id = $2',
                 [grandTotal, check.rows[0].id, ip]
             );
 
-            // លុប ID ស្ទួនចោល (Cleanup)
+            // លុប ID ស្ទួនចោល
             if (check.rows.length > 1) {
                 const idsToDelete = check.rows.slice(1).map(r => r.id);
                 await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
             }
             
-            logSystem('DB', 'Smart Merge', `${username}: ${totalPrevious} + ${score} = ${grandTotal}`);
+            logSystem('DB', 'Smart Merge', `${username}: Total ${grandTotal}`);
+
         } else {
             // === បើលេងលើកដំបូង (New Player) ===
             await client.query(
@@ -787,17 +779,20 @@ app.post('/api/leaderboard/submit', async (req, res) => {
             logSystem('DB', 'New Entry', `${username} [+${score}]`);
         }
 
-        await client.query('COMMIT'); // 3. Save ទិន្នន័យ (ជោគជ័យ)
+        await client.query('COMMIT'); // រក្សាទុកទិន្នន័យ
         res.status(201).json({ success: true, verifiedScore: score });
 
     } catch (err) {
-        if (client) await client.query('ROLLBACK'); // 4. មានបញ្ហា? លុបចោលវិញទាំងអស់!
+        if (client) await client.query('ROLLBACK'); // លុបចោលវិញ បើមាន Error
         logSystem('ERR', 'DB Transaction Failed', err.message);
         res.status(500).json({ success: false, message: "Server Error" });
     } finally {
-        if (client) client.release(); // 5. បិទ Connection
+        // ✅ ចំណុចសំខាន់បំផុត: បិទ Connection ជានិច្ច ដើម្បីកុំអោយ Server Error
+        if (client) client.release();
     }
 });
+
+
 
 
 // =================================================================================================
