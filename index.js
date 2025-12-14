@@ -728,7 +728,7 @@ const client = await pgPool.connect();
 app.get('/api/leaderboard/top', async (req, res) => {
 try {
 const client = await pgPool.connect();
-const result = await client.query(`SELECT username, SUM(score) as score, COUNT(difficulty) as games_played FROM leaderboard GROUP BY username ORDER BY score DESC LIMIT 100`);
+const result = await client.query(`SELECT username, SUM(score) as score, COUNT(difficulty) as games_played FROM leaderboard GROUP BY username ORDER BY score DESC LIMIT 1000`);
 client.release();
 res.json(result.rows);
 } catch (err) { res.status(500).json([]); }
