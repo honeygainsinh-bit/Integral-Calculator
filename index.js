@@ -211,9 +211,9 @@ OWNER_IP: process.env.OWNER_IP,
 CACHE_RATE: 0.25,
 TARGETS: {
 "Easy": 100,
-"Medium": 20,
-"Hard": 20,
-"Very Hard": 20,
+"Medium": 100,
+"Hard": 100,
+"Very Hard": 100,
 },
 TOPICS: [
 { key: "Limits", label: "លីមីត (Limits)", prompt: "Calculus Limits" },
@@ -727,7 +727,7 @@ const client = await pgPool.connect();
 app.get('/api/leaderboard/top', async (req, res) => {
 try {
 const client = await pgPool.connect();
-const result = await client.query(`SELECT username, SUM(score) as score, COUNT(difficulty) as games_played FROM leaderboard GROUP BY username ORDER BY score DESC LIMIT 100`);
+const result = await client.query(`SELECT username, SUM(score) as score, COUNT(difficulty) as games_played FROM leaderboard GROUP BY username ORDER BY score DESC LIMIT 1000`);
 client.release();
 res.json(result.rows);
 } catch (err) { res.status(500).json([]); }
