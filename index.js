@@ -661,86 +661,78 @@ try {
 
 });
 
-// 🏆 LEADERBOARD API (MERGE DUPLICATE DARA LOGIC)
+// 🏆 LEADERBOARD API (Logic: Consolidation & Cleanup)
 app.post('/api/leaderboard/submit', async (req, res) => {
-const { username, score, difficulty } = req.body;
-const finalDiff = standardizeDifficulty(difficulty);
-try {
-const client = await pgPool.connect();
+    const { username, score, difficulty } = req.body;
+    const finalDiff = standardizeDifficulty(difficulty);
 
-    // 1. Security Check
-    const maxAllowed = CONFIG.ALLOWED_SCORES[finalDiff] || 50; 
-    if (score > maxAllowed) {
-        client.release();
-        return res.status(403).json({ message: "Score rejected" });
-    }
+    try {
+        const client = await pgPool.connect();
 
-    // 2. Fetch ALL records for this user (including duplicates)
-    // Order by ID ASC (oldest first)
-    const check = await client.query(
-        'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC', 
-        [username, finalDiff]
-    );
-    
-    if (check.rows.length > 0) {
-        // 🔥 MERGE LOGIC START
-        
-        // Calculate sum of ALL existing duplicates
-        const totalExistingScore = check.rows.reduce((sum, row) => sum + row.score, 0);
-        
-        // Add the new score to the grand total
-        const grandTotal = totalExistingScore + score;
-        
-        // The "Survivor" is the first record (oldest ID)
-        const survivorId = check.rows[0].id;
-        
-        // Update Survivor with Grand Total
-        await client.query(
-            'UPDATE leaderboard SET score = $1, updated_at = NOW(), ip_address = $3 WHERE id = $2', 
-            [grandTotal, survivorId, req.ip]
+        // 1. Security Check: ពិនិត្យមើលក្រែងលោពិន្ទុថ្មីធំខុសប្រក្រតី
+        const maxAllowed = CONFIG.ALLOWED_SCORES[finalDiff] || 50; 
+        if (score > maxAllowed) {
+            client.release();
+            return res.status(403).json({ message: "Score rejected" });
+        }
+
+        // 2. ស្វែងរកគ្រប់ ID ទាំងអស់ដែលមានឈ្មោះដូចគ្នា (ឧទាហរណ៍: Sinh)
+        const check = await client.query(
+            'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC', 
+            [username, finalDiff]
         );
         
-        logSystem('SEC', 'Merged & Updated', `${username}: Total ${grandTotal}`);
+        // --- ករណីមានកំណត់ត្រាចាស់ (ឧទាហរណ៍: ID 1=5, ID 2=10) ---
+        if (check.rows.length > 0) {
+            
+            // [A] បូកពិន្ទុចាស់ៗចូលគ្នាសិន (ឧទាហរណ៍: 5 + 10 = 15)
+            const totalPreviousScore = check.rows.reduce((sum, row) => sum + row.score, 0);
+            
+            // [B] យកផលបូកចាស់ បូកនឹងពិន្ទុថ្មី (ឧទាហរណ៍: 15 + 5ថ្មី = 20)
+            const grandTotal = totalPreviousScore + score;
+            
+            // [C] ទុក ID ចាស់ជាងគេមួយ (Survivor) សម្រាប់ដាក់ពិន្ទុ 20
+            const survivorId = check.rows[0].id;
+            
+            // [D] Update ID នោះឱ្យទៅជាពិន្ទុ 20
+            await client.query(
+                'UPDATE leaderboard SET score = $1, updated_at = NOW(), ip_address = $3 WHERE id = $2', 
+                [grandTotal, survivorId, req.ip]
+            );
+            
+            logSystem('SEC', 'Consolidated', `${username}: Old(${totalPreviousScore}) + New(${score}) = ${grandTotal}`);
 
-        // 🔥 KILL CLONES: Delete all records except the survivor
-        if (check.rows.length > 1) {
-            const idsToDelete = check.rows.slice(1).map(r => r.id);
-            await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
-            logSystem('DB', 'Cleaned Duplicates', `Deleted IDs: ${idsToDelete.join(', ')}`);
+            // [E] លុប ID ផ្សេងៗទៀតចោលទាំងអស់ (CLEANUP)
+            if (check.rows.length > 1) {
+                // យក ID ពីលេខ 2 ដល់ចុងក្រោយ
+                const idsToDelete = check.rows.slice(1).map(r => r.id);
+                
+                // លុបចេញពី Database
+                await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
+                
+                logSystem('DB', 'Cleanup', `Deleted Duplicate IDs: ${idsToDelete.join(', ')}`);
+            }
+
+        } else {
+            // --- ករណីជាអ្នកលេងថ្មីសុទ្ធសាធ (មិនទាន់មាន ID) ---
+            await client.query(
+                'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)', 
+                [username, score, finalDiff, req.ip]
+            );
+            logSystem('DB', 'New Player', `${username}: First score ${score}`);
         }
-        // 🔥 MERGE LOGIC END
-    } else {
-        // New Entry (No duplicates found)
-        await client.query('INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)', [username, score, finalDiff, req.ip]);
-        logSystem('DB', 'New Player', `${username}`);
+
+        client.release();
+        res.status(201).json({ success: true });
+
+    } catch (err) { 
+        logSystem('ERR', 'Leaderboard Logic Error', err.message);
+        res.status(500).json({ success: false }); 
     }
-
-    client.release();
-    res.status(201).json({ success: true });
-} catch (err) { 
-    logSystem('ERR', 'Leaderboard Error', err.message);
-    res.status(500).json({ success: false }); 
-}
-
 });
 
-app.get('/api/leaderboard/top', async (req, res) => {
-try {
-const client = await pgPool.connect();
-const result = await client.query(`SELECT username, SUM(score) as score, COUNT(difficulty) as games_played FROM leaderboard GROUP BY username ORDER BY score DESC LIMIT 1000`);
-client.release();
-res.json(result.rows);
-} catch (err) { res.status(500).json([]); }
-});
 
-app.post('/api/submit-request', async (req, res) => {
-try {
-const client = await pgPool.connect();
-await client.query('INSERT INTO certificate_requests (username, score) VALUES ($1, $2)', [req.body.username, req.body.score]);
-client.release();
-res.json({ success: true });
-} catch (e) { res.status(500).json({ success: false }); }
-});
+
 
 // =================================================================================================
 // SECTION 9: ADMINISTRATIVE API & AUTH ROUTES (🔥 UPDATED)
