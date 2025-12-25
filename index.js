@@ -481,7 +481,7 @@ for (const topicObj of CONFIG.TOPICS) {
                     }
                     
                     // Delay to avoid rate limits
-                    await new Promise(r => setTimeout(r, 10000));
+                    await new Promise(r => setTimeout(r, 60000));
 
                 } catch (err) {
                     if (err.message.includes('429') || err.message.includes('quota')) {
