@@ -299,7 +299,7 @@ SYSTEM_STATE.postgresConnected = true;
         CREATE TABLE IF NOT EXISTS leaderboard (
             id SERIAL PRIMARY KEY,
             user_id BIGINT,
-            username VARCHAR(50) NOT NULL,
+            username VARCHAR(100) NOT NULL,
             score INTEGER NOT NULL,
             difficulty VARCHAR(20) NOT NULL,
             ip_address VARCHAR(45),
