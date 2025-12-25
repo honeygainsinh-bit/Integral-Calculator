@@ -702,9 +702,9 @@ app.post('/api/leaderboard/save', async (req, res) => {
 
         // 🔒 Lock Rows (ការពារការជាន់គ្នា)
         const check = await client.query(
-            'SELECT id, score FROM leaderboard WHERE (user_id = $1 OR username = $2) AND difficulty = $3 FOR UPDATE',
-            [user_id, username, finalDiff]
-        );
+    'SELECT id, score FROM leaderboard WHERE LOWER(username) = LOWER($1) AND difficulty = $2 ORDER BY id ASC FOR UPDATE',
+    [username.trim(), finalDiff] // ប្រើ .trim() ដើម្បីកាត់ដកឃ្លាដែលលើសចេញ
+);
 
         if (check.rows.length > 0) {
             // 🔄 SMART MERGE logic
