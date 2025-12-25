@@ -298,7 +298,7 @@ SYSTEM_STATE.postgresConnected = true;
     await client.query(`
         CREATE TABLE IF NOT EXISTS leaderboard (
             id SERIAL PRIMARY KEY,
-            username VARCHAR(50) NOT NULL,
+            user_id VARCHAR(50) NOT NULL,
             score INTEGER NOT NULL,
             difficulty VARCHAR(20) NOT NULL,
             ip_address VARCHAR(45),
@@ -682,7 +682,7 @@ app.post('/api/generate-problem', async (req, res) => {
 // 🏆 2. LEADERBOARD SUBMIT API (SMART MERGE + SCORE CHECK ONLY)
 app.post('/api/leaderboard/save', async (req, res) => {
     // ⚠️ No gameToken required anymore
-    const { username, score, difficulty } = req.body;
+    const { user_id, score, difficulty } = req.body;
     const finalDiff = standardizeDifficulty(difficulty);
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
