@@ -298,7 +298,8 @@ SYSTEM_STATE.postgresConnected = true;
     await client.query(`
         CREATE TABLE IF NOT EXISTS leaderboard (
             id SERIAL PRIMARY KEY,
-            user_id VARCHAR(50) NOT NULL,
+            user_id BIGINT,
+            username VARCHAR(50) NOT NULL,
             score INTEGER NOT NULL,
             difficulty VARCHAR(20) NOT NULL,
             ip_address VARCHAR(45),
@@ -682,7 +683,7 @@ app.post('/api/generate-problem', async (req, res) => {
 // 🏆 2. LEADERBOARD SUBMIT API (SMART MERGE + SCORE CHECK ONLY)
 app.post('/api/leaderboard/save', async (req, res) => {
     // ⚠️ No gameToken required anymore
-    const { user_id, score, difficulty } = req.body;
+    const { user_id, username, score, difficulty } = req.body;
     const finalDiff = standardizeDifficulty(difficulty);
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
@@ -701,8 +702,8 @@ app.post('/api/leaderboard/save', async (req, res) => {
 
         // 🔒 Lock Rows (ការពារការជាន់គ្នា)
         const check = await client.query(
-            'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC FOR UPDATE',
-            [username, finalDiff]
+            'SELECT id, score FROM leaderboard WHERE (user_id = $1 OR username = $2) AND difficulty = $3 FOR UPDATE',
+            [user_id, username, finalDiff]
         );
 
         if (check.rows.length > 0) {
@@ -725,10 +726,10 @@ app.post('/api/leaderboard/save', async (req, res) => {
         } else {
             // ➕ NEW ENTRY
             await client.query(
-                'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
-                [username, score, finalDiff, ip]
+                'INSERT INTO leaderboard(user_id, username, score, difficulty, ip_address) VALUES($1, $2, $3, $4, $5)',
+                [user_id, username, score, finalDiff, ip]
             );
-            logSystem('DB', 'New Player', `${username} [+${score}]`);
+            logSystem('DB', 'New Player', `${username} [ID: ${user_id}]`);
         }
 
         await client.query('COMMIT'); 
