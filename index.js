@@ -701,20 +701,20 @@ app.post('/api/leaderboard/save', async (req, res) => {
 
         if (check.rows.length > 0) {
             // 🔄 SMART MERGE logic
-            const totalPrevious = check.rows.reduce((sum, row) => sum + row.score, 0);
-            const grandTotal = totalPrevious + score;
+            const totalPrevious = parseInt(check.rows[0].score) || 0; 
+    const grandTotal = totalPrevious + (parseInt(score) || 0);
 
-            // Update ID ទីមួយ
-            await client.query(
-                'UPDATE leaderboard SET score = $1, updated_at = NOW(), ip_address = $3 WHERE id = $2',
-                [grandTotal, check.rows[0].id, ip]
-            );
+    // Update តែជួរដែលមាន ID ត្រឹមត្រូវ
+    await client.query(
+        'UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2',
+        [grandTotal, check.rows[0].id]
+    );
 
-            // លុប ID ស្ទួនចោល
-            if (check.rows.length > 1) {
-                const idsToDelete = check.rows.slice(1).map(r => r.id);
-                await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
-            }
+    // លុបជួរស្ទួនផ្សេងទៀតចោលដើម្បីសម្អាត Database (ជួយឱ្យលែងមាន ID ស្ទួនច្រើនដូចក្នុងរូប)
+    if (check.rows.length > 1) {
+        const idsToDelete = check.rows.slice(1).map(r => r.id);
+        await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
+    }  
             logSystem('DB', 'Smart Merge', `${username}: Total ${grandTotal}`);
         } else {
             // ➕ NEW ENTRY
