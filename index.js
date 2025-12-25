@@ -675,53 +675,82 @@ app.post('/api/generate-problem', async (req, res) => {
 
 // 🏆 2. LEADERBOARD SUBMIT API (SMART MERGE + SCORE CHECK ONLY)
 app.post('/api/leaderboard/save', async (req, res) => {
-    const { user_id, username, difficulty } = req.body;
-    const finalDiff = difficulty || 'Easy';
-    const player = (username || 'Unknown').trim();
+    // ⚠️ No gameToken required anymore
+    const { username, score, difficulty } = req.body;
+    const finalDiff = standardizeDifficulty(difficulty);
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-    // ✅ ១. កំណត់ច្បាប់ផ្ដល់ពិន្ទុក្នុង Backend ហាម Browser កែប្រែ
-    let scoreToAdd = 0;
+    // ==========================================
+    // 🚩 ផ្នែកបន្ថែម៖ កំណត់ពិន្ទុចេញពី Server ផ្ទាល់ (SERVER-SIDE RULES)
+    // វិធីនេះទោះ Chrome ផ្ញើលេខ ១០ មក ក៏យើងយកតែលេខដែលកំណត់ខាងក្រោមនេះដែរ
+    // ==========================================
+    let verifiedScore = 5; 
     switch (finalDiff) {
-        case 'Easy':      scoreToAdd = 5;  break;
-        case 'Medium':    scoreToAdd = 10; break;
-        case 'Hard':      scoreToAdd = 15; break;
-        case 'Very Hard': scoreToAdd = 20; break;
-        default:          scoreToAdd = 5;  // បើរកមិនឃើញ ឱ្យ ៥ ទុកមុន
+        case 'Easy':      verifiedScore = 5;  break;
+        case 'Medium':    verifiedScore = 10; break;
+        case 'Hard':      verifiedScore = 15; break;
+        case 'Very Hard': verifiedScore = 20; break;
+        default:          verifiedScore = 5;
     }
+    // ==========================================
 
-    const client = await pool.connect();
+    // 🛑 SCORE CHECK ONLY (ការពារកុំអោយដាក់ពិន្ទុលើសខ្លាំងពេក)
+    const maxAllowed = SCORE_RULES[finalDiff] || 50; 
+    if (score > maxAllowed) {
+        logSystem('SEC', '⚠️ SCORE REJECTED', `${username} sent ${score} (Max: ${maxAllowed})`);
+        return res.status(400).json({ success: false, message: "Invalid Score: Too High" });
+    }
+    if (score < 0) return res.status(400).json({ success: false });
+
+    let client;
     try {
-        await client.query('BEGIN');
+        client = await pgPool.connect(); 
+        await client.query('BEGIN');     // Transaction Start
 
-        // ២. ឆែករកអ្នកលេងចាស់
+        // 🔒 Lock Rows (ការពារការជាន់គ្នា)
         const check = await client.query(
-            'SELECT id, score FROM leaderboard WHERE LOWER(username) = LOWER($1) AND difficulty = $2 ORDER BY id ASC FOR UPDATE',
-            [player, finalDiff]
+            'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC FOR UPDATE',
+            [username, finalDiff]
         );
 
         if (check.rows.length > 0) {
-            // 📈 ៣. បូកពិន្ទុចាស់ + ពិន្ទុដែលយើងកំណត់មិញ
-            const grandTotal = (parseInt(check.rows[0].score) || 0) + scoreToAdd;
+            // 🔄 SMART MERGE logic
+            const totalPrevious = parseInt(check.rows[0].score) || 0; 
+            
+            // ✅ MODIFIED: ប្តូរពី (parseInt(score) || 0) មកប្រើ verifiedScore វិញ
+            const grandTotal = totalPrevious + verifiedScore; 
 
+            // Update តែជួរដែលមាន ID ត្រឹមត្រូវ
             await client.query(
                 'UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2',
                 [grandTotal, check.rows[0].id]
             );
+
+            // លុបជួរស្ទួនផ្សេងទៀតចោលដើម្បីសម្អាត Database
+            if (check.rows.length > 1) {
+                const idsToDelete = check.rows.slice(1).map(r => r.id);
+                await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
+            }  
+            logSystem('DB', 'Smart Merge', `${username}: Total ${grandTotal}`);
         } else {
-            // ➕ ៤. បញ្ចូលអ្នកលេងថ្មីជាមួយពិន្ទុតាមកម្រិត
+            // ➕ NEW ENTRY
+            // ✅ MODIFIED: ប្រើ verifiedScore ជំនួសអោយ score ពី browser
             await client.query(
-                'INSERT INTO leaderboard (user_id, username, score, difficulty) VALUES ($1, $2, $3, $4)',
-                [user_id, player, scoreToAdd, finalDiff]
+                'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
+                [username, verifiedScore, finalDiff, ip]
             );
+            logSystem('DB', 'New Player', `${username} [+${verifiedScore}]`);
         }
 
-        await client.query('COMMIT');
-        res.json({ success: true, message: `បូកជូន ${scoreToAdd} ក្នុងកម្រិត ${finalDiff}` });
+        await client.query('COMMIT'); 
+        res.status(201).json({ success: true, verifiedScore: verifiedScore });
+
     } catch (err) {
-        await client.query('ROLLBACK');
-        res.status(500).json({ error: err.message });
+        if (client) await client.query('ROLLBACK'); 
+        logSystem('ERR', 'Leaderboard Error', err.message);
+        res.status(500).json({ success: false });
     } finally {
-        client.release();
+        if (client) client.release(); // ✅ SAFE RELEASE
     }
 });
 
