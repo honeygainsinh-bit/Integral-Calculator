@@ -713,7 +713,7 @@ app.post('/api/leaderboard/save', async (req, res) => {
 
             // Update ID ទីមួយ
             await client.query(
-                'UPDATE leaderboard SET score = $1, updated_at = NOW(), ip_address = $3 WHERE id = $2',
+                'UPDATE leaderboard SET score = $1, updated_at = NOW(), WHERE id = $2',
                 [grandTotal, check.rows[0].id, ip]
             );
 
