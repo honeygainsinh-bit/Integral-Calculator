@@ -462,7 +462,8 @@ for (const topicObj of CONFIG.TOPICS) {
                     const validated = validateProblemIntegrity(text);
                     if (!validated) {
                         logSystem('GEN', '⚠️ Invalid Data', 'Bad JSON/Logic discarded.');
-                        continue; 
+                        Waiting 60s; 
+                        await new Promise(r => setTimeout(r, 60000));
                     }
 
                     try {
