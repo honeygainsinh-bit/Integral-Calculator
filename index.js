@@ -682,67 +682,54 @@ app.post('/api/generate-problem', async (req, res) => {
 
 // 🏆 2. LEADERBOARD SUBMIT API (SMART MERGE + SCORE CHECK ONLY)
 app.post('/api/leaderboard/save', async (req, res) => {
-    // ⚠️ No gameToken required anymore
+    // ១. ទទួលទិន្នន័យ (ប្រើ trim ដើម្បីដកឃ្លា)
     const { user_id, username, score, difficulty } = req.body;
-    const finalDiff = standardizeDifficulty(difficulty);
+    const finalDiff = difficulty || 'Easy';
+    const player = (username || 'Unknown').trim();
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-    // 🛑 SCORE CHECK ONLY (ការពារកុំអោយដាក់ពិន្ទុលើស)
-    const maxAllowed = SCORE_RULES[finalDiff] || 50; 
-    if (score > maxAllowed) {
-        logSystem('SEC', '⚠️ SCORE REJECTED', `${username} sent ${score} (Max: ${maxAllowed})`);
-        return res.status(400).json({ success: false, message: "Invalid Score: Too High" });
-    }
-    if (score < 0) return res.status(400).json({ success: false });
-
-    let client;
+    const client = await pool.connect();
     try {
-        client = await pgPool.connect(); 
-        await client.query('BEGIN');     // Transaction Start
+        await client.query('BEGIN');
 
-        // 🔒 Lock Rows (ការពារការជាន់គ្នា)
+        // ២. ស្វែងរកអ្នកលេង (ប្រើ LOWER ដើម្បីឱ្យស្គាល់ទាំងអក្សរធំ និងតូច)
         const check = await client.query(
-    'SELECT id, score FROM leaderboard WHERE LOWER(username) = LOWER($1) AND difficulty = $2 ORDER BY id ASC FOR UPDATE',
-    [username.trim(), finalDiff] // ប្រើ .trim() ដើម្បីកាត់ដកឃ្លាដែលលើសចេញ
-);
+            'SELECT id, score FROM leaderboard WHERE LOWER(username) = LOWER($1) AND difficulty = $2 ORDER BY id ASC FOR UPDATE',
+            [player, finalDiff]
+        );
 
         if (check.rows.length > 0) {
-            // 🔄 SMART MERGE logic
-        
-    // ✅ កែសម្រួល៖ យកតែពិន្ទុពីជួរទីមួយមកបូក (ការពារការបូកស្ទួន)
-    const totalPrevious = check.rows[0].score; 
-    const grandTotal = totalPrevious + score;
+            // 📈 ករណីបូកពិន្ទុថែម (យកតែជួរទីមួយមកបូក)
+            const totalPrevious = parseInt(check.rows[0].score) || 0;
+            const grandTotal = totalPrevious + (parseInt(score) || 0);
 
-    // Update ជួរទីមួយ
-    await client.query(
-        'UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2',
-        [grandTotal, check.rows[0].id]
-    );
-
-    // លុបជួរដែលស្ទួនផ្សេងៗទៀតចោល (ជួយសម្អាត Database ឱ្យស្អាត)
-    if (check.rows.length > 1) {
-        const idsToDelete = check.rows.slice(1).map(r => r.id);
-        await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
-    }
-}
-
-            // ➕ NEW ENTRY
+            // 📝 UPDATE ឱ្យត្រូវតាមជួរក្នុង Database
             await client.query(
-                'INSERT INTO leaderboard(user_id, username, score, difficulty, ip_address) VALUES($1, $2, $3, $4, $5)',
-                [user_id, username, score, finalDiff, ip]
+                'UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2',
+                [grandTotal, check.rows[0].id]
             );
-            logSystem('DB', 'New Player', `${username} [ID: ${user_id}]`);
+
+            // 🧹 លុបជួរស្ទួនចោល
+            if (check.rows.length > 1) {
+                const idsToDelete = check.rows.slice(1).map(r => r.id);
+                await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
+            }
+        } else {
+            // ➕ ករណីបញ្ចូលថ្មី
+            await client.query(
+                'INSERT INTO leaderboard (user_id, username, score, difficulty, ip_address) VALUES ($1, $2, $3, $4, $5)',
+                [user_id, player, score, finalDiff, ip]
+            );
         }
 
-        await client.query('COMMIT'); 
-        res.status(201).json({ success: true, verifiedScore: score });
-
+        await client.query('COMMIT');
+        res.json({ success: true, message: 'ជោគជ័យ!' });
     } catch (err) {
-        if (client) await client.query('ROLLBACK'); 
-        logSystem('ERR', 'Leaderboard Error', err.message);
-        res.status(500).json({ success: false });
+        await client.query('ROLLBACK');
+        console.error('Error:', err.message);
+        res.status(500).json({ success: false, error: err.message });
     } finally {
-        if (client) client.release(); // ✅ SAFE RELEASE
+        client.release();
     }
 });
 
