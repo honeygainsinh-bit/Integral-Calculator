@@ -680,10 +680,7 @@ app.post('/api/leaderboard/save', async (req, res) => {
     const finalDiff = standardizeDifficulty(difficulty);
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-    // ==========================================
-    // 🚩 ផ្នែកបន្ថែម៖ កំណត់ពិន្ទុចេញពី Server ផ្ទាល់ (SERVER-SIDE RULES)
-    // វិធីនេះទោះ Chrome ផ្ញើលេខ ១០ មក ក៏យើងយកតែលេខដែលកំណត់ខាងក្រោមនេះដែរ
-    // ==========================================
+    // ✅ ផ្នែកបន្ថែម៖ កំណត់ពិន្ទុចេញពី Server (ការពារ Chrome បូកលើស)
     let verifiedScore = 5; 
     switch (finalDiff) {
         case 'Easy':      verifiedScore = 5;  break;
@@ -692,9 +689,8 @@ app.post('/api/leaderboard/save', async (req, res) => {
         case 'Very Hard': verifiedScore = 20; break;
         default:          verifiedScore = 5;
     }
-    // ==========================================
 
-    // 🛑 SCORE CHECK ONLY (ការពារកុំអោយដាក់ពិន្ទុលើសខ្លាំងពេក)
+    // 🛑 SCORE CHECK ONLY (ការពារកុំអោយដាក់ពិន្ទុលើស)
     const maxAllowed = SCORE_RULES[finalDiff] || 50; 
     if (score > maxAllowed) {
         logSystem('SEC', '⚠️ SCORE REJECTED', `${username} sent ${score} (Max: ${maxAllowed})`);
@@ -707,17 +703,26 @@ app.post('/api/leaderboard/save', async (req, res) => {
         client = await pgPool.connect(); 
         await client.query('BEGIN');     // Transaction Start
 
-        // 🔒 Lock Rows (ការពារការជាន់គ្នា)
+        // 🔒 Lock Rows
         const check = await client.query(
-            'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC FOR UPDATE',
+            'SELECT id, score, updated_at FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC FOR UPDATE',
             [username, finalDiff]
         );
 
         if (check.rows.length > 0) {
+            // ✅ ផ្នែកបន្ថែម៖ របាំងការពារការផ្ញើស្ទួនពី Chrome (Lock 5 វិនាទី)
+            const lastUpdate = new Date(check.rows[0].updated_at).getTime();
+            const now = Date.now();
+
+            if (now - lastUpdate < 5000) { 
+                await client.query('ROLLBACK');
+                logSystem('DB', 'Duplicate Blocked', `${username} ផ្ញើស្ទួនលឿនពេក`);
+                return res.status(200).json({ success: true, message: "Already updated" });
+            }
+
             // 🔄 SMART MERGE logic
             const totalPrevious = parseInt(check.rows[0].score) || 0; 
-            
-            // ✅ MODIFIED: ប្តូរពី (parseInt(score) || 0) មកប្រើ verifiedScore វិញ
+            // ប្រើ verifiedScore ជំនួសឱ្យ score ពី browser
             const grandTotal = totalPrevious + verifiedScore; 
 
             // Update តែជួរដែលមាន ID ត្រឹមត្រូវ
@@ -726,7 +731,7 @@ app.post('/api/leaderboard/save', async (req, res) => {
                 [grandTotal, check.rows[0].id]
             );
 
-            // លុបជួរស្ទួនផ្សេងទៀតចោលដើម្បីសម្អាត Database
+            // លុបជួរស្ទួនផ្សេងទៀតចោល
             if (check.rows.length > 1) {
                 const idsToDelete = check.rows.slice(1).map(r => r.id);
                 await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
@@ -734,9 +739,8 @@ app.post('/api/leaderboard/save', async (req, res) => {
             logSystem('DB', 'Smart Merge', `${username}: Total ${grandTotal}`);
         } else {
             // ➕ NEW ENTRY
-            // ✅ MODIFIED: ប្រើ verifiedScore ជំនួសអោយ score ពី browser
             await client.query(
-                'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
+                'INSERT INTO leaderboard(username, score, difficulty, ip_address, updated_at) VALUES($1, $2, $3, $4, NOW())',
                 [username, verifiedScore, finalDiff, ip]
             );
             logSystem('DB', 'New Player', `${username} [+${verifiedScore}]`);
@@ -753,7 +757,6 @@ app.post('/api/leaderboard/save', async (req, res) => {
         if (client) client.release(); // ✅ SAFE RELEASE
     }
 });
-
 
 // 📊 3. LEADERBOARD TOP API (LIMIT 500)
 app.get('/api/leaderboard/top', async (req, res) => {
