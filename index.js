@@ -273,11 +273,15 @@ if (SYSTEM_STATE.logs.length > 300) SYSTEM_STATE.logs.pop();
 
 // --- POSTGRESQL ---
 const pgPool = new Pool({
-connectionString: CONFIG.POSTGRES_URL,
-ssl: { rejectUnauthorized: false },
-connectionTimeoutMillis: 5000,
-max: 20
+  connectionString: CONFIG.POSTGRES_URL,
+  ssl: {
+    rejectUnauthorized: false, // ទុកឱ្យនៅដដែល
+    require: true             // បង្ខំឱ្យប្រើ SSL Mode
+  },
+  connectionTimeoutMillis: 10000, // ដំឡើងដល់ 10s ដើម្បីកុំឱ្យឆាប់ដាច់ (Timeout)
+  max: 20
 });
+
 
 pgPool.on('error', (err) => {
 SYSTEM_STATE.postgresConnected = false;
