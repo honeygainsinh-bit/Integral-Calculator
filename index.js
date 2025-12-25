@@ -273,17 +273,11 @@ if (SYSTEM_STATE.logs.length > 300) SYSTEM_STATE.logs.pop();
 
 // --- POSTGRESQL ---
 const pgPool = new Pool({
-  connectionString: CONFIG.POSTGRES_URL,
-  ssl: {
-    rejectUnauthorized: false // បិទការឆែក Certificate ដើម្បីបំបាត់ Error self-signed
-  },
-  connectionTimeoutMillis: 10000,
-  max: 20
+connectionString: CONFIG.POSTGRES_URL,
+ssl: { rejectUnauthorized: false },
+connectionTimeoutMillis: 5000,
+max: 20
 });
-
-
-
-
 
 pgPool.on('error', (err) => {
 SYSTEM_STATE.postgresConnected = false;
@@ -298,8 +292,7 @@ SYSTEM_STATE.postgresConnected = true;
     await client.query(`
         CREATE TABLE IF NOT EXISTS leaderboard (
             id SERIAL PRIMARY KEY,
-            user_id BIGINT,
-            username VARCHAR(100) NOT NULL,
+            username VARCHAR(50) NOT NULL,
             score INTEGER NOT NULL,
             difficulty VARCHAR(20) NOT NULL,
             ip_address VARCHAR(45),
@@ -682,57 +675,110 @@ app.post('/api/generate-problem', async (req, res) => {
 
 // 🏆 2. LEADERBOARD SUBMIT API (SMART MERGE + SCORE CHECK ONLY)
 app.post('/api/leaderboard/save', async (req, res) => {
-    // ១. ទទួលទិន្នន័យ និងសម្អាតឈ្មោះ (Trim)
-    const { user_id, username, score, difficulty } = req.body;
-    const finalDiff = difficulty || 'Easy';
-    const player = (username || 'Unknown').trim();
+    // ⚠️ No gameToken required anymore
+    const { username, score, difficulty } = req.body;
+    const finalDiff = standardizeDifficulty(difficulty);
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
+    // 🛑 SCORE CHECK ONLY (ការពារកុំអោយដាក់ពិន្ទុលើស)
+    const maxAllowed = SCORE_RULES[finalDiff] || 50; 
+    if (score > maxAllowed) {
+        logSystem('SEC', '⚠️ SCORE REJECTED', `${username} sent ${score} (Max: ${maxAllowed})`);
+        return res.status(400).json({ success: false, message: "Invalid Score: Too High" });
+    }
+    if (score < 0) return res.status(400).json({ success: false });
 
-        // ២. ស្វែងរកអ្នកលេង (ប្រើ LOWER ដើម្បីកុំឱ្យច្រឡំអក្សរធំ-តូច)
+    let client;
+    try {
+        client = await pgPool.connect(); 
+        await client.query('BEGIN');     // Transaction Start
+
+        // 🔒 Lock Rows (ការពារការជាន់គ្នា)
         const check = await client.query(
-            'SELECT id, score FROM leaderboard WHERE LOWER(username) = LOWER($1) AND difficulty = $2 ORDER BY id ASC FOR UPDATE',
-            [player, finalDiff]
+            'SELECT id, score FROM leaderboard WHERE username = $1 AND difficulty = $2 ORDER BY id ASC FOR UPDATE',
+            [username, finalDiff]
         );
 
         if (check.rows.length > 0) {
-            // 📈 ៣. ករណីបូកពិន្ទុថែម (យកតែជួរទីមួយមកបូក ការពារការបូកឡើងរាប់រយ)
-            const totalPrevious = parseInt(check.rows[0].score) || 0;
-            const grandTotal = totalPrevious + (parseInt(score) || 0);
+            // 🔄 SMART MERGE logic
+            const totalPrevious = check.rows.reduce((sum, row) => sum + row.score, 0);
+            const grandTotal = totalPrevious + score;
 
-            // 📝 ៤. UPDATE ជួរទីមួយ (ប្រើ Parameter $1, $2 ដើម្បីកុំឱ្យ Syntax Error)
+            // Update ID ទីមួយ
             await client.query(
-                'UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2',
-                [grandTotal, check.rows[0].id]
+                'UPDATE leaderboard SET score = $1, updated_at = NOW(), ip_address = $3 WHERE id = $2',
+                [grandTotal, check.rows[0].id, ip]
             );
 
-            // 🧹 ៥. លុបជួរដែលស្ទួនផ្សេងទៀតចោលឱ្យអស់
+            // លុប ID ស្ទួនចោល
             if (check.rows.length > 1) {
                 const idsToDelete = check.rows.slice(1).map(r => r.id);
                 await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
             }
+            logSystem('DB', 'Smart Merge', `${username}: Total ${grandTotal}`);
         } else {
-            // ➕ ៦. បញ្ចូលអ្នកលេងថ្មី (INSERT)
+            // ➕ NEW ENTRY
             await client.query(
-                'INSERT INTO leaderboard (user_id, username, score, difficulty, ip_address) VALUES ($1, $2, $3, $4, $5)',
-                [user_id, player, score, finalDiff, ip]
+                'INSERT INTO leaderboard(username, score, difficulty, ip_address) VALUES($1, $2, $3, $4)',
+                [username, score, finalDiff, ip]
             );
+            logSystem('DB', 'New Player', `${username} [+${score}]`);
         }
 
-        await client.query('COMMIT');
-        res.json({ success: true, message: 'Saved successfully' });
-    } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Leaderboard Error:', err.message);
-        res.status(500).json({ success: false, error: err.message });
-    } finally {
-        client.release();
-    }
-}); // <--- សញ្ញាបិទត្រូវតែនៅទីនេះជានិច្ច
+        await client.query('COMMIT'); 
+        res.status(201).json({ success: true, verifiedScore: score });
 
+    } catch (err) {
+        if (client) await client.query('ROLLBACK'); 
+        logSystem('ERR', 'Leaderboard Error', err.message);
+        res.status(500).json({ success: false });
+    } finally {
+        if (client) client.release(); // ✅ SAFE RELEASE
+    }
+});
+
+
+// 📊 3. LEADERBOARD TOP API (LIMIT 500)
+app.get('/api/leaderboard/top', async (req, res) => {
+    let client;
+    try {
+        client = await pgPool.connect();
+        
+        const result = await client.query(`
+            SELECT username, SUM(score) as score, COUNT(difficulty) as games_played 
+            FROM leaderboard 
+            GROUP BY username 
+            ORDER BY score DESC 
+            LIMIT 500
+        `);
+        
+        res.json(result.rows);
+    } catch (err) { 
+        logSystem('ERR', 'Fetch Error', err.message);
+        res.status(500).json([]); 
+    } finally {
+        if (client) client.release(); 
+    }
+});
+
+
+// 📜 4. CERTIFICATE REQUEST API
+app.post('/api/submit-request', async (req, res) => {
+    let client;
+    try {
+        client = await pgPool.connect();
+        await client.query('INSERT INTO certificate_requests (username, score) VALUES ($1, $2)', [req.body.username, req.body.score]);
+        res.json({ success: true });
+    } catch (e) { 
+        res.status(500).json({ success: false }); 
+    } finally {
+        if (client) client.release(); 
+    }
+});
+
+    
+
+        
 
 // =================================================================================================
 // SECTION 9: ADMINISTRATIVE API & AUTH ROUTES (🔥 UPDATED)
