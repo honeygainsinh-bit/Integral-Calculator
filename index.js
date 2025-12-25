@@ -464,6 +464,7 @@ for (const topicObj of CONFIG.TOPICS) {
                         logSystem('GEN', '⚠️ Invalid Data', 'Bad JSON/Logic discarded.');
                         Waiting 60s; 
                         await new Promise(r => setTimeout(r, 60000));
+                        continue;
                     }
 
                     try {
