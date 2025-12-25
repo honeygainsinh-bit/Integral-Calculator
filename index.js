@@ -275,12 +275,12 @@ if (SYSTEM_STATE.logs.length > 300) SYSTEM_STATE.logs.pop();
 const pgPool = new Pool({
   connectionString: CONFIG.POSTGRES_URL,
   ssl: {
-    rejectUnauthorized: false, // ទុកឱ្យនៅ false បែបនេះដើម្បីកុំឱ្យវាឆែក certificate
-    require: true
+    rejectUnauthorized: false // នេះជាចំណុចសំខាន់បំផុត ដើម្បីបំបាត់ Error មិញ
   },
   connectionTimeoutMillis: 10000,
   max: 20
 });
+
 
 
 
