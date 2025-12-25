@@ -682,6 +682,7 @@ app.post('/api/generate-problem', async (req, res) => {
 
 // 🏆 2. LEADERBOARD SUBMIT API (SMART MERGE + SCORE CHECK ONLY)
 app.post('/api/leaderboard/save', async (req, res) => {
+    // ១. ទទួលទិន្នន័យ និងសម្អាតឈ្មោះ (Trim)
     const { user_id, username, score, difficulty } = req.body;
     const finalDiff = difficulty || 'Easy';
     const player = (username || 'Unknown').trim();
@@ -690,37 +691,47 @@ app.post('/api/leaderboard/save', async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+
+        // ២. ស្វែងរកអ្នកលេង (ប្រើ LOWER ដើម្បីកុំឱ្យច្រឡំអក្សរធំ-តូច)
         const check = await client.query(
             'SELECT id, score FROM leaderboard WHERE LOWER(username) = LOWER($1) AND difficulty = $2 ORDER BY id ASC FOR UPDATE',
             [player, finalDiff]
         );
 
         if (check.rows.length > 0) {
+            // 📈 ៣. ករណីបូកពិន្ទុថែម (យកតែជួរទីមួយមកបូក ការពារការបូកឡើងរាប់រយ)
             const totalPrevious = parseInt(check.rows[0].score) || 0;
             const grandTotal = totalPrevious + (parseInt(score) || 0);
+
+            // 📝 ៤. UPDATE ជួរទីមួយ (ប្រើ Parameter $1, $2 ដើម្បីកុំឱ្យ Syntax Error)
             await client.query(
                 'UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2',
                 [grandTotal, check.rows[0].id]
             );
+
+            // 🧹 ៥. លុបជួរដែលស្ទួនផ្សេងទៀតចោលឱ្យអស់
             if (check.rows.length > 1) {
                 const idsToDelete = check.rows.slice(1).map(r => r.id);
                 await client.query('DELETE FROM leaderboard WHERE id = ANY($1::int[])', [idsToDelete]);
             }
         } else {
+            // ➕ ៦. បញ្ចូលអ្នកលេងថ្មី (INSERT)
             await client.query(
                 'INSERT INTO leaderboard (user_id, username, score, difficulty, ip_address) VALUES ($1, $2, $3, $4, $5)',
                 [user_id, player, score, finalDiff, ip]
             );
         }
+
         await client.query('COMMIT');
-        res.json({ success: true });
+        res.json({ success: true, message: 'Saved successfully' });
     } catch (err) {
         await client.query('ROLLBACK');
+        console.error('Leaderboard Error:', err.message);
         res.status(500).json({ success: false, error: err.message });
     } finally {
         client.release();
     }
-});
+}); // <--- សញ្ញាបិទត្រូវតែនៅទីនេះជានិច្ច
 
 
 // =================================================================================================
