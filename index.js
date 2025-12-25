@@ -713,9 +713,9 @@ app.post('/api/leaderboard/save', async (req, res) => {
 
             // Update ID ទីមួយ
             await client.query(
-                'UPDATE leaderboard SET score = $1, updated_at = NOW(), WHERE id = $2',
-                [grandTotal, check.rows[0].id, ip]
-            );
+    'UPDATE leaderboard SET score = $1, updated_at = NOW() WHERE id = $2',
+    [grandTotal, check.rows[0].id]
+);
 
             // លុប ID ស្ទួនចោល
             if (check.rows.length > 1) {
