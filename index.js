@@ -205,7 +205,7 @@ PORT: process.env.PORT || 3000,
 POSTGRES_URL: process.env.DATABASE_URL,
 MONGO_URI: process.env.MONGODB_URI,
 GEMINI_KEY: process.env.GEMINI_API_KEY,
-AI_MODEL: "gemini-1.5-flash",
+AI_MODEL: "gemini-2.5-flash",
 IMG_API: process.env.EXTERNAL_IMAGE_API || "https://fakeimg.pl/800x600/?text=",
 OWNER_IP: process.env.OWNER_IP,
 CACHE_RATE: 0.25,
@@ -402,15 +402,8 @@ SYSTEM_STATE.isGenerating = true;
 logSystem('GEN', '🚀 ENGINE STARTUP', 'Initialized with KHMER + LATEX FIXES.');
 
 const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
-const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL ,
-generationConfig: {
-        temperature: 0.7,        // បន្ថយភាពរវើរវាយ
-        topP: 0.95,
-        topK: 40,
-        maxOutputTokens: 8192,   // ឱ្យសរសេរបានវែង
-        responseMimeType: "application/json", // 🔥 បង្ខំឱ្យចេញ JSON សុទ្ធ ១០០%
-    }
-});
+const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
+
 for (const topicObj of CONFIG.TOPICS) {
     for (const [diffLevel, targetCount] of Object.entries(CONFIG.TARGETS)) {
         
@@ -451,7 +444,6 @@ for (const topicObj of CONFIG.TOPICS) {
                 3. Use RANDOM constants/numbers every time.
                 4. STRICTLY JSON output. No Markdown.
                 5. Options must be numerically distinct.
-6. IMPORTANT: Verify calculation internally to ensure the correct answer exists. Do NOT output the solution steps. Return ONLY the JSON object.
                 
                 JSON STRUCTURE:
                 {
@@ -465,7 +457,8 @@ for (const topicObj of CONFIG.TOPICS) {
                 try {
                     const result = await model.generateContent(prompt);
                     const response = await result.response;
-                    let text = response.text();
+                    let text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+                    
                     const validated = validateProblemIntegrity(text);
                     if (!validated) {
                         logSystem('GEN', '⚠️ Invalid Data', 'Bad JSON/Logic discarded - Waiting 1s.');
@@ -636,18 +629,7 @@ app.post('/api/generate-problem', async (req, res) => {
     // B. LIVE AI GENERATION (Fallback)
     try {
         const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
-// 👇 កែត្រង់នេះដូចគ្នា
-const model = genAI.getGenerativeModel({ 
-    model: CONFIG.AI_MODEL,
-    generationConfig: {
-        temperature: 0.7,
-        topP: 0.95,
-        topK: 40,
-        maxOutputTokens: 8192,
-        responseMimeType: "application/json",
-    }
-});
-
+        const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
         
         const forms = ALL_FORMS[finalTopic] || ["General Math"];
         const randomForm = forms[Math.floor(Math.random() * forms.length)];
@@ -661,8 +643,7 @@ const model = genAI.getGenerativeModel({
         1. Language: KHMER. 
         2. Format: JSON Only. { "question": "...", "options": ["..."], "answer": "...", "explanation": "..." }
         3. Math: Wrap in $.
-        4. IMPORTANT: Verify calculation internally to ensure the correct answer exists. Do NOT output the solution steps. Return ONLY the JSON object.
-`;
+        `;
         
         const result = await model.generateContent(aiPrompt);
         const text = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
