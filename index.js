@@ -402,8 +402,15 @@ SYSTEM_STATE.isGenerating = true;
 logSystem('GEN', '🚀 ENGINE STARTUP', 'Initialized with KHMER + LATEX FIXES.');
 
 const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
-const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
-
+const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL ,
+generationConfig: {
+        temperature: 0.7,        // បន្ថយភាពរវើរវាយ
+        topP: 0.95,
+        topK: 40,
+        maxOutputTokens: 8192,   // ឱ្យសរសេរបានវែង
+        responseMimeType: "application/json", // 🔥 បង្ខំឱ្យចេញ JSON សុទ្ធ ១០០%
+    }
+});
 for (const topicObj of CONFIG.TOPICS) {
     for (const [diffLevel, targetCount] of Object.entries(CONFIG.TARGETS)) {
         
@@ -444,6 +451,7 @@ for (const topicObj of CONFIG.TOPICS) {
                 3. Use RANDOM constants/numbers every time.
                 4. STRICTLY JSON output. No Markdown.
                 5. Options must be numerically distinct.
+6. IMPORTANT: Verify calculation internally to ensure the correct answer exists. Do NOT output the solution steps. Return ONLY the JSON object.
                 
                 JSON STRUCTURE:
                 {
@@ -629,7 +637,18 @@ app.post('/api/generate-problem', async (req, res) => {
     // B. LIVE AI GENERATION (Fallback)
     try {
         const genAI = new GoogleGenerativeAI(CONFIG.GEMINI_KEY);
-        const model = genAI.getGenerativeModel({ model: CONFIG.AI_MODEL });
+// 👇 កែត្រង់នេះដូចគ្នា
+const model = genAI.getGenerativeModel({ 
+    model: CONFIG.AI_MODEL,
+    generationConfig: {
+        temperature: 0.7,
+        topP: 0.95,
+        topK: 40,
+        maxOutputTokens: 8192,
+        responseMimeType: "application/json",
+    }
+});
+
         
         const forms = ALL_FORMS[finalTopic] || ["General Math"];
         const randomForm = forms[Math.floor(Math.random() * forms.length)];
@@ -643,7 +662,8 @@ app.post('/api/generate-problem', async (req, res) => {
         1. Language: KHMER. 
         2. Format: JSON Only. { "question": "...", "options": ["..."], "answer": "...", "explanation": "..." }
         3. Math: Wrap in $.
-        `;
+        4. IMPORTANT: Verify calculation internally to ensure the correct answer exists. Do NOT output the solution steps. Return ONLY the JSON object.
+`;
         
         const result = await model.generateContent(aiPrompt);
         const text = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
