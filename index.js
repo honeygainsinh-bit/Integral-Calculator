@@ -462,7 +462,7 @@ for (const topicObj of CONFIG.TOPICS) {
                     const validated = validateProblemIntegrity(text);
                     if (!validated) {
                         logSystem('GEN', '⚠️ Invalid Data', 'Bad JSON/Logic discarded - Waiting 60s.');
-                        await new Promise(r => setTimeout(r, 60000));
+                        await new Promise(r => setTimeout(r, 10000));
                         continue;
                     }
 
@@ -482,16 +482,16 @@ for (const topicObj of CONFIG.TOPICS) {
                     }
                     
                     // Delay to avoid rate limits
-                    await new Promise(r => setTimeout(r, 60000));
+                    await new Promise(r => setTimeout(r, 10000));
 
                 } catch (err) {
                     if (err.message.includes('429') || err.message.includes('quota')) {
-                        logSystem('WARN', '⏳ QUOTA HIT', 'Pausing for 60 seconds...');
-                        await new Promise(r => setTimeout(r, 60000));
+                        logSystem('WARN', '⏳ QUOTA HIT', 'Pausing for 10 seconds...');
+                        await new Promise(r => setTimeout(r, 10000));
                         i--; 
                     } else {
                         logSystem('ERR', 'Gen Logic Error', err.message);
-                        await new Promise(r => setTimeout(r, 60000));
+                        await new Promise(r => setTimeout(r, 10000));
                     }
                 }
             }
