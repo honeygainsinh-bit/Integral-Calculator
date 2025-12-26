@@ -205,7 +205,7 @@ PORT: process.env.PORT || 3000,
 POSTGRES_URL: process.env.DATABASE_URL,
 MONGO_URI: process.env.MONGODB_URI,
 GEMINI_KEY: process.env.GEMINI_API_KEY,
-AI_MODEL: "gemini-3.0-flash",
+AI_MODEL: "gemini-2.5-flash",
 IMG_API: process.env.EXTERNAL_IMAGE_API || "https://fakeimg.pl/800x600/?text=",
 OWNER_IP: process.env.OWNER_IP,
 CACHE_RATE: 0.25,
@@ -465,8 +465,7 @@ for (const topicObj of CONFIG.TOPICS) {
                 try {
                     const result = await model.generateContent(prompt);
                     const response = await result.response;
-                    let text = response.text().replace(/```json/g, '').replace(/```/g, '').trim();
-                    
+                    let text = response.text();
                     const validated = validateProblemIntegrity(text);
                     if (!validated) {
                         logSystem('GEN', '⚠️ Invalid Data', 'Bad JSON/Logic discarded - Waiting 1s.');
