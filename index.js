@@ -211,9 +211,9 @@ OWNER_IP: process.env.OWNER_IP,
 CACHE_RATE: 0.25,
 TARGETS: {
 "Easy": 100,
-"Medium": 100,
-"Hard": 100,
-"Very Hard": 100,
+"Medium": 50,
+"Hard": 50,
+"Very Hard": 50,
 },
 TOPICS: [
 { key: "Limits", label: "លីមីត (Limits)", prompt: "Calculus Limits" },
