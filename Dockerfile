@@ -14,8 +14,8 @@ RUN npm install
 COPY . .
 
 # កំណត់ Port ឱ្យត្រូវជាមួយ Koyeb (Default 8000)
-ENV PORT=8000
-EXPOSE 8000
+ENV PORT=3000
+EXPOSE 3000
 
 # បញ្ជាឱ្យ Start Server
 CMD ["node", "index.js"]
